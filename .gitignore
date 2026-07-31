@@ -1,0 +1,12 @@
+# build artifacts — the DMG ships as a Release asset, not in the tree
+MillenAI.app/
+*.dmg
+__pycache__/
+*.pyc
+
+# macOS / tooling noise
+.DS_Store
+.claude/
+
+# unrelated to MillenAI, and v23-mac.sh contains a private server address
+v23-*.sh
