@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "V1 Beta 6"   # bump here — UI, window, DMG all follow
-APP_BUILD = 6               # integer compared against the GitHub release tag
+APP_VERSION = "V1 Beta 7"   # bump here — UI, window, DMG all follow
+APP_BUILD = 7               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -172,7 +172,7 @@ TIERS = {
         "icon": "\U0001f9e0", "desc": "reasons it through, blended",
         "picks": ["Phi-4 14B", "DeepSeek R1 7B", "Qwen 2.5 Coder 14B",
                   "Gemma 2 9B IT", "Mistral Nemo 12B"],
-        "count": 5,
+        "count": 3,
     },
     "Pro": {
         "icon": "\u2728", "desc": "several models, blended",
@@ -541,6 +541,47 @@ def _download_model(label: str):
     except Exception as exc:
         with _setup_lock:
             _setup_jobs[label] = {"status": "error", "note": str(exc)[:200]}
+
+
+TITLE_PROMPT = (
+    "Summarise what this message is about in 3 to 6 words, written like a "
+    "headline: a noun phrase, not a question, not first person, no quotes "
+    "and no final punctuation. Do not answer the message \u2014 only label "
+    "its topic.\n\nMESSAGE: ")
+
+
+def make_title(text: str) -> str:
+    """Name a chat with a small model — reusing whatever engine is already
+    loaded, so it costs almost nothing."""
+    pulled = ollama_pulled_tags() or set()
+    usable = [l for l in MODEL_ROUTES
+              if model_cached(l, pulled) and model_fits_memory(l)]
+    # 1B models write poor titles; prefer something already resident, then
+    # the smallest model that is still capable enough
+    # 1B-class models produce garbage titles (seen looping "address address
+    # address..."), so require a capable model even if a tiny one is resident
+    capable = sorted((l for l in usable
+                      if MODEL_MEM_BYTES.get(l, 0) >= 2.4e9),
+                     key=lambda l: MODEL_MEM_BYTES.get(l, 0))
+    live = [l for l in capable
+            if MODEL_ROUTES[l][0] == "mlx" and _port_in_use(MODEL_ROUTES[l][1])]
+    order = (live[:1] + [l for l in capable if l not in live[:1]])[:2] \
+        or usable[:1]
+    for label in order:
+        try:
+            parts = []
+            run_model(label, [{"role": "user",
+                               "content": TITLE_PROMPT + text[:600]}],
+                      parts.append)
+            title = " ".join("".join(parts).split())
+            title = title.split("\n")[0]
+            title = re.sub(r"^(topic|title)\s*:?\s*", "", title, flags=re.I)
+            title = title.strip("\"'*#\u2014- .")
+            if 2 < len(title) < 70 and not _looks_degenerate(title):
+                return title
+        except Exception:
+            pass
+    return ""
 
 
 # ------------------------------------------------------------- updates
@@ -1577,6 +1618,14 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 threading.Thread(target=_do_update, daemon=True).start()
             self._send_json({"ok": True})
             return
+        if self.path == "/api/title":
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                txt = json.loads(self.rfile.read(n)).get("text", "")
+            except (ValueError, json.JSONDecodeError):
+                txt = ""
+            self._send_json({"title": make_title(txt) if txt else ""})
+            return
         if self.path == "/api/open-logs":
             subprocess.Popen(
                 ["open", os.path.expanduser("~/Library/Logs/MillenAI")])
@@ -1866,7 +1915,7 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 .tier.active .tdesc{color:var(--accent)}
 
-#chat-list{margin-bottom:2px}
+#chat-list{margin-bottom:2px;overflow-y:auto;max-height:34vh}
 #chat-list:empty::after{
   content:"no chats yet";display:block;color:var(--faint);
   font-size:11px;padding:2px 10px 6px;
@@ -2252,10 +2301,11 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div id="tier-rows">__TIER_ROWS__</div>
 
   <div id="model-list">
+  <div class="group-label chats">Chats</div>
+  <div id="chat-list"></div>
+
   <div class="group-label adv" id="adv-toggle"><span id="adv-caret">▸</span> All models</div>
   <div id="adv-wrap" hidden>
-  <div class="group-label chats" style="margin-top:0">Chats</div>
-  <div id="chat-list"></div>
 __MODEL_ROWS__
   <div class="model" id="open-setup" title="Download more models">
     <span class="ico">⬇</span>Add models…</div>
@@ -2698,10 +2748,23 @@ function persistCurrent(){
   let c=chats.find(x=>x.id===curChat);
   if(!c){c={id:curChat};chats.unshift(c);}
   const first=messages.find(m=>m.role==="user");
-  c.title=(first?first.content:"chat").slice(0,48);
+  // show the raw text immediately, then let a small model name it properly
+  if(!c.title)c.title=(first?first.content:"chat").slice(0,48);
   c.ts=Date.now();c.messages=messages.slice();
   chats.sort((a,b)=>b.ts-a.ts);
   saveChats();renderChats();
+  if(!c.named&&first){c.named=true;nameChat(c,first.content);}
+}
+
+async function nameChat(c,text){
+  try{
+    const r=await fetch("/api/title",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({text:text})});
+    const t=(await r.json()).title;
+    if(t){c.title=t;saveChats();renderChats();}
+    else c.named=false;          // let a later turn try again
+  }catch(e){c.named=false;}
 }
 function renderChats(){
   const el=$("#chat-list");

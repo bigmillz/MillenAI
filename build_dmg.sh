@@ -119,7 +119,17 @@ PYEOF
 rm -f "$VOL.dmg" MillenAI.dmg MillenAI-rw.dmg
 hdiutil create -volname "$VOL" -srcfolder "$STAGE" -ov -format UDRW \
   -quiet MillenAI-rw.dmg
+# detach any leftover mount of this volume first — a stale one makes the
+# Finder styling step fail with "Can't get disk ..."
+hdiutil detach -quiet "/Volumes/$VOL" 2>/dev/null || true
 hdiutil attach -readwrite -noverify -noautoopen -quiet MillenAI-rw.dmg
+
+# wait for Finder to actually see the volume before scripting it
+for i in $(seq 1 40); do
+  [[ -d "/Volumes/$VOL" ]] && break
+  sleep 0.25
+done
+sleep 1
 
 osascript <<OSA
 tell application "Finder"
