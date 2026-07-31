@@ -74,7 +74,7 @@ except ImportError:
     HAS_WEBVIEW = False
 
 APP_VERSION = "1.1.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 25               # integer compared against the GitHub release tag
+APP_BUILD = 26               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2308,13 +2308,22 @@ body.perf #hero h1{animation:none}
 /* the wordmark centres on its own; LIVE is pulled out of the flow so it
    sits further right without dragging the title off-centre */
 #hero .h1row{display:flex;align-items:center;justify-content:center;position:relative}
-#hero .live-tag{position:absolute;left:100%;margin-left:30px;white-space:nowrap}
+/* LIVE sits in the flow: as it expands the centred row grows, sliding
+   "MillenAI" to the left. Same face and size as the wordmark, dark grey. */
+#hero .live-big{
+  font-size:92px;font-weight:700;letter-spacing:-.015em;line-height:1;
+  color:#555;white-space:nowrap;overflow:hidden;
+  max-width:0;opacity:0;margin-left:0;
+  transition:max-width .55s cubic-bezier(.4,0,.2,1),
+             opacity .45s ease,margin-left .55s cubic-bezier(.4,0,.2,1);
+}
+body.live #hero .live-big{max-width:5ch;opacity:1;margin-left:.26em}
+body.perf #hero .live-big{transition:none}
 /* subdued deep-blue accents — deliberately quiet next to the wordmark */
-.live-tag,#hero .beta-tag{
+#hero .beta-tag{
   font-family:var(--helv);font-weight:600;color:#8e8e8e;
   letter-spacing:.32em;text-transform:uppercase;
 }
-.live-tag{font-size:11px;padding-left:.32em}
 #hero .beta-tag{font-size:11px;margin:6px 0 8px;padding-left:.32em}
 #hero .beta-tag .vnum{color:#c9c9c9;font-weight:700;letter-spacing:.18em}
 
@@ -2584,7 +2593,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #setup-go:hover{background:var(--accent-hot);color:#000}
 #setup-go:disabled{opacity:.55;cursor:default}
 
-@media(max-width:900px){#hero .live-tag{display:none}}
 @media(max-width:760px){
   #sidebar{display:none}
   #chat-inner{padding:24px 14px 150px}
@@ -2660,7 +2668,7 @@ __MODEL_ROWS__
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
-      <div class="h1row"><h1>MillenAI</h1><span class="live-tag" hidden>LIVE</span></div>
+      <div class="h1row"><h1>MillenAI</h1><span class="live-big">LIVE</span></div>
       <div class="beta-tag">__APP_BETA__</div>
       <p class="greet">What's going on today?</p>
     </div>
@@ -2811,7 +2819,7 @@ setPerf(perf);
 
 /* --------------------------------------------------- live web search */
 function paintLive(){
-  const t=$(".live-tag"); if(t)t.hidden=!autoWeb;
+  document.body.classList.toggle("live",!!autoWeb);
 }
 function setWeb(on){
   autoWeb=on; $("#web-toggle").classList.toggle("on",on);
@@ -3081,7 +3089,7 @@ async function pushChatsToDisk(){
 }
 
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1>MillenAI</h1><span class="live-tag" hidden>LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
+  inner.innerHTML='<div id="hero"><div class="h1row"><h1>MillenAI</h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
   paintLive();
 }
 function saveChats(){
