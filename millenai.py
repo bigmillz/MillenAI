@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "V1 Beta 11"   # bump here — UI, window, DMG all follow
-APP_BUILD = 11               # integer compared against the GitHub release tag
+APP_VERSION = "V1 Beta 12"   # bump here — UI, window, DMG all follow
+APP_BUILD = 12               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2255,20 +2255,31 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 
 #celebrate{position:fixed;inset:0;z-index:90;pointer-events:none;overflow:hidden}
 #celebrate[hidden]{display:none}
+/* a diagonal band of light that travels across the window */
 #celebrate .sweep{
-  position:absolute;top:0;bottom:0;width:60%;
+  position:absolute;top:50%;left:50%;
+  width:46vw;height:260vh;margin:-130vh 0 0 -23vw;
   background:linear-gradient(90deg,transparent,#ff8f8f,#ffc46e,#f5e663,
              #7ef0a6,#6ec7ff,#8f9dff,#c98fff,transparent);
-  filter:blur(2px);opacity:.75;mix-blend-mode:screen;
-  animation:sweep 1s cubic-bezier(.4,0,.2,1) forwards;
+  filter:blur(10px);opacity:.7;mix-blend-mode:screen;
+  animation:sweepDiag 1.05s cubic-bezier(.35,0,.25,1) forwards;
 }
-@keyframes sweep{from{left:-65%}to{left:105%}}
+@keyframes sweepDiag{
+  from{transform:rotate(24deg) translate(-110vw,-26vh)}
+  to  {transform:rotate(24deg) translate(110vw,26vh)}
+}
+/* soft blurred glow that collapses into the wordmark — no hard edges, so
+   nothing ever reads as a box sitting on top of the text */
 #celebrate .converge{
-  position:absolute;border-radius:14px;
-  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+  position:absolute;border-radius:50%;
+  background:linear-gradient(115deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
              #6ec7ff,#8f9dff,#c98fff);
-  opacity:.5;mix-blend-mode:screen;filter:blur(8px);
-  transition:all .85s cubic-bezier(.5,0,.2,1);
+  opacity:.6;mix-blend-mode:screen;filter:blur(30px);
+  transition:left .85s cubic-bezier(.45,0,.2,1),
+             top .85s cubic-bezier(.45,0,.2,1),
+             width .85s cubic-bezier(.45,0,.2,1),
+             height .85s cubic-bezier(.45,0,.2,1),
+             opacity .85s ease-in;
 }
 #hero h1.absorb{animation:absorb .9s ease-out}
 @keyframes absorb{
@@ -3186,17 +3197,22 @@ function celebrateDownloads(){
     setTimeout(()=>{
       // 3. …then collapses into the wordmark
       const h1=$("#hero h1");
+      const r=h1?h1.getBoundingClientRect()
+                :{left:innerWidth/2-60,top:innerHeight/2-20,width:120,height:40};
+      const cx=r.left+r.width/2, cy=r.top+r.height/2;
       const box=document.createElement("div");
       box.className="converge";
-      box.style.left="6%";box.style.top="34%";
-      box.style.width="88%";box.style.height="32%";
+      // enters along the same diagonal the sweep travelled
+      const W=r.width*2.6, H=r.height*4.5;
+      box.style.width=W+"px";box.style.height=H+"px";
+      box.style.left=(cx-W/2-170)+"px";box.style.top=(cy-H/2-110)+"px";
       cel.appendChild(box);
       requestAnimationFrame(()=>{
-        const r=h1?h1.getBoundingClientRect():{left:innerWidth/2,top:innerHeight/2,width:10,height:10};
-        box.style.left=r.left+"px";box.style.top=r.top+"px";
-        box.style.width=r.width+"px";box.style.height=r.height+"px";
+        const w2=r.width*.55, h2=r.height*.5;
+        box.style.left=(cx-w2/2)+"px";box.style.top=(cy-h2/2)+"px";
+        box.style.width=w2+"px";box.style.height=h2+"px";
         box.style.opacity="0";
-        if(h1)setTimeout(()=>h1.classList.add("absorb"),380);
+        if(h1)setTimeout(()=>h1.classList.add("absorb"),420);
       });
       setTimeout(()=>{
         cel.hidden=true;cel.innerHTML="";
