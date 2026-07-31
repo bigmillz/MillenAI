@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.2.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 30               # integer compared against the GitHub release tag
+APP_VERSION = "1.2.1"   # bump here — UI, window, DMG all follow
+APP_BUILD = 31               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2404,12 +2404,14 @@ body.resizing{cursor:col-resize;user-select:none}
 #brand-row{display:flex;align-items:center;gap:8px}
 #update-flag{
   font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
-  color:#e26d5a;cursor:pointer;margin-top:-6px;
+  color:#e26d5a;cursor:pointer;margin-top:1px;
 }
 #update-flag:hover{text-decoration:underline}
 #update-flag[hidden]{display:none}
-#brand{display:flex;cursor:pointer;align-items:baseline;gap:8px}
-#brand .name{font-weight:700;font-size:22px;letter-spacing:.02em}
+/* centred, not baseline-aligned: the version pill is a bordered box, so
+   sitting it on the wordmark's baseline hangs it low against the taller type */
+#brand{display:flex;cursor:pointer;align-items:center;gap:8px}
+#brand .name{font-weight:700;font-size:26px;letter-spacing:.02em}
 #brand .tag{font-family:var(--mono);font-size:10px;color:var(--accent);
   border:1px solid var(--accent-dim);background:var(--accent-dim);
   padding:2px 6px;border-radius:4px;letter-spacing:.08em}
