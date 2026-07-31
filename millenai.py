@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "V1 Beta 7"   # bump here — UI, window, DMG all follow
-APP_BUILD = 7               # integer compared against the GitHub release tag
+APP_VERSION = "V1 Beta 8"   # bump here — UI, window, DMG all follow
+APP_BUILD = 8               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -252,7 +252,6 @@ def build_tier_rows() -> str:
             f'  <div class="tier" data-tier="{name}">'
             f'<span class="ico">{t["icon"]}</span>'
             f'<span class="tname">{name}</span>'
-            f'<span class="tdesc">{t["desc"]}</span>'
             f'<span class="infobtn" title="Which models does this use?">i</span>'
             f'</div>')
     return "\n".join(out)
@@ -1461,9 +1460,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             html = (HTML_CONTENT
                     .replace("__MODEL_ROWS__", build_model_rows())
                     .replace("__APP_VER_TAG__",
-                             APP_VERSION.upper().replace(" ", "&nbsp;"))
+                             APP_VERSION.upper().replace("V1", "1.0")
+                             .replace(" ", "&nbsp;"))
                     .replace("__APP_BETA__",
-                             APP_VERSION.replace("V1 ", "").upper())
+                             '<b class="vnum">1.0</b> '
+                             + APP_VERSION.replace("V1 ", "").upper())
                     .replace("__TIER_ROWS__", build_tier_rows())
                     .replace("__CHIP__", chip_name())
                     .replace("__APP_VER__", APP_VERSION))
@@ -1820,9 +1821,9 @@ HTML_CONTENT = r"""<!DOCTYPE html>
   --text:#e4e8f4;
   --dim:#8f97ad;
   --faint:#5c6377;
-  --accent:#7d8fff;
-  --accent-hot:#b3c1ff;
-  --accent-dim:rgba(125,143,255,.14);
+  --accent:#3e477f;
+  --accent-hot:#59607f;
+  --accent-dim:rgba(62,71,127,.22);
   --teal:#5fd4c4;
   --red:#e26d5a;
   --radius:10px;
@@ -1852,9 +1853,10 @@ body{
   position:absolute;top:0;right:-3px;width:7px;height:100%;
   cursor:col-resize;z-index:20;
 }
-#sb-resize:hover,body.resizing #sb-resize{background:rgba(125,143,255,.25)}
+#sb-resize:hover,body.resizing #sb-resize{background:rgba(62,71,127,.45)}
 body.resizing{cursor:col-resize;user-select:none}
 #brand-wrap{padding:0 6px 12px}
+#brand-row{display:flex;align-items:center;gap:8px}
 #update-flag{
   font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
   color:#e26d5a;cursor:pointer;margin-top:-6px;
@@ -1868,13 +1870,14 @@ body.resizing{cursor:col-resize;user-select:none}
   padding:2px 6px;border-radius:4px;letter-spacing:.08em}
 
 #newchat{
-  display:flex;align-items:center;gap:8px;width:100%;
-  background:var(--panel2);border:1px solid var(--line);color:var(--text);
-  font:600 13.5px var(--sans);padding:10px 12px;border-radius:var(--radius);
-  cursor:pointer;transition:border-color .15s,background .15s;
+  margin-left:auto;width:28px;height:28px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  background:none;border:1px solid var(--line);border-radius:8px;
+  color:var(--accent-hot);cursor:pointer;padding:0;
+  transition:border-color .15s,background .15s,color .15s;
 }
-#newchat:hover{border-color:var(--accent);background:#222941}
-#newchat .plus{color:var(--accent);font-weight:700}
+#newchat svg{width:15px;height:15px}
+#newchat:hover{border-color:var(--accent-hot);background:var(--accent-dim);color:var(--text)}
 
 .group-label{
   font-family:var(--mono);font-size:10px;letter-spacing:.14em;
@@ -1906,14 +1909,9 @@ body.resizing{cursor:col-resize;user-select:none}
 .tier:hover{color:var(--text);background:var(--panel2)}
 .tier.active{
   color:var(--text);background:var(--accent-dim);
-  border-color:rgba(125,143,255,.32);
+  border-color:rgba(62,71,127,.6);
 }
 .tier .tname{font-weight:600}
-.tier .tdesc{
-  margin-left:auto;font-family:var(--mono);font-size:9.5px;
-  color:var(--faint);text-align:right;max-width:118px;line-height:1.25;
-}
-.tier.active .tdesc{color:var(--accent)}
 
 #chat-list{margin-bottom:2px;overflow-y:auto;max-height:34vh}
 #chat-list:empty::after{
@@ -1928,20 +1926,20 @@ body.resizing{cursor:col-resize;user-select:none}
 .chat-item:hover{color:var(--text);background:var(--panel2)}
 .chat-item.active{
   color:var(--text);background:var(--accent-dim);
-  border-color:rgba(125,143,255,.3);
+  border-color:rgba(62,71,127,.55);
 }
 .chat-item .ct{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chat-item .cx{color:var(--faint);visibility:hidden;font-size:13px;padding:0 3px}
 .chat-item:hover .cx{visibility:visible}
 .chat-item .cx:hover{color:var(--red)}
 .infobtn{
-  width:17px;height:17px;border-radius:50%;flex-shrink:0;
+  margin-left:auto;width:17px;height:17px;border-radius:50%;flex-shrink:0;
   margin-left:9px;background:var(--line);color:var(--dim);
   font:italic 600 10px var(--helv);line-height:17px;text-align:center;
   cursor:pointer;opacity:.5;transition:opacity .13s,background .13s,color .13s;
 }
 .tier:hover .infobtn,.infobtn:hover{opacity:1}
-.infobtn:hover{background:var(--accent);color:#0d1020}
+.infobtn:hover{background:var(--accent);color:#e4e8f4}
 #tierpop{
   position:fixed;z-index:70;max-width:250px;
   background:var(--panel2);border:1px solid var(--line);border-radius:10px;
@@ -1954,7 +1952,7 @@ body.resizing{cursor:col-resize;user-select:none}
 #tierpop .note{color:var(--faint);font-size:10.5px;margin-top:7px;display:block}
 .model.active{
   color:var(--text);background:var(--accent-dim);
-  border-color:rgba(125,143,255,.3);
+  border-color:rgba(62,71,127,.55);
 }
 .model .ico{width:18px;text-align:center;font-size:13px}
 .model .size{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint)}
@@ -1981,7 +1979,7 @@ body.resizing{cursor:col-resize;user-select:none}
   border-radius:50%;background:var(--dim);transition:all .15s;
 }
 .toggle-row.on .switch{background:var(--accent)}
-.toggle-row.on .switch::after{left:15px;background:#111}
+.toggle-row.on .switch::after{left:15px;background:#dfe3f0}
 
 /* telemetry — the instrument cluster */
 #telemetry{
@@ -2037,7 +2035,7 @@ body.perf #chat-scroll{scroll-behavior:auto}
 #hero,#hero h1,#hero p{font-family:var(--helv)}
 /* the whole wordmark rides the rainbow, not just the version tag */
 #hero h1{
-  font-size:51px;font-weight:700;letter-spacing:-.01em;
+  font-size:61px;font-weight:700;letter-spacing:-.01em;
   /* tile starts and ends on the same color; sliding one full tile
      (background-size 200% -> position 200%) loops seamlessly */
   background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
@@ -2061,7 +2059,8 @@ body.perf #hero h1{animation:none}
   letter-spacing:.32em;text-transform:uppercase;
 }
 .live-tag{font-size:11px;padding-left:.32em}
-#hero .beta-tag{font-size:10px;margin:2px 0 6px;padding-left:.32em}
+#hero .beta-tag{font-size:11px;margin:6px 0 8px;padding-left:.32em}
+#hero .beta-tag .vnum{color:#8b93ad;font-weight:700;letter-spacing:.18em}
 
 .msg{margin-bottom:26px;animation:rise .25s ease both}
 body.perf .msg{animation:none}
@@ -2117,7 +2116,7 @@ body.perf .msg{animation:none}
 body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .model.picked{
   color:var(--text);background:var(--accent-dim);
-  border-color:rgba(125,143,255,.3);
+  border-color:rgba(62,71,127,.55);
 }
 .model .memtag{
   font-family:var(--mono);font-size:7px;letter-spacing:.02em;
@@ -2156,7 +2155,7 @@ body.perf #composer-wrap{background:var(--bg);border-top:1px solid var(--line-so
 #composer:focus-within{border-color:var(--accent)}
 body.gen #composer{
   border-color:var(--accent);
-  box-shadow:0 0 34px rgba(125,143,255,.18),0 0 90px rgba(125,143,255,.08);
+  box-shadow:0 0 34px rgba(62,71,127,.30),0 0 90px rgba(62,71,127,.14);
 }
 body.gen #chip-model{color:var(--accent)}
 body.perf #composer{box-shadow:none}
@@ -2172,11 +2171,13 @@ body.perf #composer{box-shadow:none}
   background:none;color:var(--dim);transition:all .13s;flex-shrink:0;
 }
 .cbtn:hover{color:var(--text);background:var(--line-soft)}
-#send{background:var(--accent);color:#0d1020;font-weight:700;font-size:16px}
-#send:hover{background:var(--accent-hot);color:#0d1020}
+#send{background:var(--accent);color:#e4e8f4;font-weight:700;font-size:16px}
+#send:hover{background:var(--accent-hot);color:#fff}
 #send:disabled{background:var(--line);color:var(--faint);cursor:default}
 #send.stop{background:var(--red);color:#fff;font-size:11px}
 #mic.rec{color:var(--red)}
+#voicebtn svg{width:17px;height:17px}
+#voicebtn.on{color:var(--accent-hot);background:var(--accent-dim)}
 body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #model-chip{
   max-width:780px;margin:0 auto 8px;pointer-events:auto;
@@ -2214,8 +2215,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   transition:background .13s,border-color .13s;
 }
 .about-btn:hover{background:var(--panel);border-color:var(--dim)}
-.about-btn.primary{background:var(--accent);color:#0d1020;border:none;margin-top:14px}
-.about-btn.primary:hover{background:var(--accent-hot)}
+.about-btn.primary{background:var(--accent);color:#e4e8f4;border:none;margin-top:14px}
+.about-btn.primary:hover{background:var(--accent-hot);color:#fff}
 
 /* ------------------------------------------------------- first-run setup */
 #setup-veil{
@@ -2252,10 +2253,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 .big-bar{height:10px;background:var(--line-soft);border-radius:6px;overflow:hidden;margin:6px 0 10px}
 .big-bar i{display:block;height:100%;width:0;border-radius:6px;
-  background:linear-gradient(90deg,var(--accent),var(--teal));transition:width .5s ease}
+  background:linear-gradient(90deg,#5a67b8,var(--teal));transition:width .5s ease}
 .big-stat{display:flex;justify-content:space-between;font-family:var(--mono);
   font-size:11px;color:var(--dim)}
-.big-speed{font-family:var(--mono);font-size:11px;color:var(--accent);margin-top:6px}
+.big-speed{font-family:var(--mono);font-size:11px;color:var(--teal);margin-top:6px}
 .setup-head{
   font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
   color:var(--faint);text-transform:uppercase;margin:14px 0 8px;
@@ -2273,8 +2274,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   transition:all .13s;
 }
 #setup-foot button:hover{color:var(--text);border-color:var(--dim)}
-#setup-go{background:var(--accent);color:#0d1020;border:none}
-#setup-go:hover{background:var(--accent-hot);color:#0d1020}
+#setup-go{background:var(--accent);color:#e4e8f4;border:none}
+#setup-go:hover{background:var(--accent-hot);color:#fff}
 #setup-go:disabled{opacity:.55;cursor:default}
 
 @media(max-width:900px){#hero .live-tag{display:none}}
@@ -2289,14 +2290,22 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 <aside id="sidebar">
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
+    <div id="brand-row">
     <div id="brand" title="About MillenAI">
       <span class="name">MillenAI</span>
       <span class="tag">__APP_VER_TAG__</span>
     </div>
+    <button id="newchat" title="New chat">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+           stroke-linecap="round" stroke-linejoin="round">
+        <path d="M13 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/>
+        <path d="M18.4 2.6a1.7 1.7 0 0 1 2.4 2.4L12.8 13l-3.2.8.8-3.2z"/>
+      </svg>
+    </button>
+    </div>
     <div id="update-flag" hidden>UPDATE AVAILABLE</div>
   </div>
 
-  <button id="newchat"><span class="plus">＋</span> New chat</button>
 
   <div id="tier-rows">__TIER_ROWS__</div>
 
@@ -2316,10 +2325,6 @@ __MODEL_ROWS__
     <div class="toggle-row" id="web-toggle" title="Looks up live snippets when a question needs current info">
       <div class="switch"></div>
       Live web search
-    </div>
-    <div class="toggle-row" id="voice-toggle" style="margin-top:9px" title="Replies are read aloud; the mic sends as soon as you finish talking">
-      <div class="switch"></div>
-      Voice chat
     </div>
     <div class="toggle-row" id="perf-toggle" style="margin-top:9px">
       <div class="switch"></div>
@@ -2352,7 +2357,7 @@ __MODEL_ROWS__
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
-      <div class="h1row"><h1>MillenAI V1</h1><span class="live-tag" hidden>LIVE</span></div>
+      <div class="h1row"><h1>MillenAI</h1><span class="live-tag" hidden>LIVE</span></div>
       <div class="beta-tag">__APP_BETA__</div>
       <p>What's going on today?</p>
     </div>
@@ -2363,6 +2368,13 @@ __MODEL_ROWS__
     <div id="composer">
       <button class="cbtn" id="mic" title="Voice input">🎙️</button>
       <textarea id="input" rows="1" placeholder="Message MillenAI…"></textarea>
+      <button class="cbtn" id="voicebtn" title="Voice chat — replies are read aloud">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 10v4"/><path d="M7 6v12"/><path d="M11 3v18"/>
+          <path d="M15 7v10"/><path d="M19 10v4"/>
+        </svg>
+      </button>
       <button class="cbtn" id="send" title="Send">↑</button>
     </div>
   </div>
@@ -2506,13 +2518,13 @@ setWeb(autoWeb);
 
 /* ------------------------------------------------------- voice chat */
 function setVoice(on){
-  voiceChat=on;$("#voice-toggle").classList.toggle("on",on);
+  voiceChat=on;$("#voicebtn").classList.toggle("on",on);
   localStorage.setItem("millen.voice",on?"1":"0");
   if(!on)fetch("/api/speak",{method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({stop:true})});
 }
-$("#voice-toggle").addEventListener("click",()=>setVoice(!voiceChat));
+$("#voicebtn").addEventListener("click",()=>setVoice(!voiceChat));
 setVoice(voiceChat);
 
 /* --------------------------------------------------------------- tiers */
@@ -2735,7 +2747,7 @@ try{chats=JSON.parse(localStorage.getItem("millen.chats"))||[];}catch(e){}
 let curChat=null;   // every launch starts fresh; history stays in the list
 
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1>MillenAI V1</h1><span class="live-tag" hidden>LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p>What\'s going on today?</p></div>';
+  inner.innerHTML='<div id="hero"><div class="h1row"><h1>MillenAI</h1><span class="live-tag" hidden>LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p>What\'s going on today?</p></div>';
   paintLive();
 }
 function saveChats(){
