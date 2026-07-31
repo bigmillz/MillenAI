@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.3.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 33               # integer compared against the GitHub release tag
+APP_VERSION = "1.3.1"   # bump here — UI, window, DMG all follow
+APP_BUILD = 34               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2452,9 +2452,9 @@ body.resizing{cursor:col-resize;user-select:none}
 .group-label.chats{color:var(--dim);opacity:.75}
 .group-label.adv{cursor:pointer;color:var(--faint);user-select:none;padding-top:12px}
 .group-label.adv:hover{color:var(--dim)}
-#tier-rows{margin:8px 0 4px}
+#tier-rows{margin:6px 0 4px}
 .tier{
-  display:flex;align-items:center;gap:9px;padding:9px 10px;margin-bottom:4px;
+  display:flex;align-items:center;gap:9px;padding:6px 10px;margin-bottom:2px;
   border-radius:9px;cursor:pointer;color:var(--dim);font-size:13.5px;
   border:1px solid transparent;transition:all .13s;user-select:none;
 }
