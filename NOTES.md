@@ -216,6 +216,25 @@ address…" for 16k characters. Title generation requires a ≥2.4 GB model.
 examples, they echo the examples instead of reading the actual message.
 Direct instructions work; few-shot does not.
 
+**A repetition detector cannot see token salad.** When a model melts down it
+does not always loop — under memory pressure Gemma 4 emitted fragments fused
+with hyphens and single characters from nine scripts
+(`own-and-and ζ,탕s-तिर-der`). Every "word" there is unique, so the
+unique-word ratio read **0.79**, indistinguishable from good prose, and the
+guard waved it through. `_looks_degenerate()` now also tests for words
+carrying 2+ hyphens (>25% of the text) and for characters from 3+ non-Latin
+scripts appearing in runs averaging under 4 characters. That last condition is
+what separates salad from a legitimately multilingual answer: real answers
+write whole words in each script, salad glues one or two characters onto Latin
+fragments.
+
+**The merge was never checked.** Drafts were, the merge wasn't — so a merger
+that collapsed streamed its collapse straight to the reader. The merge is now
+watched as it arrives; on collapse it emits a `\0RESET\0` sentinel, which
+tells the UI to discard everything shown so far, and falls back to the
+strongest draft (already checked). Verified end to end: 1,155 characters of
+salad streamed, 121 characters of clean answer displayed.
+
 **Reasoning arrives in `delta.reasoning`, not `delta.content`.** mlx_lm
 streams a reasoning model's chain of thought in its own field. The parser read
 only `content`, so Gemma 4 appeared to answer with *nothing* — and because

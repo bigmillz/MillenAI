@@ -37,6 +37,7 @@ import tarfile
 import tempfile
 import threading
 import time
+import unicodedata
 import http.server
 import socketserver
 import urllib.request
@@ -73,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.1.2"   # bump here — UI, window, DMG all follow
-APP_BUILD = 28               # integer compared against the GitHub release tag
+APP_VERSION = "1.1.3"   # bump here — UI, window, DMG all follow
+APP_BUILD = 29               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1623,11 +1624,43 @@ SYNTH_INSTRUCTION = (
 
 
 def _looks_degenerate(text: str) -> bool:
-    """Runaway repetition detector ('to make up to make up to…')."""
+    """Detect output that has collapsed — repetition, or token salad.
+
+    Two distinct failures, and the second is invisible to a test for the
+    first. A model that melts down under memory pressure emits fragments
+    fused with hyphens and single characters from a dozen scripts
+    ("own-and-and ζ,탕s-तिर-der"). Every one of those "words" is unique, so
+    the repetition ratio reads 0.79 — indistinguishable from good prose.
+    """
     words = text.split()
-    if len(words) < 120:
-        return False
-    return len(set(words)) / len(words) < 0.15
+    if len(words) < 60:
+        return False                      # too short to judge either way
+    # runaway repetition: "to make up to make up to…"
+    if len(words) >= 120 and len(set(words)) / len(words) < 0.15:
+        return True
+    # token salad: fragments welded together with hyphens. Real prose has
+    # the odd "state-of-the-art"; it does not have 25% of every word.
+    if sum(1 for w in words if w.count("-") >= 2) / len(words) > 0.25:
+        return True
+    # token salad: characters from many scripts scattered singly through the
+    # text. A genuinely multilingual answer writes whole words in each script
+    # (runs of 6+ characters); salad glues one or two onto Latin fragments.
+    runs = re.findall(r"[^\x00-\x7f]+", text)
+    scripts = set()
+    for ch in text:
+        if ch.isalpha() and ord(ch) > 0x7f:
+            try:
+                scripts.add(unicodedata.name(ch).split()[0])
+            except ValueError:
+                pass
+    if len(scripts) >= 3 and runs:
+        if sum(len(r) for r in runs) / len(runs) < 4:
+            return True
+    return False
+
+
+class _Degenerate(RuntimeError):
+    """Raised to abandon a merge that has collapsed mid-stream."""
 
 
 def run_council(labels: list, messages: list, emit, status) -> None:
@@ -1708,7 +1741,26 @@ def run_council(labels: list, messages: list, emit, status) -> None:
         {"role": "user",
          "content": f"{SYNTH_INSTRUCTION}\n\nQUESTION: {question}\n\n{body}"},
     ]
-    run_model(merger, synth, emit)
+    # The drafts were each checked, but the merge never was — so a merger
+    # that melted down streamed its collapse straight to the reader with
+    # nothing in the way. Watch it as it arrives, and if it goes, throw away
+    # what was shown and fall back to the best draft we already trust.
+    merged = []
+
+    def guarded(chunk):
+        merged.append(chunk)
+        if len(merged) % 40 == 0 and _looks_degenerate("".join(merged)):
+            raise _Degenerate
+        emit(chunk)
+
+    try:
+        run_model(merger, synth, guarded)
+        if _looks_degenerate("".join(merged)):
+            raise _Degenerate
+    except _Degenerate:
+        emit(f"{NUL}RESET{NUL}")      # tells the UI to discard the garbage
+        status(f"{merger} lost the thread — showing the best single answer")
+        emit(good[0][1])
 
 
 def offline_hint(kind: str, err: Exception) -> str:
@@ -3143,6 +3195,10 @@ async function send(){
       // pull progress markers out so they never land in the answer
       full=raw.replace(/\u0000STATUS:(.*?)\u0000/g,(_,t)=>{status=t;return "";})
               .replace(/\u0000STATUS:[^\u0000]*$/,"");   // partial marker
+      // a merge that collapsed mid-stream sends RESET \u2014 discard
+      // everything streamed before it, keep the replacement answer
+      const cut=full.lastIndexOf("\u0000RESET\u0000");
+      if(cut>=0)full=full.slice(cut+7);
       tokEst=full.length/4;
       const secs=(performance.now()-t0)/1000;
       lastRate=secs>0.3?tokEst/secs:0;
