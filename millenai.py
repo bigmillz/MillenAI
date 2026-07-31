@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "V1 Beta 9"   # bump here — UI, window, DMG all follow
-APP_BUILD = 9               # integer compared against the GitHub release tag
+APP_VERSION = "V1 Beta 10"   # bump here — UI, window, DMG all follow
+APP_BUILD = 10               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -174,6 +174,11 @@ TIERS = {
                   "Gemma 2 9B IT", "Mistral Nemo 12B"],
         "count": 3,
     },
+    "Power": {
+        "icon": "\u269b\ufe0f", "desc": "every model that fits, blended",
+        "picks": [],          # purely memory-driven
+        "count": 99,
+    },
     "Pro": {
         "icon": "\u2728", "desc": "several models, blended",
         "picks": ["Mistral Nemo 12B", "Gemma 2 9B IT", "Qwen 2.5 7B",
@@ -181,6 +186,11 @@ TIERS = {
         "count": 5,
     },
 }
+
+# Auto-blending skips these: a vision model answers text poorly, and 1B-class
+# models degrade into repetition (observed looping "address address address").
+BLEND_EXCLUDE = {"LLaVA Vision 7B"}
+BLEND_MIN_MEM = 2.4e9
 
 THINK_HINT = ("Work through this carefully and step by step before giving "
               "your final answer.")
@@ -202,6 +212,10 @@ def resolve_tier(name: str) -> list:
         return (l in MODEL_ROUTES and model_cached(l, pulled)
                 and model_fits_memory(l))
 
+    def blendable(l):
+        return (usable(l) and l not in BLEND_EXCLUDE
+                and MODEL_MEM_BYTES.get(l, 0) >= BLEND_MIN_MEM)
+
     ready = [l for l in t["picks"] if usable(l)]
     if t["count"] > 1:
         # Only blend in models that leave room for the others. A 70B needs
@@ -210,7 +224,7 @@ def resolve_tier(name: str) -> list:
         total = psutil.virtual_memory().total if HAS_PSUTIL else 0
         budget = total * 0.45 if total else float("inf")
         ready += [l for l in MERGE_RANK
-                  if usable(l) and l not in ready
+                  if blendable(l) and l not in ready
                   and MODEL_MEM_BYTES.get(l, 0) <= budget]
     if not ready:  # nothing at all from the tier — fall back to anything
         ready = [l for l in MERGE_RANK if usable(l)]
@@ -248,6 +262,8 @@ def chip_name() -> str:
 def build_tier_rows() -> str:
     out = []
     for name, t in TIERS.items():
+        if name == "Power":
+            continue          # lives under "All models", not up top
         out.append(
             f'  <div class="tier" data-tier="{name}">'
             f'<span class="ico">{t["icon"]}</span>'
@@ -1007,13 +1023,16 @@ def _downloaded_bytes(pulled) -> tuple:
         est = MLX_EST_BYTES.get(label, 0)
         want += est
         kind = MODEL_ROUTES.get(label, ("",))[0]
+        with _setup_lock:
+            job = dict(_setup_jobs.get(label, {}))
         if model_cached(label, pulled):
             have += est
+        elif job.get("status") not in ("downloading", "queued"):
+            pass          # stalled/never started — counts as nothing yet
         elif kind == "mlx":
             have += min(est, _dir_bytes(_hf_model_dir(MLX_REPOS[label])))
         else:
-            with _setup_lock:
-                have += int(est * _setup_jobs.get(label, {}).get("pct", 0) / 100)
+            have += int(est * job.get("pct", 0) / 100)
     return have, want
 
 
@@ -1070,6 +1089,7 @@ def setup_status() -> dict:
                        "star": label in STARTER_LABELS,
                        "note": job.get("note", "")})
 
+    ready_n = sum(1 for x in models if x["status"] == "ready")
     have, want = _downloaded_bytes(pulled)
     bps = _dl_speed(have)
     busy = any(m["status"] in ("downloading", "queued") for m in models)
@@ -1080,6 +1100,10 @@ def setup_status() -> dict:
         "eta_min": (round((want - have) / bps / 60)
                     if busy and bps > 1e5 and want > have else None),
         "busy": busy,
+        # nag on first run only: once a couple of models work, the welcome
+        # screen is opt-in via "Add models…"
+        "needs_setup": ready_n < 2,
+        "ready_n": ready_n,
         "mlx_ok": _has_mlx() if IS_ARM else True,
         "ollama": _ollama_bin() is not None,
         "arch": "arm64" if IS_ARM else "x86_64",
@@ -1346,7 +1370,7 @@ def run_council(labels: list, messages: list, emit, status) -> None:
         status("skipping " + ", ".join(skipped))
         time.sleep(1.2)  # let the notice be seen before it's replaced
     # sequential generation — cap the roster so a run stays minutes, not hours
-    labels = (usable or labels[:1])[:6]
+    labels = (usable or labels[:1])[:8]
 
     drafts = []
     for i, label in enumerate(labels, 1):
@@ -1864,7 +1888,7 @@ body.resizing{cursor:col-resize;user-select:none}
 #update-flag:hover{text-decoration:underline}
 #update-flag[hidden]{display:none}
 #brand{display:flex;cursor:pointer;align-items:baseline;gap:8px}
-#brand .name{font-weight:700;font-size:17px;letter-spacing:.02em}
+#brand .name{font-weight:700;font-size:22px;letter-spacing:.02em}
 #brand .tag{font-family:var(--mono);font-size:10px;color:var(--accent);
   border:1px solid var(--accent-dim);background:var(--accent-dim);
   padding:2px 6px;border-radius:4px;letter-spacing:.08em}
@@ -2315,6 +2339,9 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 
   <div class="group-label adv" id="adv-toggle"><span id="adv-caret">▸</span> All models</div>
   <div id="adv-wrap" hidden>
+  <div class="tier" data-tier="Power"><span class="ico">⚛️</span>
+    <span class="tname">Power Mode</span>
+    <span class="infobtn" title="Which models does this use?">i</span></div>
 __MODEL_ROWS__
   <div class="model" id="open-setup" title="Download more models">
     <span class="ico">⬇</span>Add models…</div>
@@ -2944,7 +2971,7 @@ function starResize(){
   sw=starCv.width=Math.max(1,starCv.offsetWidth*dpr);
   sh=starCv.height=Math.max(1,starCv.offsetHeight*dpr);
   starList=[];
-  const n=Math.min(420,Math.round(sw*sh/9000));
+  const n=Math.min(640,Math.round(sw*sh/6000));   // ~50% denser
   for(let i=0;i<n;i++)starList.push(starSpawn(false));
 }
 starResize();
@@ -2965,7 +2992,7 @@ function starTick(){
     // streak tail = where the star was a few frames back (deeper in z)
     const pk=fov/(s.z+move*3.5+0.5), px=cx+s.x*pk, py=cy+s.y*pk;
     const t=1-s.z/sw;
-    sctx.globalAlpha=0.12+0.62*t*t;
+    sctx.globalAlpha=(generating?0.12:0.30)+0.62*t*t;  // brighter idle
     sctx.strokeStyle=s.c;
     sctx.lineWidth=Math.max(0.7,t*2.6);
     sctx.beginPath();sctx.moveTo(px,py);sctx.lineTo(x,y);sctx.stroke();
@@ -3121,8 +3148,8 @@ $("#open-setup").addEventListener("click",openSetup);
 (async()=>{
   try{
     const st=await(await fetch("/api/setup")).json();
-    // auto-open only when a recommended model is still missing
-    if(st.models.some(m=>m.star&&m.status!=="ready"))openSetup();
+    // auto-open only when the app can't hold a conversation yet
+    if(st.needs_setup)openSetup();
   }catch(e){}
 })();
 
