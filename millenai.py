@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "V1 Beta 8"   # bump here — UI, window, DMG all follow
-APP_BUILD = 8               # integer compared against the GitHub release tag
+APP_VERSION = "V1 Beta 9"   # bump here — UI, window, DMG all follow
+APP_BUILD = 9               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1813,19 +1813,19 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#0f1117;
-  --panel:#141724;
-  --panel2:#1a1e2e;
-  --line:#2a3046;
-  --line-soft:#222838;
-  --text:#e4e8f4;
-  --dim:#8f97ad;
-  --faint:#5c6377;
-  --accent:#3e477f;
-  --accent-hot:#59607f;
-  --accent-dim:rgba(62,71,127,.22);
-  --teal:#5fd4c4;
-  --red:#e26d5a;
+  --bg:#212121;
+  --panel:#171717;
+  --panel2:#2f2f2f;
+  --line:#3d3d3d;
+  --line-soft:#333;
+  --text:#ececec;
+  --dim:#b4b4b4;
+  --faint:#8e8e8e;
+  --accent:#ececec;          /* white is the accent, as in GPT */
+  --accent-hot:#fff;
+  --accent-dim:rgba(255,255,255,.10);
+  --teal:#c8c8c8;            /* was the secondary hue; now a light grey */
+  --red:#e26d5a;             /* kept: errors and the update flag */
   --radius:10px;
   --mono:'IBM Plex Mono',ui-monospace,monospace;
   --sans:'Space Grotesk',system-ui,sans-serif;
@@ -1846,14 +1846,14 @@ body{
 #sidebar{
   position:relative;
   width:284px;min-width:284px;height:100%;
-  background:#0c0e16;border-right:1px solid var(--line-soft);
+  background:var(--panel);border-right:1px solid var(--line-soft);
   display:flex;flex-direction:column;padding:20px 16px 14px;gap:4px;
 }
 #sb-resize{
   position:absolute;top:0;right:-3px;width:7px;height:100%;
   cursor:col-resize;z-index:20;
 }
-#sb-resize:hover,body.resizing #sb-resize{background:rgba(62,71,127,.45)}
+#sb-resize:hover,body.resizing #sb-resize{background:rgba(255,255,255,.18)}
 body.resizing{cursor:col-resize;user-select:none}
 #brand-wrap{padding:0 6px 12px}
 #brand-row{display:flex;align-items:center;gap:8px}
@@ -1909,7 +1909,7 @@ body.resizing{cursor:col-resize;user-select:none}
 .tier:hover{color:var(--text);background:var(--panel2)}
 .tier.active{
   color:var(--text);background:var(--accent-dim);
-  border-color:rgba(62,71,127,.6);
+  border-color:rgba(255,255,255,.26);
 }
 .tier .tname{font-weight:600}
 
@@ -1926,7 +1926,7 @@ body.resizing{cursor:col-resize;user-select:none}
 .chat-item:hover{color:var(--text);background:var(--panel2)}
 .chat-item.active{
   color:var(--text);background:var(--accent-dim);
-  border-color:rgba(62,71,127,.55);
+  border-color:rgba(255,255,255,.22);
 }
 .chat-item .ct{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chat-item .cx{color:var(--faint);visibility:hidden;font-size:13px;padding:0 3px}
@@ -1939,7 +1939,7 @@ body.resizing{cursor:col-resize;user-select:none}
   cursor:pointer;opacity:.5;transition:opacity .13s,background .13s,color .13s;
 }
 .tier:hover .infobtn,.infobtn:hover{opacity:1}
-.infobtn:hover{background:var(--accent);color:#e4e8f4}
+.infobtn:hover{background:var(--accent);color:#1a1a1a}
 #tierpop{
   position:fixed;z-index:70;max-width:250px;
   background:var(--panel2);border:1px solid var(--line);border-radius:10px;
@@ -1952,7 +1952,7 @@ body.resizing{cursor:col-resize;user-select:none}
 #tierpop .note{color:var(--faint);font-size:10.5px;margin-top:7px;display:block}
 .model.active{
   color:var(--text);background:var(--accent-dim);
-  border-color:rgba(62,71,127,.55);
+  border-color:rgba(255,255,255,.22);
 }
 .model .ico{width:18px;text-align:center;font-size:13px}
 .model .size{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--faint)}
@@ -1979,7 +1979,7 @@ body.resizing{cursor:col-resize;user-select:none}
   border-radius:50%;background:var(--dim);transition:all .15s;
 }
 .toggle-row.on .switch{background:var(--accent)}
-.toggle-row.on .switch::after{left:15px;background:#dfe3f0}
+.toggle-row.on .switch::after{left:15px;background:#1a1a1a}
 
 /* telemetry — the instrument cluster */
 #telemetry{
@@ -2055,12 +2055,12 @@ body.perf #hero h1{animation:none}
 #hero .live-tag{position:absolute;left:100%;margin-left:30px;white-space:nowrap}
 /* subdued deep-blue accents — deliberately quiet next to the wordmark */
 .live-tag,#hero .beta-tag{
-  font-family:var(--helv);font-weight:600;color:#454f7a;
+  font-family:var(--helv);font-weight:600;color:#8e8e8e;
   letter-spacing:.32em;text-transform:uppercase;
 }
 .live-tag{font-size:11px;padding-left:.32em}
 #hero .beta-tag{font-size:11px;margin:6px 0 8px;padding-left:.32em}
-#hero .beta-tag .vnum{color:#8b93ad;font-weight:700;letter-spacing:.18em}
+#hero .beta-tag .vnum{color:#c9c9c9;font-weight:700;letter-spacing:.18em}
 
 .msg{margin-bottom:26px;animation:rise .25s ease both}
 body.perf .msg{animation:none}
@@ -2116,7 +2116,7 @@ body.perf .msg{animation:none}
 body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .model.picked{
   color:var(--text);background:var(--accent-dim);
-  border-color:rgba(62,71,127,.55);
+  border-color:rgba(255,255,255,.22);
 }
 .model .memtag{
   font-family:var(--mono);font-size:7px;letter-spacing:.02em;
@@ -2124,13 +2124,13 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 }
 .model .rank{
   font-family:var(--mono);font-size:9px;color:var(--accent);
-  border:1px solid rgba(125,143,255,.4);border-radius:3px;
+  border:1px solid rgba(255,255,255,.3);border-radius:3px;
   padding:0 3px;margin-left:6px;
 }
 .websrc{
   display:inline-block;font-family:var(--mono);font-size:10px;
-  letter-spacing:.08em;color:var(--teal);background:rgba(95,212,196,.1);
-  border:1px solid rgba(95,212,196,.22);border-radius:5px;
+  letter-spacing:.08em;color:var(--teal);background:rgba(255,255,255,.07);
+  border:1px solid rgba(255,255,255,.18);border-radius:5px;
   padding:2px 7px;margin-bottom:9px;
 }
 .caret{
@@ -2155,7 +2155,7 @@ body.perf #composer-wrap{background:var(--bg);border-top:1px solid var(--line-so
 #composer:focus-within{border-color:var(--accent)}
 body.gen #composer{
   border-color:var(--accent);
-  box-shadow:0 0 34px rgba(62,71,127,.30),0 0 90px rgba(62,71,127,.14);
+  box-shadow:0 0 34px rgba(255,255,255,.10),0 0 90px rgba(255,255,255,.05);
 }
 body.gen #chip-model{color:var(--accent)}
 body.perf #composer{box-shadow:none}
@@ -2171,8 +2171,8 @@ body.perf #composer{box-shadow:none}
   background:none;color:var(--dim);transition:all .13s;flex-shrink:0;
 }
 .cbtn:hover{color:var(--text);background:var(--line-soft)}
-#send{background:var(--accent);color:#e4e8f4;font-weight:700;font-size:16px}
-#send:hover{background:var(--accent-hot);color:#fff}
+#send{background:var(--accent);color:#1a1a1a;font-weight:700;font-size:16px}
+#send:hover{background:var(--accent-hot);color:#000}
 #send:disabled{background:var(--line);color:var(--faint);cursor:default}
 #send.stop{background:var(--red);color:#fff;font-size:11px}
 #mic.rec{color:var(--red)}
@@ -2188,7 +2188,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 
 /* -------------------------------------------------------------- about */
 #update-veil,#about-veil{
-  position:fixed;inset:0;z-index:60;background:rgba(8,10,16,.72);
+  position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.66);
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
   display:flex;align-items:center;justify-content:center;
 }
@@ -2215,12 +2215,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   transition:background .13s,border-color .13s;
 }
 .about-btn:hover{background:var(--panel);border-color:var(--dim)}
-.about-btn.primary{background:var(--accent);color:#e4e8f4;border:none;margin-top:14px}
-.about-btn.primary:hover{background:var(--accent-hot);color:#fff}
+.about-btn.primary{background:var(--accent);color:#1a1a1a;border:none;margin-top:14px}
+.about-btn.primary:hover{background:var(--accent-hot);color:#000}
 
 /* ------------------------------------------------------- first-run setup */
 #setup-veil{
-  position:fixed;inset:0;z-index:50;background:rgba(8,10,16,.72);
+  position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.66);
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
   display:flex;align-items:center;justify-content:center;
 }
@@ -2253,7 +2253,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 .big-bar{height:10px;background:var(--line-soft);border-radius:6px;overflow:hidden;margin:6px 0 10px}
 .big-bar i{display:block;height:100%;width:0;border-radius:6px;
-  background:linear-gradient(90deg,#5a67b8,var(--teal));transition:width .5s ease}
+  background:linear-gradient(90deg,#8e8e8e,#ececec);transition:width .5s ease}
 .big-stat{display:flex;justify-content:space-between;font-family:var(--mono);
   font-size:11px;color:var(--dim)}
 .big-speed{font-family:var(--mono);font-size:11px;color:var(--teal);margin-top:6px}
@@ -2274,8 +2274,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   transition:all .13s;
 }
 #setup-foot button:hover{color:var(--text);border-color:var(--dim)}
-#setup-go{background:var(--accent);color:#e4e8f4;border:none}
-#setup-go:hover{background:var(--accent-hot);color:#fff}
+#setup-go{background:var(--accent);color:#1a1a1a;border:none}
+#setup-go:hover{background:var(--accent-hot);color:#000}
 #setup-go:disabled{opacity:.55;cursor:default}
 
 @media(max-width:900px){#hero .live-tag{display:none}}
@@ -2930,8 +2930,8 @@ pollEngines();setInterval(pollEngines,8000);
 // While a query streams, speed ramps up and stars stretch into light
 // streaks — Tesla-launch-control style. Perf mode disables it entirely.
 const starCv=$("#stars"),sctx=starCv.getContext("2d");
-const STAR_COLORS=["#e4e8f4","#e4e8f4","#e4e8f4","#cdd7ff",
-                   "#7d8fff","#b3c1ff","#5fd4c4","#c98fff"];
+const STAR_COLORS=["#ececec","#ececec","#d4d4d4","#b4b4b4",
+                   "#8e8e8e","#f5f5f5","#c8c8c8","#a0a0a0"];
 let starList=[],sw=0,sh=0,warpSpeed=0.5;
 function starSpawn(far){
   return {x:(Math.random()-0.5)*sw*1.6, y:(Math.random()-0.5)*sh*1.6,
