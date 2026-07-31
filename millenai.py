@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.0.1"   # bump here — UI, window, DMG all follow
-APP_BUILD = 24               # integer compared against the GitHub release tag
+APP_VERSION = "1.1.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 25               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -816,6 +816,26 @@ MEMORY_FILE = os.path.join(app_dir(), "memory.json")
 # bundle identity, which differs between running from source and from the
 # .app, and isn't guaranteed to survive a bundle swap. This file does.
 CHATS_FILE = os.path.join(app_dir(), "chats.json")
+# which model labels the user has already been offered, so a release that
+# adds models can announce them exactly once
+PREFS_FILE = os.path.join(app_dir(), "prefs.json")
+
+
+def load_prefs() -> dict:
+    try:
+        with open(PREFS_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def store_prefs(d: dict):
+    os.makedirs(os.path.dirname(PREFS_FILE), exist_ok=True)
+    tmp = PREFS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(d, f)
+    os.replace(tmp, PREFS_FILE)
 _chats_lock = threading.Lock()
 
 
@@ -1705,6 +1725,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 out[name] = {"desc": t["desc"], "models": chosen,
                              "skipped": skipped}
             self._send_json(out)
+        elif self.path == "/api/prefs":
+            self._send_json(load_prefs())
         elif self.path == "/api/chats":
             with _chats_lock:
                 self._send_json({"chats": load_chats()})
@@ -1838,6 +1860,18 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             if _update["state"] in ("idle", "error"):
                 threading.Thread(target=_do_update, daemon=True).start()
             self._send_json({"ok": True})
+            return
+        if self.path == "/api/prefs":
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                d = json.loads(self.rfile.read(n))
+            except (ValueError, json.JSONDecodeError):
+                d = None
+            if isinstance(d, dict):
+                cur = load_prefs()
+                cur.update(d)
+                store_prefs(cur)
+            self._send_json({"ok": isinstance(d, dict)})
             return
         if self.path == "/api/chats":
             n = int(self.headers.get("Content-Length", 0))
@@ -2409,12 +2443,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #model-chip b{color:var(--dim);font-weight:500}
 
 /* -------------------------------------------------------------- about */
-#update-veil,#about-veil{
+#new-veil,#update-veil,#about-veil{
   position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.66);
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
   display:flex;align-items:center;justify-content:center;
 }
-#update-veil[hidden],#about-veil[hidden]{display:none}
+#new-veil[hidden],#update-veil[hidden],#about-veil[hidden]{display:none}
 #about-card{
   width:330px;background:var(--panel2);border:1px solid var(--line);
   border-radius:16px;padding:30px 26px 22px;text-align:center;
@@ -2426,6 +2460,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #about-ver,#up-ver{font-family:var(--helv);font-size:14px;color:var(--dim);margin-top:6px}
 #up-detail{font-size:11.5px;color:var(--faint);margin:10px 0 4px;line-height:1.5}
 #about-sub{font-size:11.5px;color:var(--faint);margin-top:10px;line-height:1.5}
+#new-list{
+  font-family:var(--mono);font-size:11.5px;color:var(--accent-hot);
+  margin:12px 0 4px;line-height:1.7;text-align:left;
+}
 #about-facts{
   font-family:var(--mono);font-size:10.5px;color:var(--faint);
   margin-top:8px;line-height:1.6;
@@ -2581,11 +2619,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div class="group-label chats">Chats</div>
   <div id="chat-list"></div>
 
+  <div class="model" id="open-setup" title="Download more models">
+    <span class="ico">⬇</span>Add models…</div>
+
   <div class="group-label adv" id="adv-toggle"><span id="adv-caret">▸</span> All models</div>
   <div id="adv-wrap" hidden>
 __MODEL_ROWS__
-  <div class="model" id="open-setup" title="Download more models">
-    <span class="ico">⬇</span>Add models…</div>
   </div>
   </div>
 
@@ -2646,6 +2685,16 @@ __MODEL_ROWS__
 
 <div id="tierpop" hidden></div>
 <div id="celebrate" hidden></div>
+
+<div id="new-veil" hidden>
+  <div id="about-card">
+    <div id="about-name">New models available</div>
+    <div id="up-detail">This version adds models you don&rsquo;t have yet.</div>
+    <div id="new-list"></div>
+    <button class="about-btn primary" id="new-get">Download</button>
+    <button class="about-btn" id="new-skip">Not now</button>
+  </div>
+</div>
 
 <div id="update-veil" hidden>
   <div id="about-card">
@@ -3367,13 +3416,43 @@ function renderSetup(st){
   setupAllReady=stars.every(m=>m.status==="ready");
   const anyDl=st.busy;
   const pct=st.overall_pct;
-  setupList.innerHTML=
+  // headline: overall progress across the recommended set
+  let html=
     '<div class="big-bar"><i style="width:'+pct+'%"></i></div>'+
     '<div class="big-stat"><span>'+st.have_gb+' / '+st.want_gb+' GB</span>'+
     '<span>'+(anyDl?pct+'%':(setupAllReady?'complete':'not started'))+'</span></div>'+
     (anyDl?'<div class="big-speed">'+
       (st.speed_mbs>0?st.speed_mbs+' MB/s':'starting\u2026')+
       (st.eta_min?' \u00b7 about '+st.eta_min+' min left':'')+'</div>':'');
+
+  // …then every model individually, so anything can be added on its own
+  const state=m=>{
+    if(m.status==="ready")   return '<span class="st ok">installed</span>';
+    if(m.status==="downloading") return '<span class="st dl">'+m.pct+'%</span>';
+    if(m.status==="queued")  return '<span class="st wait">queued</span>';
+    if(m.status==="error")   return '<span class="st err" title="'+esc(m.note)+'">failed</span>';
+    return '<span class="st get">'+m.est_gb+' GB \u2193</span>';
+  };
+  const row=m=>
+    '<div class="setup-row'+(m.status==="ready"?"":" clickable")+'"'+
+    ' data-model="'+esc(m.label)+'"><span class="nm">'+esc(m.label)+'</span>'+
+    state(m)+'<div class="bar"><i style="width:'+(m.pct||0)+'%"></i></div></div>';
+  const missing=st.models.filter(m=>m.status!=="ready");
+  const have=st.models.filter(m=>m.status==="ready");
+  if(missing.length)
+    html+='<div class="setup-head">Available to add \u2014 click one</div>'
+         +missing.map(row).join("");
+  if(have.length)
+    html+='<div class="setup-head">Installed</div>'+have.map(row).join("");
+  setupList.innerHTML=html;
+
+  setupList.querySelectorAll(".setup-row.clickable").forEach(el=>{
+    el.addEventListener("click",()=>{
+      fetch("/api/model/download",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({labels:[el.dataset.model]})}).then(setupTick);
+    });
+  });
 
   if(!st.mlx_ok){
     setupNote.textContent="engine not installed — reopen the app to finish setup";
@@ -3499,6 +3578,48 @@ async function openAbout(){
       m.facts.length+" things remembered";
   }catch(e){$("#about-facts").textContent="";}
 }
+/* ------------------------------------------- new models in this release */
+// Anything in the catalog the user has never been offered gets announced
+// once, so a release that adds models surfaces them instead of hiding in
+// "Add models…".
+async function announceNewModels(){
+  try{
+    const [st,prefs]=await Promise.all([
+      (await fetch("/api/setup")).json(),
+      (await fetch("/api/prefs")).json()]);
+    const seen=prefs.seen_models||[];
+    const all=st.models.map(m=>m.label);
+    const fresh=st.models.filter(m=>m.status!=="ready"&&seen.indexOf(m.label)<0);
+    if(!seen.length){                 // first run: nothing is "new" yet
+      await fetch("/api/prefs",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({seen_models:all})});
+      return;
+    }
+    if(!fresh.length)return;
+    const gb=fresh.reduce((a,m)=>a+m.est_gb,0);
+    $("#new-list").innerHTML=fresh.map(m=>
+      "\u2022 "+esc(m.label)+"  <span style='color:var(--faint)'>"
+      +m.est_gb+" GB</span>").join("<br>");
+    $("#new-get").textContent="Download \u00b7 "+gb.toFixed(1)+" GB";
+    $("#new-veil").hidden=false;
+    const remember=async()=>{
+      await fetch("/api/prefs",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({seen_models:all})});
+    };
+    $("#new-skip").onclick=async()=>{$("#new-veil").hidden=true;await remember();};
+    $("#new-get").onclick=async()=>{
+      $("#new-veil").hidden=true;await remember();
+      await fetch("/api/model/download",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({labels:fresh.map(m=>m.label)})});
+      openSetup();                    // watch them come down
+    };
+  }catch(e){}
+}
+setTimeout(announceNewModels,2500);   // after the first paint
+
 $("#brand").addEventListener("click",openAbout);
 $("#about-close").addEventListener("click",()=>{aboutVeil.hidden=true;});
 aboutVeil.addEventListener("click",e=>{if(e.target===aboutVeil)aboutVeil.hidden=true;});

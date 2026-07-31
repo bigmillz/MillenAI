@@ -123,6 +123,13 @@ highlighted. This matters beyond cosmetics: the backend prefers `tier` over
 `models`, so leaving a stale tier set made explicit model picks silently
 ignored.
 
+**New models announce themselves.** `prefs.json` records which model labels
+the user has already been offered. On launch, anything in the catalog that is
+neither installed nor previously offered gets a one-time "New models
+available" prompt — so shipping a release that adds models surfaces them
+instead of leaving them buried in "Add models…". First run records the whole
+catalog as seen, so nothing is announced to a brand-new install.
+
 ### Memory
 Facts about the user are extracted in the background after each message by
 whichever model just answered, stored in `memory.json`, and folded into the
