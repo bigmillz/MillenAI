@@ -21,6 +21,7 @@ First use of an MLX engine downloads its weights from Hugging Face.
 """
 
 import atexit
+import calendar
 import glob
 import json
 import os
@@ -570,8 +571,10 @@ def _own_build_time() -> float:
 
 
 def _gh_time(iso: str) -> float:
+    # GitHub stamps releases in UTC; mktime would read them as local time
+    # and make every release look hours newer than it is
     try:
-        return time.mktime(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ"))
+        return calendar.timegm(time.strptime(iso, "%Y-%m-%dT%H:%M:%SZ"))
     except (ValueError, TypeError):
         return 0.0
 
