@@ -34,7 +34,7 @@ clobber it:
 - `~/Library/Application Support/MillenAI/venv` — private Python env
 - `~/Library/Application Support/MillenAI/memory.json` — long-term memory
 - `~/Library/Logs/MillenAI/` — engine + bootstrap logs
-- Chat history — WebKit localStorage, keyed to the bundle id
+- `chats.json` — conversation history (see below)
 
 ## Releasing
 
@@ -101,6 +101,14 @@ candidate:
 Drafts are capped at the 5 strongest and truncated to ~1,500 chars each —
 an unbounded merge prompt overflows small models and triggers repetition
 loops.
+
+**Chats live on disk, not in localStorage.** WebKit keys its storage to the
+bundle identity — `MillenAI` when launched from the .app but
+`org.python.python` when run from source, and that store is shared with every
+other Python/pywebview app. Relying on it meant history could vanish on an
+update or a launch-method change. The backend now owns `chats.json`
+(atomic writes); localStorage is only a mirror so the sidebar paints
+instantly, and existing localStorage chats are migrated up on first run.
 
 **Tier and single-model are mutually exclusive.** Picking a tier clears any
 individual model selection and vice versa, so exactly one row is ever

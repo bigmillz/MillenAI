@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.0.2"   # bump here — UI, window, DMG all follow
-APP_BUILD = 18               # integer compared against the GitHub release tag
+APP_VERSION = "1.0.3"   # bump here — UI, window, DMG all follow
+APP_BUILD = 19               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -639,7 +639,7 @@ def make_title(text: str) -> str:
             run_model(label, [{"role": "user",
                                "content": TITLE_PROMPT + text[:600]}],
                       parts.append)
-            title = " ".join("".join(parts).split())
+            title = " ".join(strip_special("".join(parts)).split())
             title = title.split("\n")[0]
             title = re.sub(r"^(topic|title)\s*:?\s*", "", title, flags=re.I)
             title = title.strip("\"'*#\u2014- .")
@@ -793,6 +793,29 @@ def _do_update():
 # background after each message, using the model that just answered
 # (it's already loaded — no engine thrash).
 MEMORY_FILE = os.path.join(app_dir(), "memory.json")
+# Chats live on disk, not in localStorage: WebKit keys its storage to the
+# bundle identity, which differs between running from source and from the
+# .app, and isn't guaranteed to survive a bundle swap. This file does.
+CHATS_FILE = os.path.join(app_dir(), "chats.json")
+_chats_lock = threading.Lock()
+
+
+def load_chats() -> list:
+    try:
+        with open(CHATS_FILE, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def store_chats(items: list):
+    """Atomic write — a crash mid-save must not corrupt the history."""
+    os.makedirs(os.path.dirname(CHATS_FILE), exist_ok=True)
+    tmp = CHATS_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(items[:60], f)
+    os.replace(tmp, CHATS_FILE)
 _memory_lock = threading.Lock()
 
 MEMORY_PROMPT = (
@@ -1413,6 +1436,18 @@ def stream_openai_compat(port: int, model_label: str, messages: list, emit) -> N
             raise RuntimeError("the server returned an empty completion")
 
 
+END_TOKENS = ("<end_of_turn>", "<|eot_id|>", "<|im_end|>", "</s>",
+              "<|endoftext|>")
+
+
+def strip_special(text: str) -> str:
+    """Remove end-of-turn markers some engines leak as literal text."""
+    for t in END_TOKENS:
+        if t in text:
+            text = text.replace(t, "")
+    return text
+
+
 def fold_system(messages: list) -> list:
     """Some chat templates (Gemma 2) reject the system role outright —
     merge the system prompt into the first user turn instead."""
@@ -1641,6 +1676,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self._send_json({name: {"desc": t["desc"],
                                     "models": resolve_tier(name)}
                              for name, t in TIERS.items()})
+        elif self.path == "/api/chats":
+            with _chats_lock:
+                self._send_json({"chats": load_chats()})
         elif self.path == "/api/memory":
             self._send_json({"facts": _load_memory()})
         elif self.path == "/api/voice/status":
@@ -1771,6 +1809,17 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             if _update["state"] in ("idle", "error"):
                 threading.Thread(target=_do_update, daemon=True).start()
             self._send_json({"ok": True})
+            return
+        if self.path == "/api/chats":
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                items = json.loads(self.rfile.read(n)).get("chats", [])
+            except (ValueError, json.JSONDecodeError):
+                items = None
+            if isinstance(items, list):
+                with _chats_lock:
+                    store_chats(items)
+            self._send_json({"ok": isinstance(items, list)})
             return
         if self.path == "/api/title":
             n = int(self.headers.get("Content-Length", 0))
@@ -1907,10 +1956,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
 
         def emit(chunk: str):
-            # some engines leak their end-of-turn token as literal text
-            for s in ("<end_of_turn>", "<|eot_id|>", "<|im_end|>", "</s>"):
-                if s in chunk:
-                    chunk = chunk.replace(s, "")
+            chunk = strip_special(chunk)
             if not chunk:
                 return
             self.wfile.write(chunk.encode("utf-8"))
@@ -2945,15 +2991,37 @@ function greeting(){return GREETINGS[Math.floor(Math.random()*GREETINGS.length)]
 (function(){const g=$(".greet");if(g)g.textContent=greeting();})();
 
 /* ------------------------------------------------- chats: list + store */
+// Chats are owned by the backend (survives app updates); localStorage is
+// only a fast local mirror so the list paints before the fetch returns.
 let chats=[];
 try{chats=JSON.parse(localStorage.getItem("millen.chats"))||[];}catch(e){}
 let curChat=null;   // every launch starts fresh; history stays in the list
+let chatSaveTimer=null;
+
+async function loadChatsFromDisk(){
+  try{
+    const server=(await(await fetch("/api/chats")).json()).chats||[];
+    if(server.length){chats=server;}
+    else if(chats.length){await pushChatsToDisk();}   // migrate old localStorage
+    renderChats();
+  }catch(e){}
+}
+async function pushChatsToDisk(){
+  try{
+    await fetch("/api/chats",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({chats:chats})});
+  }catch(e){}
+}
 
 function resetHero(){
   inner.innerHTML='<div id="hero"><div class="h1row"><h1>MillenAI</h1><span class="live-tag" hidden>LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
   paintLive();
 }
 function saveChats(){
+  // write through to disk, coalesced so a burst of messages is one write
+  clearTimeout(chatSaveTimer);
+  chatSaveTimer=setTimeout(pushChatsToDisk,400);
   try{localStorage.setItem("millen.chats",JSON.stringify(chats.slice(0,30)));}
   catch(e){chats=chats.slice(0,10);localStorage.setItem("millen.chats",JSON.stringify(chats));}
 }
@@ -3008,6 +3076,7 @@ function loadChat(id){
   renderChats();
 }
 renderChats();
+loadChatsFromDisk();
 
 /* ----------------------------------------------------------- new chat */
 $("#newchat").addEventListener("click",()=>{
