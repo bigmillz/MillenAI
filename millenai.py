@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.1.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 21               # integer compared against the GitHub release tag
+APP_VERSION = "1.1.1"   # bump here — UI, window, DMG all follow
+APP_BUILD = 22               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2191,7 +2191,7 @@ body.resizing{cursor:col-resize;user-select:none}
   font-size:9.5px;letter-spacing:.16em;color:var(--faint);
   display:flex;justify-content:space-between;margin-bottom:10px;
 }
-#telemetry .t-head .live{color:var(--accent)}
+#telemetry .t-head .live{color:var(--dim);white-space:nowrap}
 .meter-row{margin-bottom:9px}
 .meter-row:last-child{margin-bottom:0}
 .meter-label{
@@ -2205,7 +2205,6 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 .meter i.lit{background:var(--accent)}
 .meter i.hot{background:var(--accent-hot)}
-body:not(.perf) #telemetry .live{animation:blink 1.6s ease infinite}
 @keyframes blink{50%{opacity:.25}}
 /* performance mode: telemetry goes dark AND stops polling (the GPU probe
    and meter repaints are the expensive part) */
@@ -2574,7 +2573,7 @@ __MODEL_ROWS__
   </div>
 
   <div id="telemetry">
-    <div class="t-head"><span>__CHIP__</span><span class="live">●&nbsp;LIVE</span></div>
+    <div class="t-head"><span>__CHIP__</span><span class="live" id="model-count">&nbsp;</span></div>
     <div class="meter-row">
       <div class="meter-label"><span>UNIFIED MEMORY</span><b id="mem-label">—</b></div>
       <div class="meter" id="mem-meter"></div>
@@ -3172,6 +3171,13 @@ async function pollEngines(){
 
 
     });
+    // headline tally: how many models are actually usable right now
+    const cnt=$("#model-count");
+    if(cnt){
+      const all=Object.entries(st).filter(([,v])=>v.supported!==false);
+      const up=all.filter(([,v])=>v.up).length;
+      cnt.textContent=up+"/"+all.length+" MODELS AVAILABLE";
+    }
     // engine states just arrived — prune hand-picked rosters of models
     // that can't run (red dots showing council ranks was a lie), then
     // fill the roster automatically if the user hasn't curated one
