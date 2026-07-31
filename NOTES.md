@@ -84,7 +84,13 @@ Blending is sequential — **only one MLX engine can be resident at a time**,
 since each pins its full weights in RAM. Parallel calls thrash.
 
 Excluded from auto-blending: vision models (`LLaVA`) and anything under
-2.4 GB (1B-class models produce degenerate output).
+2.4 GB (1B-class models produce degenerate output). **Power Mode opts out of
+those quality filters** — if a model can run, it takes part.
+
+Memory is the only hard limit, and it scales with the machine: a model must
+fit in 1.25× its estimated need *and* stay under 80% of total RAM. Estimates
+run low — a "44 GB" 70B was measured at 49.7 GB before being OOM-killed — so
+a 70B is refused on a 51 GB Mac but allowed on a 128 GB one.
 
 ### The merger
 Gemma writes the final blended answer, preferring the newest generation

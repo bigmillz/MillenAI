@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.2.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 23               # integer compared against the GitHub release tag
+APP_VERSION = "1.0.1"   # bump here — UI, window, DMG all follow
+APP_BUILD = 24               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -205,9 +205,12 @@ TIERS = {
         "count": 5,
     },
     "Power": {
-        "icon": "\u269b\ufe0f", "desc": "every model that fits, blended",
+        "icon": "\u269b\ufe0f", "name": "Power Mode",
+        "desc": "every model that fits, blended",
         "picks": [],          # purely memory-driven
         "count": 99,
+        # no quality filtering — if it can run, it takes part
+        "all": True,
     },
 }
 
@@ -236,7 +239,11 @@ def resolve_tier(name: str) -> list:
         return (l in MODEL_ROUTES and model_cached(l, pulled)
                 and model_fits_memory(l))
 
+    take_all = t.get("all")
+
     def blendable(l):
+        if take_all:            # Power: memory is the only limit
+            return usable(l)
         return (usable(l) and l not in BLEND_EXCLUDE
                 and MODEL_MEM_BYTES.get(l, 0) >= BLEND_MIN_MEM)
 
@@ -246,7 +253,10 @@ def resolve_tier(name: str) -> list:
         # most of the machine, so pairing it with four more would thrash
         # (and take many minutes) even if it fits on its own right now.
         total = psutil.virtual_memory().total if HAS_PSUTIL else 0
-        budget = total * 0.45 if total else float("inf")
+        # the 45% cap keeps one huge model from crowding a blend; Power
+        # deliberately ignores it and relies on the real memory check
+        budget = float("inf") if take_all else (
+            total * 0.45 if total else float("inf"))
         ready += [l for l in MERGE_RANK
                   if blendable(l) and l not in ready
                   and MODEL_MEM_BYTES.get(l, 0) <= budget]
@@ -303,7 +313,7 @@ def build_tier_rows() -> str:
         out.append(
             f'  <div class="tier" data-tier="{name}">'
             f'<span class="ico">{t["icon"]}</span>'
-            f'<span class="tname">{name}</span>'
+            f'<span class="tname">{t.get("name", name)}</span>'
             f'<span class="infobtn" title="Which models does this use?">i</span>'
             f'</div>')
     return "\n".join(out)
@@ -345,7 +355,13 @@ def model_fits_memory(label: str) -> bool:
     kind, target = MODEL_ROUTES.get(label, (None, None))
     if kind == "mlx" and _port_in_use(target):
         return True  # already resident and serving
-    return need * 1.05 < avail
+    # Real footprints run above the estimate — a "44 GB" 70B was measured at
+    # 49.7 GB and got OOM-killed — so demand real headroom, and never allow a
+    # model that needs most of the machine even when RAM looks free.
+    total = psutil.virtual_memory().total if HAS_PSUTIL else 0
+    if total and need > total * 0.8:
+        return False
+    return need * 1.25 < avail
 
 _search_cache = {"query": "", "data": "", "timestamp": 0.0}
 _search_lock = threading.Lock()
@@ -1539,7 +1555,7 @@ def run_council(labels: list, messages: list, emit, status) -> None:
         status("skipping " + ", ".join(skipped))
         time.sleep(1.2)  # let the notice be seen before it's replaced
     # sequential generation — cap the roster so a run stays minutes, not hours
-    labels = (usable or labels[:1])[:8]
+    labels = (usable or labels[:1])[:12]
 
     drafts = []
     for i, label in enumerate(labels, 1):
@@ -1678,9 +1694,17 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/api/update/status":
             self._send_json(dict(_update))
         elif self.path == "/api/tiers":
-            self._send_json({name: {"desc": t["desc"],
-                                    "models": resolve_tier(name)}
-                             for name, t in TIERS.items()})
+            pulled = ollama_pulled_tags() or set()
+            out = {}
+            for name, t in TIERS.items():
+                chosen = resolve_tier(name)
+                # installed models this tier can't use right now
+                skipped = [l for l in MODEL_INFO
+                           if model_cached(l, pulled) and l not in chosen
+                           and not model_fits_memory(l)]
+                out[name] = {"desc": t["desc"], "models": chosen,
+                             "skipped": skipped}
+            self._send_json(out)
         elif self.path == "/api/chats":
             with _chats_lock:
                 self._send_json({"chats": load_chats()})
@@ -2233,7 +2257,7 @@ body.perf #chat-scroll{scroll-behavior:auto}
 #hero,#hero h1,#hero p{font-family:var(--helv)}
 /* the whole wordmark rides the rainbow, not just the version tag */
 #hero h1{
-  font-size:61px;font-weight:700;letter-spacing:-.01em;
+  font-size:92px;font-weight:700;letter-spacing:-.015em;
   /* tile starts and ends on the same color; sliding one full tile
      (background-size 200% -> position 200%) loops seamlessly */
   background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
@@ -2778,7 +2802,10 @@ async function showTierPop(el,name){
       ? list.map(m=>'<div class="mline">'+esc(m)+'</div>').join("")+
         (list.length>1?'<span class="note">answers blended by Gemma</span>'
                       :'<span class="note">single model — fastest</span>')
-      : '<div class="mline">nothing downloaded yet</div>');
+      : '<div class="mline">nothing downloaded yet</div>')+
+    ((info.skipped||[]).length
+      ? '<span class="note">skipped, needs more memory: '+
+        esc(info.skipped.join(", "))+'</span>' : "");
   const r=el.getBoundingClientRect();
   tierPop.hidden=false;
   tierPop.style.left=Math.round(r.right+10)+"px";
