@@ -1,46 +1,78 @@
 #!/bin/zsh
-# Publish a new MillenAI build to GitHub so existing installs can self-update.
+# Publish a new MillenAI release to GitHub so existing installs self-update.
 #
-#   ./release.sh 5 "V1 Beta 5"
+#   ./release.sh patch     bug fix        1.0.1 -> 1.0.2
+#   ./release.sh minor     new feature    1.0.1 -> 1.1.0
+#   ./release.sh major     rewrite        1.0.1 -> 2.0.0
+#   ./release.sh 1.4.2     explicit version
 #
-# Bumps APP_BUILD/APP_VERSION in millenai.py, rebuilds the app + DMG, then
-# creates a GitHub Release tagged v<build> with the .dmg attached. Running
-# copies of MillenAI compare that tag against their own APP_BUILD and offer
-# the update. Needs the GitHub CLI:  brew install gh && gh auth login
+# The build number is a separate monotonic counter that always increments —
+# it is what the in-app updater compares, so the marketing version can move
+# however you like without breaking updates.
+#
+# Needs the GitHub CLI:  brew install gh && gh auth login
 set -e
 cd "$(dirname "$0")"
 
-BUILD="$1"; LABEL="$2"
-if [[ -z "$BUILD" || -z "$LABEL" ]]; then
-  echo "usage: ./release.sh <build-number> \"<version label>\""
-  echo "   eg: ./release.sh 5 \"V1 Beta 5\""
+ARG="$1"
+if [[ -z "$ARG" ]]; then
+  echo "usage: ./release.sh <patch|minor|major|X.Y.Z>"
   exit 1
 fi
 if ! command -v gh >/dev/null; then
   echo "gh not found — install with: brew install gh && gh auth login"; exit 1
 fi
 
-echo "→ bumping to build $BUILD ($LABEL)"
-python3 - "$BUILD" "$LABEL" <<'PY'
+# --- work out the next version + build from millenai.py
+read -r VERSION BUILD <<<"$(python3 - "$ARG" <<'PY'
+import re, sys, pathlib
+arg = sys.argv[1]
+src = pathlib.Path("millenai.py").read_text()
+cur = re.search(r'APP_VERSION = "([^"]+)"', src).group(1)
+build = int(re.search(r"APP_BUILD = (\d+)", src).group(1)) + 1
+
+if arg in ("patch", "minor", "major"):
+    parts = [int(x) for x in re.findall(r"\d+", cur)]
+    while len(parts) < 3:
+        parts.append(0)
+    major, minor, patch = parts[:3]
+    if arg == "patch":
+        patch += 1
+    elif arg == "minor":
+        minor, patch = minor + 1, 0
+    else:
+        major, minor, patch = major + 1, 0, 0
+    version = f"{major}.{minor}.{patch}"
+else:
+    if not re.fullmatch(r"\d+\.\d+\.\d+", arg):
+        sys.exit("version must look like 1.2.3")
+    version = arg
+print(version, build)
+PY
+)"
+[[ -n "$VERSION" ]] || { echo "could not work out the version"; exit 1; }
+
+echo "→ $VERSION (build $BUILD)"
+python3 - "$VERSION" "$BUILD" <<'PY'
 import pathlib, re, sys
-build, label = sys.argv[1], sys.argv[2]
+version, build = sys.argv[1], sys.argv[2]
 p = pathlib.Path("millenai.py"); s = p.read_text()
-s = re.sub(r'APP_VERSION = "[^"]*"', 'APP_VERSION = "%s"' % label, s, count=1)
-s = re.sub(r'APP_BUILD = \d+', 'APP_BUILD = %s' % build, s, count=1)
+s = re.sub(r'APP_VERSION = "[^"]*"', 'APP_VERSION = "%s"' % version, s, count=1)
+s = re.sub(r"APP_BUILD = \d+", "APP_BUILD = %s" % build, s, count=1)
 p.write_text(s)
 PY
 
 echo "→ building"
 ./build_dmg.sh >/dev/null
-DMG="MillenAI ${LABEL}.dmg"   # build_dmg.sh derives this from millenai.py
+DMG="MillenAI ${VERSION}.dmg"   # build_dmg.sh derives this from millenai.py
 [[ -f "$DMG" ]] || { echo "expected $DMG but it wasn't built"; exit 1; }
 
 echo "→ publishing v$BUILD"
-git add -A && git commit -m "Release $LABEL (build $BUILD)" || true
+git add -A && git commit -m "Release $VERSION (build $BUILD)" || true
 git push origin HEAD
 gh release create "v$BUILD" "$DMG" \
-  --title "$LABEL" \
-  --notes "MillenAI $LABEL. Open the app and it will offer this update automatically."
+  --title "$VERSION" \
+  --notes "MillenAI $VERSION. Open the app and it will offer this update automatically."
 
 echo ""
-echo "✓ published v$BUILD — existing installs will offer it within the hour."
+echo "✓ published $VERSION — existing installs will offer it within the hour."

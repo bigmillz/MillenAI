@@ -39,12 +39,19 @@ clobber it:
 ## Releasing
 
 ```bash
-./release.sh 15 "1.1"
+./release.sh patch     # bug fix        1.0.1 -> 1.0.2
+./release.sh minor     # new feature    1.0.1 -> 1.1.0
+./release.sh major     # rewrite        1.0.1 -> 2.0.0
+./release.sh 1.4.2     # explicit
 ```
 
-Bumps `APP_BUILD`/`APP_VERSION`, rebuilds, pushes, and creates Release `v15`
-with the DMG attached. Installed copies compare against it daily and offer
-the update in-place.
+Semantic versioning: **patch** for fixes, **minor** for features, **major**
+only for a deliberate rewrite.
+
+`APP_BUILD` is a separate monotonic counter that always increments and is
+what the updater actually compares — so the marketing version can move
+however you like (even backwards) without breaking updates. The release tag
+is `v<build>`; the release *title* is the version.
 
 **`APP_VERSION` and `APP_BUILD` in `millenai.py` are the single source of
 truth.** Both build scripts read them at build time — the Info.plist, DMG
