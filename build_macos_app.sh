@@ -1,5 +1,6 @@
 #!/bin/zsh
-# Builds MillenAI.app (Beta 4) — a double-clickable native macOS bundle.
+# Builds MillenAI.app — a double-clickable native macOS bundle.
+# Version comes from APP_VERSION/APP_BUILD in millenai.py.
 # Creates a private venv so it never fights Homebrew's managed Python (PEP 668).
 # Run from the folder containing millenai.py and MillenAI.icns:
 #   chmod +x build_macos_app.sh && ./build_macos_app.sh
@@ -26,6 +27,11 @@ echo "app will run on: $PY"
 # Bundle stays version-less on purpose: dropping a new build into
 # /Applications then replaces the old one instead of piling up copies.
 # The version lives in the UI and on the disk image, not in the filename.
+# single source of truth for the version lives in millenai.py
+APP_VERSION="$(python3 -c "import re;print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('millenai.py').read()).group(1))")"
+APP_BUILD="$(python3 -c "import re;print(re.search(r'APP_BUILD = (\d+)', open('millenai.py').read()).group(1))")"
+echo "version: $APP_VERSION (build $APP_BUILD)"
+
 APP="MillenAI.app"
 rm -rf "$APP" "MillenAI Beta 2.app"   # drop any old versioned bundle too
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
@@ -43,8 +49,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key>            <string>MillenAI</string>
   <key>CFBundleDisplayName</key>     <string>MillenAI</string>
   <key>CFBundleIdentifier</key>      <string>com.millen.millenai</string>
-  <key>CFBundleVersion</key>         <string>4.0</string>
-  <key>CFBundleShortVersionString</key> <string>4.0 (Beta 4)</string>
+  <key>CFBundleVersion</key>         <string>${APP_BUILD}.0</string>
+  <key>CFBundleShortVersionString</key> <string>${APP_BUILD}.0 (${APP_VERSION})</string>
   <key>CFBundleExecutable</key>      <string>MillenAI</string>
   <key>CFBundleIconFile</key>        <string>MillenAI</string>
   <key>CFBundlePackageType</key>     <string>APPL</string>

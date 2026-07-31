@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-MillenAI Beta 4 — single-file local LLM cockpit.
+MillenAI — single-file local LLM cockpit.
 
 Run:  python3 millenai.py
 Optional extras:

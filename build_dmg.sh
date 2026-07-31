@@ -1,10 +1,13 @@
 #!/bin/zsh
-# Packages MillenAI into a styled, shareable disk image: MillenAI V1 Beta 5.dmg
+# Packages MillenAI into a styled, shareable disk image: $VOL.dmg
 # Finder shows a custom starfield background with a drag-to-install arrow.
 set -e
 cd "$(dirname "$0")"
 
 ./build_macos_app.sh
+
+VER="$(python3 -c "import re;print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('millenai.py').read()).group(1))")"
+VOL="MillenAI $VER"
 
 VENV="$HOME/Library/Application Support/MillenAI/venv"
 "$VENV/bin/pip" install --quiet pillow
@@ -15,7 +18,7 @@ cp -R MillenAI.app "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
 # --- background art (1320x800 @144dpi -> 660x400 pts, retina-sharp)
-"$VENV/bin/python3" - "$STAGE/.background/bg.png" <<'PYEOF'
+"$VENV/bin/python3" - "$STAGE/.background/bg.png" "$VER" <<'PYEOF'
 import random
 import sys
 
@@ -73,8 +76,8 @@ def centered(y, text, f, fill):
     w = od.textlength(text, font=f)
     od.text(((W - w) / 2, y), text, font=f, fill=fill)
 
-# wordmark: MillenAI + periwinkle "V1 Beta 4"
-name, tag = "MillenAI ", "V1 Beta 4"
+# wordmark: MillenAI + the version, in periwinkle
+name, tag = "MillenAI ", sys.argv[2]
 nw = od.textlength(name, font=big)
 tw = od.textlength(tag, font=big)
 x0 = (W - nw - tw) / 2
@@ -113,14 +116,14 @@ print("background written")
 PYEOF
 
 # --- writable image first, style it via Finder, then compress
-rm -f "MillenAI V1 Beta 5.dmg" MillenAI.dmg MillenAI-rw.dmg
-hdiutil create -volname "MillenAI V1 Beta 5" -srcfolder "$STAGE" -ov -format UDRW \
+rm -f "$VOL.dmg" MillenAI.dmg MillenAI-rw.dmg
+hdiutil create -volname "$VOL" -srcfolder "$STAGE" -ov -format UDRW \
   -quiet MillenAI-rw.dmg
 hdiutil attach -readwrite -noverify -noautoopen -quiet MillenAI-rw.dmg
 
-osascript <<'OSA'
+osascript <<OSA
 tell application "Finder"
-  tell disk "MillenAI V1 Beta 5"
+  tell disk "$VOL"
     open
     set current view of container window to icon view
     set toolbar visible of container window to false
@@ -151,17 +154,17 @@ OSA
 # volume icon LAST — the Finder styling session above deletes
 # .VolumeIcon.icns and clears the custom-icon flag if they exist earlier
 if [[ -f MillenAI.icns ]]; then
-  cp MillenAI.icns "/Volumes/MillenAI V1 Beta 5/.VolumeIcon.icns"
-  SetFile -a C "/Volumes/MillenAI V1 Beta 5" 2>/dev/null \
-    || xcrun SetFile -a C "/Volumes/MillenAI V1 Beta 5" 2>/dev/null \
+  cp MillenAI.icns "/Volumes/$VOL/.VolumeIcon.icns"
+  SetFile -a C "/Volumes/$VOL" 2>/dev/null \
+    || xcrun SetFile -a C "/Volumes/$VOL" 2>/dev/null \
     || echo "  (SetFile unavailable — volume icon flag skipped)"
 fi
 
 sync
-hdiutil detach -quiet "/Volumes/MillenAI V1 Beta 5"
-hdiutil convert -quiet MillenAI-rw.dmg -format UDZO -o "MillenAI V1 Beta 5.dmg"
+hdiutil detach -quiet "/Volumes/$VOL"
+hdiutil convert -quiet MillenAI-rw.dmg -format UDZO -o "$VOL.dmg"
 rm -f MillenAI-rw.dmg
 rm -rf "$(dirname "$STAGE")"
 
 echo ""
-echo "✓ built MillenAI V1 Beta 5.dmg ($(du -h "MillenAI V1 Beta 5.dmg" | cut -f1 | tr -d ' '))"
+echo "✓ built $VOL.dmg ($(du -h "$VOL.dmg" | cut -f1 | tr -d ' '))"

@@ -30,18 +30,9 @@ s = re.sub(r'APP_BUILD = \d+', 'APP_BUILD = %s' % build, s, count=1)
 p.write_text(s)
 PY
 
-# the DMG name follows the version label
-python3 - "$LABEL" <<'PY'
-import pathlib, re, sys
-label = sys.argv[1]
-p = pathlib.Path("build_dmg.sh"); s = p.read_text()
-s = re.sub(r'MillenAI V1 Beta \d+', "MillenAI %s" % label, s)
-p.write_text(s)
-PY
-
 echo "→ building"
 ./build_dmg.sh >/dev/null
-DMG="MillenAI ${LABEL}.dmg"
+DMG="MillenAI ${LABEL}.dmg"   # build_dmg.sh derives this from millenai.py
 [[ -f "$DMG" ]] || { echo "expected $DMG but it wasn't built"; exit 1; }
 
 echo "→ publishing v$BUILD"
