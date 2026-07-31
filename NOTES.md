@@ -199,13 +199,17 @@ A platform layer now covers both OSes from one `millenai.py`. `IS_MAC` /
 | GPU telemetry | `ioreg` Device Utilization % | `nvidia-smi --query-gpu=utilization.gpu` |
 | Chip label | `sysctl` brand string | GPU name, e.g. `RTX 4090` |
 | Data dir | `~/Library/Application Support/MillenAI` | `%LOCALAPPDATA%\MillenAI` |
-| Ollama engine | `ollama-darwin.tgz` (146 MB) | `ollama-windows-amd64.zip` (1.5 GB, bundles CUDA) |
+| Ollama engine | `ollama-darwin.tgz` (146 MB) | amd64 zip (1.5 GB, bundles CUDA) or arm64 zip (209 MB, CPU-only) |
 | Package | DMG + `.app` | `MillenAI-<ver>-Windows.zip` + `.bat` launcher |
 | In-place update | yes (swaps the bundle) | not yet — points at the release page |
 
 Build with `powershell -ExecutionPolicy Bypass -File build_windows.ps1`.
 Like the Mac build the zip is tiny: the launcher creates a venv on first run
 and the app fetches Ollama and models itself.
+
+**Windows-on-ARM has no CUDA** — no NVIDIA support exists for it, so those
+machines run CPU-only and `faster-whisper` likely has no ARM64 wheel
+(voice input degrades to unavailable rather than crashing).
 
 **CUDA needs no code.** Ollama detects an NVIDIA GPU and offloads on its own;
 the Windows zip ships the CUDA runtime. A 4090 will comfortably outrun an

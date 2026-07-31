@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.1"   # bump here — UI, window, DMG all follow
-APP_BUILD = 15               # integer compared against the GitHub release tag
+APP_VERSION = "1.2"   # bump here — UI, window, DMG all follow
+APP_BUILD = 16               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -417,8 +417,12 @@ def _has_mlx() -> bool:
 OLLAMA_TGZ_URL = "https://ollama.com/download/ollama-darwin.tgz"
 # Windows portable build — bundles the CUDA runtime, so an NVIDIA GPU is
 # used automatically with no extra setup
-OLLAMA_ZIP_URL = ("https://github.com/ollama/ollama/releases/latest/"
-                  "download/ollama-windows-amd64.zip")
+# Windows ships two builds: amd64 bundles the CUDA runtime, arm64 is
+# CPU-only (Windows-on-ARM has no NVIDIA support).
+IS_WIN_ARM = IS_WIN and platform.machine().lower() in ("arm64", "aarch64")
+OLLAMA_ZIP_URL = ("https://github.com/ollama/ollama/releases/latest/download/"
+                  + ("ollama-windows-arm64.zip" if IS_WIN_ARM
+                     else "ollama-windows-amd64.zip"))
 _MANAGED_BIN_DIR = os.path.join(app_dir(), "bin")
 _MANAGED_BIN_DIR_FOUND = []   # nested location inside the win zip
 
@@ -2608,6 +2612,7 @@ __MODEL_ROWS__
     <div id="about-ver">Version __APP_VER__</div>
     <div id="about-sub">Everything runs on this Mac. No cloud, no accounts.</div>
     <div id="about-facts"></div>
+    <button class="about-btn" id="about-check">Check for updates</button>
     <button class="about-btn" id="about-logs">Open logs folder</button>
     <button class="about-btn" id="about-forget">Forget what you know about me</button>
     <button class="about-btn primary" id="about-close">Close</button>
@@ -3416,6 +3421,24 @@ $("#brand").addEventListener("click",openAbout);
 $("#about-close").addEventListener("click",()=>{aboutVeil.hidden=true;});
 aboutVeil.addEventListener("click",e=>{if(e.target===aboutVeil)aboutVeil.hidden=true;});
 $("#about-logs").addEventListener("click",()=>fetch("/api/open-logs",{method:"POST"}));
+$("#about-check").addEventListener("click",async ev=>{
+  const b=ev.currentTarget,was=b.textContent;
+  b.disabled=true;b.textContent="Checking\u2026";
+  try{
+    const r=await(await fetch("/api/update/check")).json();
+    if(!r.configured){b.textContent="Updates not configured";}
+    else if(r.available){
+      upInfo=r;$("#update-flag").hidden=false;
+      b.textContent="Update to "+r.latest;
+      b.disabled=false;
+      b.onclick=()=>{aboutVeil.hidden=true;openUpdate();};
+      return;
+    }
+    else b.textContent=r.note?("No update \u2014 "+r.note)
+                             :"You\u2019re up to date";
+  }catch(e){b.textContent="Couldn\u2019t reach GitHub";}
+  setTimeout(()=>{b.textContent=was;b.disabled=false;},2600);
+});
 $("#about-forget").addEventListener("click",async ev=>{
   const b=ev.currentTarget;
   if(b.dataset.sure!=="1"){
