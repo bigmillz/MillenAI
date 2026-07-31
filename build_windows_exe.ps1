@@ -28,11 +28,33 @@ Set-Location $PSScriptRoot
 # for the Microsoft Store. It is on PATH even when Python is not installed, so
 # resolve a real interpreter rather than trusting the name.
 function Find-Python {
-  foreach ($name in @("python", "python3", "py")) {
+  # 1. whatever is on PATH already, ignoring the Store stub
+  foreach ($name in @("python", "python3")) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
-    if (-not $cmd -or -not $cmd.Source) { continue }
-    if ($cmd.Source -like "*\WindowsApps\*") { continue }   # the Store stub
-    return $cmd.Source
+    if ($cmd -and $cmd.Source -and $cmd.Source -notlike "*\WindowsApps\*") {
+      return $cmd.Source
+    }
+  }
+  # 2. ask the py launcher, which installs to C:\Windows and is always on PATH
+  $launcher = Get-Command py -ErrorAction SilentlyContinue
+  if ($launcher -and $launcher.Source -notlike "*\WindowsApps\*") {
+    $exe = & $launcher.Source -3 -c "import sys;print(sys.executable)" 2>$null
+    if ($exe -and (Test-Path $exe)) { return $exe }
+  }
+  # 3. look where the installer actually puts it. A shell captures PATH when
+  #    it starts, so a PowerShell window opened BEFORE Python was installed
+  #    will never see it however many times you re-run this.
+  $globs = @(
+    "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe",
+    "$env:ProgramFiles\Python3*\python.exe",
+    "${env:ProgramFiles(x86)}\Python3*\python.exe",
+    "C:\Python3*\python.exe"
+  )
+  $hit = Get-ChildItem -Path $globs -ErrorAction SilentlyContinue |
+         Sort-Object FullName -Descending | Select-Object -First 1
+  if ($hit) {
+    Write-Host "  (found off-PATH: this shell predates the install)" -ForegroundColor DarkGray
+    return $hit.FullName
   }
   return $null
 }
@@ -48,6 +70,10 @@ if (-not $py) {
   Write-Host "  only runs on ARM machines, and those have no CUDA."
   Write-Host ""
   Write-Host "  Tick 'Add python.exe to PATH' in the installer."
+  Write-Host ""
+  Write-Host "  ALREADY INSTALLED IT? Close this window and open a new one."
+  Write-Host "  A shell captures PATH when it starts, so one opened before the"
+  Write-Host "  installer ran will never see Python no matter how often you retry."
   Write-Host ""
   Write-Host "  If it still is not found afterwards, turn off the Store stubs:"
   Write-Host "  Settings > Apps > Advanced app settings > App execution aliases"
