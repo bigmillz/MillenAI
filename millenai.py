@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.1.3"   # bump here — UI, window, DMG all follow
-APP_BUILD = 29               # integer compared against the GitHub release tag
+APP_VERSION = "1.2.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 30               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -212,6 +212,16 @@ TIERS = {
         "count": 99,
         # no quality filtering — if it can run, it takes part
         "all": True,
+    },
+    "Research": {
+        "icon": "\U0001f50e", "desc": "searches the web, writes a cited brief",
+        # one capable model does the whole run: it plans the searches and
+        # writes the brief, so there is only ever one engine load
+        "picks": ["Gemma 4 12B", "Mistral Nemo 12B", "Qwen 2.5 7B",
+                  "Llama 3.1 8B", "Gemma 2 9B IT", "Gemma 4 26B",
+                  "Llama 3.2 3B"],
+        "count": 1,
+        "research": True,
     },
 }
 
@@ -1395,6 +1405,38 @@ def gpu_utilization():
     return pct
 
 
+_results_cache = {}        # query -> (fetched_at, [result dicts])
+_RESULTS_TTL = 300.0
+
+
+def search_results(query: str, limit: int = 5) -> list:
+    """Structured DuckDuckGo hits — title, snippet and URL. Never raises.
+
+    Deliberately separate from run_search's single-slot cache: a research
+    run fires several queries back to back, and a one-entry cache would
+    evict each one before the next could reuse it.
+    """
+    if not HAS_SEARCH:
+        return []
+    now = time.time()
+    with _search_lock:
+        hit = _results_cache.get(query)
+        if hit and now - hit[0] < _RESULTS_TTL:
+            return hit[1]
+    try:
+        out = [{"title": (r.get("title") or "").strip(),
+                "body": (r.get("body") or "").strip(),
+                "url": (r.get("href") or "").strip()}
+               for r in DDGS().text(query, max_results=limit)]
+    except Exception:
+        out = []                      # offline or rate-limited — not fatal
+    with _search_lock:
+        if len(_results_cache) > 40:
+            _results_cache.clear()
+        _results_cache[query] = (now, out)
+    return out
+
+
 def run_search(query: str) -> str:
     """DuckDuckGo snippets with a 60s cache. Never raises."""
     if not HAS_SEARCH:
@@ -1660,7 +1702,36 @@ def _looks_degenerate(text: str) -> bool:
 
 
 class _Degenerate(RuntimeError):
-    """Raised to abandon a merge that has collapsed mid-stream."""
+    """Raised to abandon an answer that has collapsed mid-stream."""
+
+
+def _stream_guarded(label: str, msgs: list, emit, status,
+                    fallback: str, note: str) -> bool:
+    """Stream one model, discarding everything if the output collapses.
+
+    The drafts in a blend are each checked before use, but the final text —
+    the merge, or a research brief — used to reach the reader unchecked. It
+    is watched as it arrives now, and on collapse the UI is told to throw
+    away what it has shown and the known-good `fallback` replaces it.
+    """
+    seen = []
+
+    def guarded(chunk):
+        seen.append(chunk)
+        if len(seen) % 40 == 0 and _looks_degenerate("".join(seen)):
+            raise _Degenerate
+        emit(chunk)
+
+    try:
+        run_model(label, msgs, guarded)
+        if _looks_degenerate("".join(seen)):
+            raise _Degenerate
+        return True
+    except _Degenerate:
+        emit(f"{NUL}RESET{NUL}")      # tells the UI to discard the garbage
+        status(f"{label} lost the thread — {note}")
+        emit(fallback)
+        return False
 
 
 def run_council(labels: list, messages: list, emit, status) -> None:
@@ -1745,22 +1816,103 @@ def run_council(labels: list, messages: list, emit, status) -> None:
     # that melted down streamed its collapse straight to the reader with
     # nothing in the way. Watch it as it arrives, and if it goes, throw away
     # what was shown and fall back to the best draft we already trust.
-    merged = []
+    _stream_guarded(merger, synth, emit, status, good[0][1],
+                    "showing the best single answer")
 
-    def guarded(chunk):
-        merged.append(chunk)
-        if len(merged) % 40 == 0 and _looks_degenerate("".join(merged)):
-            raise _Degenerate
-        emit(chunk)
 
+RESEARCH_PLAN = (
+    "Break this question into 2 short web search queries that cover "
+    "different angles of it.\n"
+    "Copy any product name, version number, place or date EXACTLY as "
+    "written. Never replace a term with one you consider more familiar — if "
+    "something looks unfamiliar to you it is probably newer than you are, "
+    "and the search will find it.\n"
+    "Reply with ONLY the queries, one per line — no numbering, no quotes, "
+    "no commentary.\n\nQUESTION: ")
+
+RESEARCH_WRITE = (
+    "Write a short research brief answering the question, using ONLY the "
+    "numbered sources below. Cite them inline as [1], [2] and so on, matching "
+    "the numbers exactly as given. Lead with the answer, then the supporting "
+    "detail. If the sources disagree or don't cover something, say so plainly "
+    "rather than filling the gap. Never invent a fact or a source.")
+
+
+def _plan_queries(label: str, question: str, status) -> list:
+    """Ask the model what to search for. Falls back to the raw question."""
+    status("planning the research")
+    parts = []
     try:
-        run_model(merger, synth, guarded)
-        if _looks_degenerate("".join(merged)):
-            raise _Degenerate
-    except _Degenerate:
-        emit(f"{NUL}RESET{NUL}")      # tells the UI to discard the garbage
-        status(f"{merger} lost the thread — showing the best single answer")
-        emit(good[0][1])
+        run_model(label, [{"role": "user",
+                           "content": RESEARCH_PLAN + question}],
+                  parts.append)
+    except Exception:
+        return [question]
+    out = strip_think(strip_special("".join(parts)))
+    lines = [re.sub(r'^[\s\d\.\)\-\*"]+', "", ln).strip(' "\'*')
+             for ln in out.splitlines()]
+    return [ln for ln in lines if 6 < len(ln) < 120][:2]
+
+
+def run_research(labels: list, messages: list, emit, status) -> None:
+    """Plan several searches, run them, then write a brief that cites them.
+
+    One model does the whole run — planning and writing — so there is only
+    ever a single engine load, which on MLX is the expensive part.
+    """
+    if not HAS_SEARCH:
+        raise RuntimeError(
+            "Research needs web search — install it with: pip install ddgs")
+    question = messages[-1]["content"] if messages else ""
+    usable = [l for l in labels
+              if model_cached(l) and model_fits_memory(l)]
+    if not usable:
+        raise RuntimeError("no model is available to research with")
+    rank = {l: i for i, l in enumerate(MERGE_RANK)}
+    writer = min(usable, key=lambda l: rank.get(l, 99))
+
+    # The user's own words always go first. A local model's knowledge stops
+    # years before the question often does — asked about "macOS 26 Tahoe" it
+    # planned searches for "macOS Monterey", a version it recognised, and
+    # researched the wrong OS end to end. Searching verbatim first means the
+    # planner can only ever add angles, never quietly replace the subject.
+    queries = [question[:120]]
+    for q in _plan_queries(writer, question, status):
+        if q.lower() not in (x.lower() for x in queries):
+            queries.append(q)
+
+    sources, seen = [], set()
+    for i, q in enumerate(queries, 1):
+        status(f"searching {i} of {len(queries)} — {q}")
+        for r in search_results(q):
+            # the same page often surfaces for several queries
+            if r["url"] and r["body"] and r["url"] not in seen:
+                seen.add(r["url"])
+                sources.append(r)
+    if not sources:
+        raise RuntimeError(
+            "the searches came back empty — check the network connection")
+    sources = sources[:12]
+
+    block = "\n\n".join(
+        f"[{n}] {s['title']}\n{s['body'][:600]}"
+        for n, s in enumerate(sources, 1))
+    brief = [messages[0],
+             {"role": "user",
+              "content": f"{RESEARCH_WRITE}\n\nQUESTION: {question}\n\n"
+                         f"SOURCES:\n{block}"}]
+
+    status(f"{writer} is writing from {len(sources)} sources")
+    # if the brief collapses, the raw snippets are still worth more than
+    # nothing — they are what the answer would have been drawn from
+    plain = "\n".join(f"- **{s['title'][:90]}** — {s['body'][:220]}"
+                      for s in sources[:5])
+    _stream_guarded(writer, brief, emit, status, plain,
+                    "showing the raw findings instead")
+
+    emit("\n\n**Sources**\n" + "\n".join(
+        f"{n}. [{(s['title'] or s['url'])[:90]}]({s['url']})"
+        for n, s in enumerate(sources, 1)))
 
 
 def offline_hint(kind: str, err: Exception) -> str:
@@ -2095,7 +2247,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         query, forced = None, prompt.lower().startswith("/search")
         if forced:
             query = prompt[7:].strip()
-        elif auto_web and needs_search(prompt):
+        elif (auto_web and needs_search(prompt)
+              and not TIERS.get(tier, {}).get("research")):
             query = prompt.strip()
 
         if query:
@@ -2161,7 +2314,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
         kind, target = route
         try:
-            if len(council) > 1:
+            if TIERS.get(tier, {}).get("research"):
+                run_research(council, full_messages, emit, status)
+            elif len(council) > 1:
                 run_council(council, full_messages, emit, status)
             else:
                 run_model(route_label or model_name, full_messages, emit)
@@ -2418,8 +2573,17 @@ body.perf #chat-scroll{scroll-behavior:auto}
 /* one typeface across the whole landing screen */
 #hero,#hero h1,#hero p{font-family:var(--helv)}
 /* the whole wordmark rides the rainbow, not just the version tag */
+/* The wordmark sits unpainted in light grey. A second copy of the same text
+   rides on top carrying the rainbow, revealed through a diagonal mask that
+   travels with the sweep — so the band appears to paint the letters as it
+   crosses them, and the colour stays behind it. */
 #hero h1{
   font-size:92px;font-weight:700;letter-spacing:-.015em;
+  position:relative;color:#9a9a9a;-webkit-text-fill-color:#9a9a9a;
+}
+#hero h1::after{
+  content:attr(data-word);
+  position:absolute;left:0;top:0;white-space:nowrap;pointer-events:none;
   /* tile starts and ends on the same color; sliding one full tile
      (background-size 200% -> position 200%) loops seamlessly */
   background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
@@ -2428,10 +2592,28 @@ body.perf #chat-scroll{scroll-behavior:auto}
   -webkit-background-clip:text;background-clip:text;
   color:transparent;-webkit-text-fill-color:transparent;
   animation:rainbow 16s linear infinite,hueshift 45s linear infinite;
+  /* the mask is far wider than the text and slides across it: the opaque
+     half trails the band, the transparent half runs ahead of it */
+  -webkit-mask-image:linear-gradient(114deg,#000 0 42%,transparent 58% 100%);
+          mask-image:linear-gradient(114deg,#000 0 42%,transparent 58% 100%);
+  -webkit-mask-size:300% 100%;mask-size:300% 100%;
+  -webkit-mask-position:100% 0;mask-position:100% 0;
+}
+/* once painted it stays painted */
+body.painted #hero h1::after{
+  -webkit-mask-position:0 0;mask-position:0 0;
+}
+body.painting #hero h1::after{
+  transition:-webkit-mask-position .5s linear,mask-position .5s linear;
+  transition-delay:1.28s;
 }
 @keyframes hueshift{to{filter:hue-rotate(360deg)}}
 @keyframes rainbow{from{background-position:0% 50%}to{background-position:200% 50%}}
 body.perf #hero h1{animation:none}
+/* performance mode skips the theatre — show it painted immediately */
+body.perf #hero h1::after{
+  animation:none;-webkit-mask-position:0 0;mask-position:0 0;
+}
 #hero p{color:var(--dim);font-size:15px}
 /* the wordmark centres on its own; LIVE is pulled out of the flow so it
    sits further right without dragging the title off-centre */
@@ -2629,36 +2811,36 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #celebrate{position:fixed;inset:0;z-index:90;pointer-events:none;overflow:hidden}
 #celebrate[hidden]{display:none}
 /* a diagonal band of light that travels across the window */
+/* What made this read as a ribbon dragged over the window: evenly spaced
+   colour stops at uniform opacity, a light blur, and hard rectangular ends
+   that ran off the screen. So the stops are now unevenly spaced and each
+   carries its own alpha, the blur is heavy enough to dissolve the banding,
+   and an elliptical mask fades the whole thing out at its edges — closer to
+   light spilling across the window than a strip passing over it. */
 #celebrate .sweep{
   position:absolute;top:50%;left:50%;
-  width:88vw;height:280vh;margin:-140vh 0 0 -44vw;
-  background:linear-gradient(90deg,transparent,#ff8f8f,#ffc46e,#f5e663,
-             #7ef0a6,#6ec7ff,#8f9dff,#c98fff,transparent);
-  filter:blur(16px);opacity:.8;mix-blend-mode:screen;
-  animation:sweepDiag 1.6s cubic-bezier(.35,0,.25,1) forwards;
+  width:112vw;height:220vh;margin:-110vh 0 0 -56vw;
+  background:linear-gradient(90deg,
+    rgba(255,143,143,0)    0%,
+    rgba(255,143,143,.62) 13%,
+    rgba(255,196,110,.95) 26%,
+    rgba(245,230,99,.72)  36%,
+    rgba(126,240,166,1)   49%,
+    rgba(110,199,255,.80) 63%,
+    rgba(143,157,255,.96) 77%,
+    rgba(201,143,255,.52) 89%,
+    rgba(201,143,255,0)  100%);
+  /* enough blur to dissolve the banding, not so much the hues grey out */
+  filter:blur(44px);opacity:1;mix-blend-mode:screen;
+  -webkit-mask-image:radial-gradient(ellipse 70% 54% at 50% 50%,
+    #000 0%,rgba(0,0,0,.88) 52%,transparent 88%);
+          mask-image:radial-gradient(ellipse 70% 54% at 50% 50%,
+    #000 0%,rgba(0,0,0,.88) 52%,transparent 88%);
+  animation:sweepDiag 2.8s linear forwards;
 }
 @keyframes sweepDiag{
-  from{transform:rotate(24deg) translate(-135vw,-32vh)}
-  to  {transform:rotate(24deg) translate(135vw,32vh)}
-}
-/* soft blurred glow that collapses into the wordmark — no hard edges, so
-   nothing ever reads as a box sitting on top of the text */
-#celebrate .converge{
-  position:absolute;border-radius:50%;
-  background:linear-gradient(115deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff);
-  opacity:.6;mix-blend-mode:screen;filter:blur(30px);
-  transition:left 1s cubic-bezier(.45,0,.2,1),
-             top 1s cubic-bezier(.45,0,.2,1),
-             width 1s cubic-bezier(.45,0,.2,1),
-             height 1s cubic-bezier(.45,0,.2,1),
-             opacity 1s ease-in;
-}
-#hero h1.absorb{animation:absorb .9s ease-out}
-@keyframes absorb{
-  0%{filter:brightness(1)}
-  45%{filter:brightness(2.1) drop-shadow(0 0 22px rgba(255,255,255,.5))}
-  100%{filter:brightness(1)}
+  from{transform:rotate(24deg) translate(-120vw,-30vh)}
+  to  {transform:rotate(24deg) translate(120vw,30vh)}
 }
 /* The wordmark is *deposited* by the sweep: it rushes in oversized and
    blurred and lands just as the band crosses the middle of the window.
@@ -2673,9 +2855,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
    it read as a separate event rather than as something the sweep delivered.
    These stops put it at ~1.7x when the band is entering and landing at
    ~0.8s, exactly when the band crosses the middle. */
-#hero h1.flyin{
-  animation:rainbow 16s linear infinite,heroIn 1.05s linear both;
-}
+#hero h1.flyin{animation:heroIn 1.05s linear both}
 @keyframes heroIn{
   0%  {opacity:0;transform:scale(2.3) translateY(12px);filter:blur(22px)}
   22% {opacity:1}
@@ -2695,12 +2875,18 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 /* a narrow bright core riding just behind the wide band — gives the sweep a
    leading edge instead of one soft smear */
+/* the bright core, kept only as a diffuse hot spot — as a thin hard line it
+   was the single most ribbon-like thing on the screen */
 #celebrate .spark{
   position:absolute;top:50%;left:50%;
-  width:11vw;height:280vh;margin:-140vh 0 0 -5.5vw;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.9),transparent);
-  filter:blur(5px);opacity:.85;mix-blend-mode:screen;
-  animation:sweepDiag 1.6s cubic-bezier(.35,0,.25,1) .07s forwards;
+  width:26vw;height:220vh;margin:-110vh 0 0 -13vw;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.62),transparent);
+  filter:blur(38px);opacity:.55;mix-blend-mode:screen;
+  -webkit-mask-image:radial-gradient(ellipse 62% 44% at 50% 50%,
+    #000 0%,transparent 80%);
+          mask-image:radial-gradient(ellipse 62% 44% at 50% 50%,
+    #000 0%,transparent 80%);
+  animation:sweepDiag 2.8s linear .09s forwards;
 }
 /* the impact — a soft bloom centred on the wordmark as the band reaches it */
 #celebrate .bloom{
@@ -2708,7 +2894,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   background:radial-gradient(circle,rgba(255,255,255,.85),
              rgba(255,255,255,.16) 45%,transparent 70%);
   mix-blend-mode:screen;opacity:0;
-  animation:bloomPop .85s ease-out .62s forwards;
+  animation:bloomPop 1.1s ease-out 1.35s forwards;
 }
 @keyframes bloomPop{
   0%  {opacity:0;transform:translate(-50%,-50%) scale(.35)}
@@ -2851,7 +3037,7 @@ __MODEL_ROWS__
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
-      <div class="h1row"><h1>MillenAI</h1><span class="live-big">LIVE</span></div>
+      <div class="h1row"><h1 data-word="MillenAI">MillenAI</h1><span class="live-big">LIVE</span></div>
       <div class="beta-tag">__APP_BETA__</div>
       <p class="greet">What's going on today?</p>
     </div>
@@ -3089,6 +3275,10 @@ function renderMD(raw){
   s=s.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
   s=s.replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g,"$1<em>$2</em>");
   s=s.replace(/^### (.*)$/gm,"<h3>$1</h3>").replace(/^## (.*)$/gm,"<h2>$1</h2>").replace(/^# (.*)$/gm,"<h1>$1</h1>");
+  // markdown links — research briefs cite their sources this way. Only
+  // http(s) is allowed through, so a model cannot emit javascript: or data:
+  s=s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_,t,u)=>'<a href="'+u+'" target="_blank" rel="noopener noreferrer">'+t+"</a>");
   // lists
   s=s.replace(/(^|\n)((?:[-*] .*(?:\n|$))+)/g,(m,pre,block)=>{
     const items=block.trim().split(/\n/).map(l=>"<li>"+l.replace(/^[-*] /,"")+"</li>").join("");
@@ -3276,7 +3466,7 @@ async function pushChatsToDisk(){
 }
 
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1>MillenAI</h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
+  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI</h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
   paintLive();
 }
 function saveChats(){
@@ -3473,6 +3663,14 @@ const starCv=$("#stars"),sctx=starCv.getContext("2d");
 const STAR_COLORS=["#ececec","#ececec","#d4d4d4","#b4b4b4",
                    "#8e8e8e","#f5f5f5","#c8c8c8","#a0a0a0"];
 let starList=[],sw=0,sh=0,warpSpeed=0.5;
+// The ramp is a 0..1 progress driven by real elapsed time, then eased —
+// not an exponential approach on the speed itself. Approaching the target
+// by a fixed fraction each frame spends most of its travel in the first
+// moments, which lands as a jump rather than a launch, and it also runs at
+// whatever rate the display happens to refresh at.
+const WARP_UP=3.0, WARP_DOWN=1.8;      // seconds to full speed / back to idle
+const WARP_IDLE=0.5, WARP_FULL=22;
+let warpT=0, warpLast=0;
 function starSpawn(far){
   return {x:(Math.random()-0.5)*sw*1.6, y:(Math.random()-0.5)*sh*1.6,
           z:far?sw:1+Math.random()*sw,
@@ -3489,12 +3687,16 @@ function starResize(){
 }
 starResize();
 window.addEventListener("resize",starResize);
-function starTick(){
+function starTick(ts){
   requestAnimationFrame(starTick);
-  if(perf)return;
+  if(perf){warpLast=0;return;}
+  // clamp dt so a backgrounded tab doesn't resume at full speed
+  const dt=Math.min(0.05,warpLast?(ts-warpLast)/1000:0.016);
+  warpLast=ts||0;
   sctx.clearRect(0,0,sw,sh);
-  // hard launch, soft glide back down
-  warpSpeed+=((generating?22:0.5)-warpSpeed)*(generating?0.055:0.03);
+  warpT=Math.max(0,Math.min(1,warpT+(generating?dt/WARP_UP:-dt/WARP_DOWN)));
+  const e=warpT*warpT*(3-2*warpT);      // smoothstep: eases in and settles
+  warpSpeed=WARP_IDLE+(WARP_FULL-WARP_IDLE)*e;
   const cx=sw/2,cy=sh/2,fov=sw*0.45,move=warpSpeed*(sw/1400);
   sctx.lineCap="round";
   for(const s of starList){
@@ -3505,7 +3707,9 @@ function starTick(){
     // streak tail = where the star was a few frames back (deeper in z)
     const pk=fov/(s.z+move*3.5+0.5), px=cx+s.x*pk, py=cy+s.y*pk;
     const t=1-s.z/sw;
-    sctx.globalAlpha=(generating?0.12:0.30)+0.62*t*t;  // brighter idle
+    // dim with the ramp rather than switching on `generating` — a hard step
+    // here was visible as a flicker the instant a query started
+    sctx.globalAlpha=(0.30-0.18*e)+0.62*t*t;
     sctx.strokeStyle=s.c;
     sctx.lineWidth=Math.max(0.7,t*2.6);
     sctx.beginPath();sctx.moveTo(px,py);sctx.lineTo(x,y);sctx.stroke();
@@ -3696,37 +3900,23 @@ function rainbowWipe(){
       if(e)e.classList.add("flyin");
     });
   }
+  // the band paints the wordmark on its way past: arm the transition, then
+  // flip the end state on the next frame so it actually animates
+  document.body.classList.add("painting");
+  requestAnimationFrame(()=>document.body.classList.add("painted"));
   setTimeout(()=>{
-    // …then collapses into the wordmark
     const h1=$("#hero h1");
-    // drop the entry classes before measuring, so the rect is the resting one
     if(h1)h1.classList.remove("flyin");
     [$("#hero .beta-tag"),$("#hero .greet")].forEach(e=>{
       if(e)e.classList.remove("flyin");
     });
-    const r=h1?h1.getBoundingClientRect()
-              :{left:innerWidth/2-60,top:innerHeight/2-20,width:120,height:40};
-    const cx=r.left+r.width/2, cy=r.top+r.height/2;
-    const box=document.createElement("div");
-    box.className="converge";
-    // enters along the same diagonal the sweep travelled
-    const W=r.width*2.6, H=r.height*4.5;
-    box.style.width=W+"px";box.style.height=H+"px";
-    box.style.left=(cx-W/2-170)+"px";box.style.top=(cy-H/2-110)+"px";
-    cel.appendChild(box);
-    requestAnimationFrame(()=>{
-      const w2=r.width*.55, h2=r.height*.5;
-      box.style.left=(cx-w2/2)+"px";box.style.top=(cy-h2/2)+"px";
-      box.style.width=w2+"px";box.style.height=h2+"px";
-      box.style.opacity="0";
-      if(h1)setTimeout(()=>h1.classList.add("absorb"),520);
-    });
-    setTimeout(()=>{
-      cel.hidden=true;cel.innerHTML="";
-      if(h1)h1.classList.remove("absorb");
-      wipeBusy=false;
-    },1600);
   },1240);
+  setTimeout(()=>{
+    cel.hidden=true;cel.innerHTML="";
+    // leave `painted` on — the colour stays where the band left it
+    document.body.classList.remove("painting");
+    wipeBusy=false;
+  },3200);
 }
 
 let wasDownloading=false;

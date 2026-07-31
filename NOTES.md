@@ -92,6 +92,31 @@ fit in 1.25× its estimated need *and* stay under 80% of total RAM. Estimates
 run low — a "44 GB" 70B was measured at 49.7 GB before being OOM-killed — so
 a 70B is refused on a 51 GB Mac but allowed on a 128 GB one.
 
+### Research (the agent)
+A fifth mode alongside the tiers. One model does the whole run — it plans the
+searches *and* writes the brief — so there is only ever one engine load, which
+on MLX is the expensive part. The flow: plan queries → search each → dedupe
+sources by URL → write a brief citing them as `[1]`, `[2]` → append a linked
+source list. Typical run is ~25s over 12 sources.
+
+**The user's own question is always the first search query.** A local model's
+knowledge stops years before the question often does: asked what changed in
+"macOS 26 Tahoe", the planner searched for "macOS Monterey" — a version it
+recognised — and researched the wrong operating system from end to end,
+confidently and with citations. Searching verbatim first means the planner can
+only ever *add* angles, never quietly replace the subject. The prompt also
+tells it to copy names and versions exactly, and that an unfamiliar term is
+probably newer than it is.
+
+Auto web search is suppressed for this tier so the agent isn't handed
+pre-fetched snippets for a query it hasn't planned yet. `search_results()`
+keeps its own multi-entry cache — `run_search`'s single slot would evict each
+query before the next could use it.
+
+`renderMD` gained markdown links for the source list. Only `http(s)` is
+matched, so a model cannot emit a `javascript:` or `data:` href; anything else
+stays escaped text. Verified — no anchor, no tag, nothing live.
+
 ### The merger
 Gemma writes the final blended answer, preferring the newest generation
 installed: **Gemma 4 12B → Gemma 4 26B → Gemma 2 9B IT**, then the strongest
@@ -139,7 +164,30 @@ crosses the middle, with a bloom flaring behind it. The version tag and
 greeting rise in on a 0.34s delay so the screen assembles rather than appears.
 Then the existing converge-and-absorb finish plays.
 
-Two things to preserve if this is ever retouched:
+The wordmark is **painted by the band**, not simply coloured. It sits in flat
+light grey (`#9a9a9a`); a second copy of the text rides on top via
+`h1::after { content: attr(data-word) }` carrying the rainbow, revealed
+through a diagonal mask that slides across in step with the sweep. The colour
+stays where the band left it (`body.painted`), so after the first launch
+animation the wordmark simply is rainbow.
+
+Three things to preserve if this is ever retouched:
+
+- **A longer duration does not slow the sweep.** Raising it 1.6s → 2.8s
+  changed almost nothing visible: the eased curve plus a ±175vw travel still
+  threw the band across the middle of the window in ~0.6s. Measured band
+  centre against the wordmark to find it. Linear travel over only the
+  distance actually needed (±120vw) is what makes it read as slow.
+- **Band width and brightness are coupled.** 132vw at opacity .92 flooded the
+  entire window with saturated colour and made the wordmark unreadable.
+  112vw at .72 is wider than the original and still leaves the page legible.
+- **The paint is timed off the band, not guessed.** Travel is symmetric and
+  linear, so the band centre reaches the middle of the window at exactly half
+  the duration whatever the width; the wordmark sits slightly right of centre,
+  so the reveal is centred on 1.53s (delay 1.28s, duration .5s). Verified:
+  at 1.28s the band is at x=528 with the wordmark starting at 611 and paint at
+  0; at 1.53s band 761, wordmark centre 782, paint 50%; at 1.78s band 994,
+  wordmark ending 953, paint 100%.
 
 - **It must not wait on `/api/setup`.** That call enumerates every model on
   disk and took 2.3s here; gating the flourish on it left the window sitting
@@ -149,6 +197,18 @@ Two things to preserve if this is ever retouched:
   the keyframes. Any eased curve is far too front-loaded — the wordmark had
   settled by 0.35s, well before the band reached it, so it read as an
   unrelated event instead of something the sweep delivered.
+
+### The starfield
+Idle drift; while a query streams the stars stretch into streaks. The ramp is
+a 0–1 progress driven by **real elapsed time** and then eased (smoothstep),
+not an exponential approach on the speed itself. Approaching a target by a
+fixed fraction per frame spends most of its travel in the first fraction of a
+second — it landed as a jump rather than a launch — and it runs at whatever
+rate the display happens to refresh at. Now: 3.0s up, 1.8s back to idle,
+measured 0.5 → 2.7 → 7.1 → 12.3 → 17.4 → 21.0 → 22 across the three seconds.
+`dt` is clamped so a backgrounded tab doesn't resume at full speed. Star
+brightness follows the same eased value; switching it on `generating`
+flickered at the moment a query started.
 
 ### Memory
 Facts about the user are extracted in the background after each message by
