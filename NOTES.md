@@ -102,6 +102,12 @@ Drafts are capped at the 5 strongest and truncated to ~1,500 chars each —
 an unbounded merge prompt overflows small models and triggers repetition
 loops.
 
+**Tier and single-model are mutually exclusive.** Picking a tier clears any
+individual model selection and vice versa, so exactly one row is ever
+highlighted. This matters beyond cosmetics: the backend prefers `tier` over
+`models`, so leaving a stale tier set made explicit model picks silently
+ignored.
+
 ### Memory
 Facts about the user are extracted in the background after each message by
 whichever model just answered, stored in `memory.json`, and folded into the

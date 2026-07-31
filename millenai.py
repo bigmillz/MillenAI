@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.0.1"   # bump here — UI, window, DMG all follow
-APP_BUILD = 17               # integer compared against the GitHub release tag
+APP_VERSION = "1.0.2"   # bump here — UI, window, DMG all follow
+APP_BUILD = 18               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2662,19 +2662,14 @@ function paintModels(){
   model=council[0];
   localStorage.setItem("millen.model",model);
   localStorage.setItem("millen.council",JSON.stringify(council));
+  const manual=!tier;            // no tier selected => one model is driving
   $$(".model").forEach(el=>{
-    if(!el.dataset.model)return;  // the Power Mode row manages itself
-    const i=council.indexOf(el.dataset.model);
-    el.classList.toggle("active",i===0);
-    el.classList.toggle("picked",i>0);
+    if(!el.dataset.model)return;  // rows without a model manage themselves
+    el.classList.toggle("active",manual&&el.dataset.model===council[0]);
     const old=el.querySelector(".rank"); if(old)old.remove();
-    if(combine&&i>=0&&council.length>1){
-      const r=document.createElement("span");
-      r.className="rank"; r.textContent=i===0?"merge":String(i+1);
-      el.appendChild(r);
-    }
   });
-  $("#chip-model").textContent=tier;
+  $$(".tier").forEach(el=>el.classList.toggle("active",el.dataset.tier===tier));
+  $("#chip-model").textContent=tier||model;
 }
 function selectModel(name){
   if(!name)return;  // rows without a model (Power Mode) don't select
@@ -2686,14 +2681,9 @@ function selectModel(name){
       body:JSON.stringify({labels:[name]})}).then(pollEngines);
     return;
   }
-  if(combine){
-    councilManual=true;                            // user is curating now
-    const i=council.indexOf(name);
-    if(i<0)council.push(name);
-    else if(council.length>1)council.splice(i,1);   // never empty
-  }else{
-    council=[name];
-  }
+  tier="";                       // an explicit pick overrides any tier
+  localStorage.setItem("millen.tier","");
+  council=[name];
   paintModels();
 }
 $$(".model").forEach(el=>el.addEventListener("click",()=>selectModel(el.dataset.model)));
@@ -2737,9 +2727,8 @@ setVoice(voiceChat);
 let tier=localStorage.getItem("millen.tier")||"Pro";
 function setTier(name){
   tier=name;localStorage.setItem("millen.tier",name);
-  $$(".tier").forEach(el=>el.classList.toggle("active",el.dataset.tier===name));
   councilManual=false;
-  paintModels();
+  paintModels();                 // paints both tier and model highlights
 }
 const tierPop=$("#tierpop");
 async function showTierPop(el,name){
