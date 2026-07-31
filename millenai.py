@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.0.3"   # bump here — UI, window, DMG all follow
-APP_BUILD = 19               # integer compared against the GitHub release tag
+APP_VERSION = "1.0.4"   # bump here — UI, window, DMG all follow
+APP_BUILD = 20               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -731,12 +731,15 @@ def check_update():
     except Exception as exc:
         return {"configured": True, "available": False, "note": str(exc)[:120]}
     tag = rel.get("tag_name", "")
+    # the tag is a build counter (v19); the release *title* is the version
+    # people recognise (1.0.3) — show that, but still compare on the tag
+    shown = (rel.get("name") or "").strip() or tag
     dmg = next((a for a in rel.get("assets", [])
                 if a.get("name", "").endswith(".dmg")), None)
     if dmg:
         _update["url"] = dmg["browser_download_url"]
         _update["size"] = dmg.get("size", 0)
-    _update["latest"] = tag
+    _update["latest"] = shown
     published = _gh_time(rel.get("published_at", ""))
     # a release counts as newer if GitHub published it after this build was
     # made, or if its tag carries a higher build number
@@ -745,7 +748,7 @@ def check_update():
     return {"configured": True,
             "available": bool(dmg) and newer
                          and _app_bundle_path() is not None,
-            "latest": tag, "current": APP_VERSION,
+            "latest": shown, "tag": tag, "current": APP_VERSION,
             "published": rel.get("published_at", ""),
             "size_mb": round(dmg.get("size", 0) / 1e6, 1) if dmg else 0}
 
