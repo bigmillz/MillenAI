@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 14               # integer compared against the GitHub release tag
+APP_VERSION = "1.1"   # bump here — UI, window, DMG all follow
+APP_BUILD = 15               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -101,7 +101,29 @@ SYSTEM_PROMPT = {
 
 # MLX needs Apple silicon; on Intel Macs the starter models run on Ollama
 # (CPU) instead, so the same app works everywhere.
-IS_ARM = platform.machine() == "arm64"
+IS_MAC = sys.platform == "darwin"
+IS_WIN = sys.platform == "win32"
+# MLX is Apple-silicon only; everywhere else inference goes through Ollama
+# (which uses CUDA automatically on an NVIDIA box).
+IS_ARM = IS_MAC and platform.machine() == "arm64"
+
+
+def app_dir() -> str:
+    """Per-user data directory (venv, memory, downloaded engines)."""
+    if IS_WIN:
+        base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+        return os.path.join(base, "MillenAI")
+    return os.path.expanduser("~/Library/Application Support/MillenAI")
+
+
+def log_dir() -> str:
+    return (os.path.join(app_dir(), "logs") if IS_WIN
+            else os.path.expanduser("~/Library/Logs/MillenAI"))
+
+
+def reveal(path: str):
+    """Show a folder in Finder / Explorer."""
+    subprocess.Popen(["explorer", path] if IS_WIN else ["open", path])
 
 
 # ---------------------------------------------------------------- catalog
@@ -243,6 +265,20 @@ MERGE_RANK = sorted((l for l in MODEL_ROUTES),
 
 def chip_name() -> str:
     """Short marketing name of the CPU: 'M4 PRO', 'CORE I7', etc."""
+    if IS_WIN:
+        try:
+            gpu = subprocess.run(
+                ["nvidia-smi", "--query-gpu=name",
+                 "--format=csv,noheader"], capture_output=True, text=True,
+                timeout=2,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ).stdout.strip().splitlines()
+            if gpu:      # "NVIDIA GeForce RTX 4090" -> "RTX 4090"
+                name = gpu[0].replace("NVIDIA", "").replace("GeForce", "")
+                return " ".join(name.split()).upper()[:18]
+        except Exception:
+            pass
+        return (platform.processor() or "PC").split()[0].upper()[:18]
     try:
         brand = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
                                capture_output=True, text=True,
@@ -379,13 +415,23 @@ def _has_mlx() -> bool:
 # the app can fetch its own Ollama engine (signed universal CLI) so a fresh
 # machine — Intel or Apple silicon — needs zero manual installs
 OLLAMA_TGZ_URL = "https://ollama.com/download/ollama-darwin.tgz"
-_MANAGED_BIN_DIR = os.path.expanduser(
-    "~/Library/Application Support/MillenAI/bin")
+# Windows portable build — bundles the CUDA runtime, so an NVIDIA GPU is
+# used automatically with no extra setup
+OLLAMA_ZIP_URL = ("https://github.com/ollama/ollama/releases/latest/"
+                  "download/ollama-windows-amd64.zip")
+_MANAGED_BIN_DIR = os.path.join(app_dir(), "bin")
+_MANAGED_BIN_DIR_FOUND = []   # nested location inside the win zip
 
 
 def _ollama_bin():
-    for c in (shutil.which("ollama"), "/usr/local/bin/ollama",
-              os.path.join(_MANAGED_BIN_DIR, "ollama")):
+    exe = "ollama.exe" if IS_WIN else "ollama"
+    cands = [shutil.which("ollama"), os.path.join(_MANAGED_BIN_DIR, exe)]
+    if IS_WIN:
+        cands.append(os.path.join(
+            os.environ.get("LOCALAPPDATA", ""), "Programs", "Ollama", exe))
+    else:
+        cands.append("/usr/local/bin/ollama")
+    for c in cands:
         if c and os.path.exists(c):
             return c
     return None
@@ -466,7 +512,7 @@ def _spawn_mlx_engine(label: str) -> bool:
     kind, port = MODEL_ROUTES[label]
     if kind != "mlx" or _port_in_use(port) or not _has_mlx():
         return False
-    logdir = os.path.expanduser("~/Library/Logs/MillenAI")
+    logdir = log_dir()
     os.makedirs(logdir, exist_ok=True)
     log = open(os.path.join(logdir, f"managed-{port}.log"), "ab")
     proc = subprocess.Popen(
@@ -523,11 +569,12 @@ def _spawn_ollama_serve() -> bool:
     b = _ollama_bin()
     if not b:
         return False
-    logdir = os.path.expanduser("~/Library/Logs/MillenAI")
+    logdir = log_dir()
     os.makedirs(logdir, exist_ok=True)
     log = open(os.path.join(logdir, "managed-ollama.log"), "ab")
     _managed_procs.append(subprocess.Popen(
         [b, "serve"], stdout=log, stderr=log,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ))
     print("  spawned ollama serve on port 11434")
     return True
@@ -623,7 +670,13 @@ open -n "%(app)s"
 
 
 def _app_bundle_path():
-    """/Applications/MillenAI.app when running from a bundle, else None."""
+    """/Applications/MillenAI.app when running from a bundle, else None.
+
+    Windows installs aren't a single swappable bundle, so in-place update is
+    macOS-only for now; Windows users are pointed at the release page.
+    """
+    if not IS_MAC:
+        return None
     here = os.path.abspath(__file__)
     root = os.path.dirname(os.path.dirname(os.path.dirname(here)))
     return root if root.endswith(".app") else None
@@ -735,8 +788,7 @@ def _do_update():
 # model can reference them across conversations. Extraction runs in the
 # background after each message, using the model that just answered
 # (it's already loaded — no engine thrash).
-MEMORY_FILE = os.path.expanduser(
-    "~/Library/Application Support/MillenAI/memory.json")
+MEMORY_FILE = os.path.join(app_dir(), "memory.json")
 _memory_lock = threading.Lock()
 
 MEMORY_PROMPT = (
@@ -795,19 +847,28 @@ def _extract_memory(label: str, user_msg: str):
 
 # ------------------------------------------------------------- voice
 # STT: whisper via MLX (Apple silicon only). TTS: macOS built-in `say`.
-WHISPER_REPO = "mlx-community/whisper-large-v3-turbo"
+WHISPER_REPO = ("deepdml/faster-whisper-large-v3-turbo-ct2" if not IS_MAC
+                else "mlx-community/whisper-large-v3-turbo")
 _whisper_lock = threading.Lock()
+_fw_model = None   # cached faster-whisper model (non-mac)
 _say_proc = None
 
 
 def _voice_supported() -> bool:
-    if not IS_ARM:
-        return False
-    try:
-        import mlx_whisper  # noqa: F401
-        return True
-    except ImportError:
-        return False
+    """Speech-to-text needs MLX on Apple silicon, faster-whisper elsewhere."""
+    if IS_ARM:
+        try:
+            import mlx_whisper  # noqa: F401
+            return True
+        except ImportError:
+            return False
+    if IS_WIN:
+        try:
+            import faster_whisper  # noqa: F401
+            return True
+        except ImportError:
+            return False
+    return False
 
 
 def _voice_ready() -> bool:
@@ -817,7 +878,10 @@ def _voice_ready() -> bool:
     snaps = glob.glob(os.path.join(d, "snapshots", "*", "config.json"))
     if not snaps:
         return False
-    return bool(glob.glob(os.path.join(os.path.dirname(snaps[0]), "weights.*")))
+    snap = os.path.dirname(snaps[0])
+    # MLX ships weights.*; CTranslate2 (faster-whisper) ships model.bin
+    return bool(glob.glob(os.path.join(snap, "weights.*"))
+                or glob.glob(os.path.join(snap, "model.bin")))
 
 
 VOICE_ROW = "Voice engine"
@@ -847,7 +911,8 @@ def _transcribe_wav(wav_bytes: bytes) -> str:
     import io
     import wave as _wave
     import numpy as np
-    import mlx_whisper
+    if IS_ARM:
+        import mlx_whisper
     with _wave.open(io.BytesIO(wav_bytes)) as w:
         sr, ch = w.getframerate(), w.getnchannels()
         audio = np.frombuffer(w.readframes(w.getnframes()),
@@ -859,8 +924,21 @@ def _transcribe_wav(wav_bytes: bytes) -> str:
         audio = np.interp(np.linspace(0, len(audio) - 1, n),
                           np.arange(len(audio)), audio).astype(np.float32)
     with _whisper_lock:
-        out = mlx_whisper.transcribe(audio, path_or_hf_repo=WHISPER_REPO)
-    return out["text"].strip()
+        if IS_ARM:
+            out = mlx_whisper.transcribe(audio, path_or_hf_repo=WHISPER_REPO)
+            return out["text"].strip()
+        # faster-whisper: CUDA when the box has it, CPU otherwise
+        from faster_whisper import WhisperModel
+        global _fw_model
+        if _fw_model is None:
+            try:
+                _fw_model = WhisperModel(WHISPER_REPO, device="cuda",
+                                         compute_type="float16")
+            except Exception:
+                _fw_model = WhisperModel(WHISPER_REPO, device="cpu",
+                                         compute_type="int8")
+        segments, _info = _fw_model.transcribe(audio, beam_size=5)
+        return " ".join(sg.text for sg in segments).strip()
 
 
 def _speak(text: str):
@@ -871,8 +949,25 @@ def _speak(text: str):
     plain = re.sub(r"```[\s\S]*?```", " code block omitted. ", text)
     plain = re.sub(r"[*_#`>|]", "", plain)
     plain = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", plain)
-    if plain.strip():
-        _say_proc = subprocess.Popen(["say", plain.strip()[:4000]])
+    text = plain.strip()[:4000]
+    if not text:
+        return
+    if IS_WIN:
+        # SAPI through PowerShell — built in, no download
+        ps = ("Add-Type -AssemblyName System.Speech;"
+              "$s=New-Object System.Speech.Synthesis.SpeechSynthesizer;"
+              "$s.Speak([Console]::In.ReadToEnd())")
+        _say_proc = subprocess.Popen(
+            ["powershell", "-NoProfile", "-Command", ps],
+            stdin=subprocess.PIPE, text=True,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        try:
+            _say_proc.stdin.write(text)
+            _say_proc.stdin.close()
+        except Exception:
+            pass
+    else:
+        _say_proc = subprocess.Popen(["say", text])
 
 
 def _stop_speaking():
@@ -891,8 +986,10 @@ ENGINE_ROW = "Ollama engine"
 def _download_ollama_binary():
     """Fetch the signed universal Ollama CLI, with job progress."""
     os.makedirs(_MANAGED_BIN_DIR, exist_ok=True)
-    tmp = os.path.join(_MANAGED_BIN_DIR, "ollama.tgz.part")
-    req = urllib.request.Request(OLLAMA_TGZ_URL,
+    url = OLLAMA_ZIP_URL if IS_WIN else OLLAMA_TGZ_URL
+    tmp = os.path.join(_MANAGED_BIN_DIR,
+                       "ollama.zip.part" if IS_WIN else "ollama.tgz.part")
+    req = urllib.request.Request(url,
                                  headers={"User-Agent": "MillenAI/1.0"})
     with urllib.request.urlopen(req, timeout=60) as r, open(tmp, "wb") as f:
         total = int(r.headers.get("Content-Length") or 150_000_000)
@@ -905,6 +1002,18 @@ def _download_ollama_binary():
             done += len(chunk)
             with _setup_lock:
                 _setup_jobs[ENGINE_ROW]["pct"] = min(99, int(done / total * 100))
+    if IS_WIN:
+        import zipfile
+        with zipfile.ZipFile(tmp) as z:
+            z.extractall(_MANAGED_BIN_DIR)
+        os.remove(tmp)
+        # the zip nests the binary under bin/ or ollama/ depending on build
+        if not os.path.exists(os.path.join(_MANAGED_BIN_DIR, "ollama.exe")):
+            for root, _d, files in os.walk(_MANAGED_BIN_DIR):
+                if "ollama.exe" in files:
+                    _MANAGED_BIN_DIR_FOUND.append(root)
+                    break
+        return
     with tarfile.open(tmp) as t:
         try:
             t.extractall(_MANAGED_BIN_DIR, filter="data")
@@ -1150,11 +1259,29 @@ for _sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
 _gpu_cache = {"pct": None, "ts": 0.0}
 
 
+def _gpu_nvidia():
+    """NVIDIA utilisation via nvidia-smi, which ships with the driver."""
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-gpu=utilization.gpu",
+             "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=2,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout.strip().splitlines()
+        return float(out[0].strip()) if out else None
+    except Exception:
+        return None
+
+
 def gpu_utilization():
-    """Apple GPU 'Device Utilization %' via ioreg (no sudo). None if unknown."""
+    """GPU busy percentage, or None when it can't be read."""
     now = time.time()
     if now - _gpu_cache["ts"] < 0.7:
         return _gpu_cache["pct"]
+    if not IS_MAC:
+        pct = _gpu_nvidia()
+        _gpu_cache.update(pct=pct, ts=now)
+        return pct
     pct = None
     try:
         out = subprocess.run(
@@ -1651,7 +1778,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/open-logs":
             subprocess.Popen(
-                ["open", os.path.expanduser("~/Library/Logs/MillenAI")])
+                ["open", log_dir()])
             self._send_json({"ok": True})
             return
         if self.path == "/api/memory/clear":

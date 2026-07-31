@@ -186,16 +186,41 @@ flag at all and sidesteps the whole thing.
 
 ---
 
-## Porting to Windows
+## Windows / CUDA
 
-**46 of 3,394 lines touch macOS specifics — about 1.4%.** The UI, tiers,
-blending, memory, chat history, search and updater are all portable.
+A platform layer now covers both OSes from one `millenai.py`. `IS_MAC` /
+`IS_WIN` / `IS_ARM` drive the branches; everything else is shared.
 
-What must be replaced: MLX → Ollama (CUDA is genuinely faster than Apple
-silicon here), `mlx-whisper` → `faster-whisper`, `say` → SAPI, `ioreg` → 
-`nvidia-smi`/WMI, and DMG/codesign → an Inno Setup installer with an `.exe`
-swap in the updater. Roughly two to three days, mostly testing.
+| Concern | macOS | Windows |
+|---|---|---|
+| Inference | MLX (Apple silicon) → Ollama fallback | Ollama only — **CUDA automatically** |
+| Speech-to-text | `mlx-whisper` large-v3-turbo | `faster-whisper` CT2 turbo, CUDA fp16 → CPU int8 |
+| Text-to-speech | `say` | PowerShell SAPI |
+| GPU telemetry | `ioreg` Device Utilization % | `nvidia-smi --query-gpu=utilization.gpu` |
+| Chip label | `sysctl` brand string | GPU name, e.g. `RTX 4090` |
+| Data dir | `~/Library/Application Support/MillenAI` | `%LOCALAPPDATA%\MillenAI` |
+| Ollama engine | `ollama-darwin.tgz` (146 MB) | `ollama-windows-amd64.zip` (1.5 GB, bundles CUDA) |
+| Package | DMG + `.app` | `MillenAI-<ver>-Windows.zip` + `.bat` launcher |
+| In-place update | yes (swaps the bundle) | not yet — points at the release page |
 
-The right shape is one `platform.py` answering four questions — run a model,
-transcribe, speak, read the GPU — not a fork. `MODEL_ROUTES` and the tier
-resolver already separate "which engine" from "what the app does".
+Build with `powershell -ExecutionPolicy Bypass -File build_windows.ps1`.
+Like the Mac build the zip is tiny: the launcher creates a venv on first run
+and the app fetches Ollama and models itself.
+
+**CUDA needs no code.** Ollama detects an NVIDIA GPU and offloads on its own;
+the Windows zip ships the CUDA runtime. A 4090 will comfortably outrun an
+M4 Pro here.
+
+### Status: written, not yet run on Windows
+No Windows machine or NVIDIA GPU was available. What *was* verified, by
+forcing the Windows branches on a Mac: paths resolve under `%LOCALAPPDATA%`,
+all 17 models route to Ollama with zero MLX, the correct Ollama zip and
+CT2 Whisper repo are selected, `nvidia-smi` output parses into both the GPU
+percentage and an `RTX 4090` chip label, and speech builds a PowerShell SAPI
+command with markdown stripped. macOS was re-tested end to end afterwards
+(chat, telemetry, voice, transcription) and is unchanged.
+
+Expect first-run friction on Windows: Python must be installed manually,
+SmartScreen will warn about an unknown publisher, and `faster-whisper` needs
+a working CUDA/cuDNN install for GPU transcription — it falls back to CPU
+rather than failing.
