@@ -339,6 +339,17 @@ during boot before its declaration throws, aborting everything after it —
 with no console error if the tab attached late. Declare shared state at the
 top. Syntax-check the served page (`node --check`) as part of verification.
 
+**Keep every `.ps1` pure ASCII.** Windows PowerShell 5.1 reads a `.ps1` with
+no BOM as the ANSI codepage, not UTF-8. A UTF-8 em-dash (`E2 80 94`) therefore
+arrives as three CP1252 characters, and the last of them is **U+201D, a curly
+double quote — which PowerShell honours as a string delimiter.** One dash in a
+*comment* silently desynced the quoting for the remaining 90 lines, so the
+parser reported errors inside comments and an unterminated string at the end
+of the file, with nothing wrong at any of those places. `build_windows_exe.ps1`
+now carries a note to that effect and is checked with
+`raw.decode("cp1252") == raw.decode("utf-8")` — if that holds, the encoding
+cannot bite.
+
 ### macOS packaging
 
 **The app icon should fill 82.4% of its canvas, not Apple's 80.5%.** The
@@ -386,9 +397,21 @@ A platform layer now covers both OSes from one `millenai.py`. `IS_MAC` /
 | Package | DMG + `.app` | `MillenAI-<ver>-Windows.zip` + `.bat` launcher |
 | In-place update | yes (swaps the bundle) | not yet — points at the release page |
 
-Build with `powershell -ExecutionPolicy Bypass -File build_windows.ps1`.
-Like the Mac build the zip is tiny: the launcher creates a venv on first run
-and the app fetches Ollama and models itself.
+**Built on macOS, by `./build_windows.sh`** — and `release.sh` runs it, so
+every release publishes the DMG *and* the Windows zip as assets. There is
+nothing to compile: the package is `millenai.py` plus a `.bat` and a README,
+so the output is identical whatever machine builds it. This replaced
+`build_windows.ps1`, which could only run on Windows — keeping two copies of
+the launcher and readme text would have guaranteed they drifted.
+
+**CUDA is not built, it is downloaded.** Ollama's Windows amd64 build bundles
+the CUDA runtime; the app fetches it on the user's PC and Ollama offloads to
+the GPU by itself. So "a CUDA version" isn't a build target — there is one
+Python file that runs everywhere.
+
+The `.bat` and README are written through a CRLF filter. `cmd.exe` is
+unforgiving about bare LF in a batch file, and PowerShell's `Set-Content` had
+been supplying CRLF for free.
 
 **Windows-on-ARM must run the app as emulated x64.** Not a preference — a
 hard dependency wall. `pythonnet` 3.1.0 (pywebview's Windows backend; there

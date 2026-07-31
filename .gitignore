@@ -10,3 +10,10 @@ __pycache__/
 
 # unrelated to MillenAI, and v23-mac.sh contains a private server address
 v23-*.sh
+MillenAI-*-Windows.zip
+MillenAI-*-Setup.exe
+MillenAI-*-Windows-exe.zip
+MillenAI.iss
+.build-venv/
+build/
+dist/

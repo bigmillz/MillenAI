@@ -62,17 +62,28 @@ s = re.sub(r"APP_BUILD = \d+", "APP_BUILD = %s" % build, s, count=1)
 p.write_text(s)
 PY
 
-echo "→ building"
+echo "→ building macOS"
 ./build_dmg.sh >/dev/null
 DMG="MillenAI ${VERSION}.dmg"   # build_dmg.sh derives this from millenai.py
 [[ -f "$DMG" ]] || { echo "expected $DMG but it wasn't built"; exit 1; }
 
+echo "→ building Windows"
+./build_windows.sh >/dev/null
+ZIP="MillenAI-${VERSION}-Windows.zip"
+[[ -f "$ZIP" ]] || { echo "expected $ZIP but it wasn't built"; exit 1; }
+
 echo "→ publishing v$BUILD"
 git add -A && git commit -m "Release $VERSION (build $BUILD)" || true
 git push origin HEAD
-gh release create "v$BUILD" "$DMG" \
+gh release create "v$BUILD" "$DMG" "$ZIP" \
   --title "$VERSION" \
-  --notes "MillenAI $VERSION. Open the app and it will offer this update automatically."
+  --notes "MillenAI $VERSION.
+
+**macOS** — download the .dmg. Existing installs update themselves.
+
+**Windows** — download the .zip, unzip anywhere, run MillenAI.bat. Needs
+Python 3.10+ from python.org. On an NVIDIA machine it uses CUDA
+automatically; no setup, nothing extra to install."
 
 echo ""
 echo "✓ published $VERSION — existing installs will offer it within the hour."
