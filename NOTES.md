@@ -99,6 +99,15 @@ on MLX is the expensive part. The flow: plan queries → search each → dedupe
 sources by URL → write a brief citing them as `[1]`, `[2]` → append a linked
 source list. Typical run is ~25s over 12 sources.
 
+**Hermes 3 8B leads the Research picks.** The tier's `count` is 1, so the
+first *installed* pick is the agent — order in `picks` is the whole selection
+mechanism. Hermes is tuned for instruction-following and structured output,
+which is most of what planning queries is, and it shows: asked about "macOS 26
+Tahoe" it planned *"macOS 26 Tahoe release date"* and *"Key features of macOS
+26 Tahoe"*, keeping the version intact, where Mistral Nemo drifted to "macOS
+13.0" on both. Adding it to a tier's picks also adds it to `STARTER_LABELS`,
+so a fresh install now pulls 4.6 GB more.
+
 **The user's own question is always the first search query.** A local model's
 knowledge stops years before the question often does: asked what changed in
 "macOS 26 Tahoe", the planner searched for "macOS Monterey" — a version it
@@ -331,6 +340,16 @@ with no console error if the tab attached late. Declare shared state at the
 top. Syntax-check the served page (`node --check`) as part of verification.
 
 ### macOS packaging
+
+**The app icon should fill 82.4% of its canvas, not Apple's 80.5%.** The
+strict macOS grid is an 824px body inside 1024, but nothing actually ships at
+that: measured across every app installed here, Canva 82.6%, Ollama 82.4%,
+Signal 82.3%, Firefox 82.2%, Sublime 82.2% — a tight cluster at **844/1024**.
+Ours started at 897px (87.6%) and loomed over its Dock neighbours; rebuilt at
+824 it read as visibly small. 844 matches the room. Rebuild by cropping to the
+opaque bbox, resizing to 844, centring on a transparent 1024 canvas, and
+running `iconutil` over a full 10-size iconset — the original was missing the
+16×16 and 32×32 @1x variants the menu bar and list views use.
 
 **Finder only persists a DMG window size if it sees the bounds *change*
 while frontmost.** Set them twice with a one-pixel nudge.

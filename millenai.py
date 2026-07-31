@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.2.1"   # bump here — UI, window, DMG all follow
-APP_BUILD = 31               # integer compared against the GitHub release tag
+APP_VERSION = "1.3.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 33               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -143,6 +143,8 @@ CATALOG = [
     ("Mistral Nemo 12B",   "🌪️", "12B", "core", "mlx-community/Mistral-Nemo-Instruct-2407-4bit",   "mistral-nemo:12b",  8892,  7.8,  6.9, True),
     ("Gemma 2 2B",         "🌱", "2B",  "core", "mlx-community/gemma-2-2b-it-4bit",                "gemma2:2b",         8886,  2.0,  1.6, False),
     ("Llama 3.1 8B",       "🦙", "8B",  "core", "mlx-community/Meta-Llama-3.1-8B-Instruct-4bit",   "llama3.1:8b",       8894,  5.5,  4.5, False),
+    # tuned for tool use and structured output — the Research agent's first pick
+    ("Hermes 3 8B",        "🪽", "8B",  "core", "mlx-community/Hermes-3-Llama-3.1-8B-4bit",        "hermes3:8b",        8912,  5.5,  4.6, False),
     ("Qwen 2.5 7B",        "🧭", "7B",  "core", "mlx-community/Qwen2.5-7B-Instruct-4bit",          "qwen2.5:7b",        8896,  5.0,  4.3, False),
     ("Qwen 2.5 Coder 7B",  "💻", "7B",  "code", "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",    "qwen2.5-coder:7b",  8898,  5.0,  4.3, False),
     ("Qwen 2.5 Coder 14B", "🛠️", "14B", "code", "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",   "qwen2.5-coder:14b", 8900,  9.5,  8.1, False),
@@ -215,11 +217,14 @@ TIERS = {
     },
     "Research": {
         "icon": "\U0001f50e", "desc": "searches the web, writes a cited brief",
-        # one capable model does the whole run: it plans the searches and
-        # writes the brief, so there is only ever one engine load
-        "picks": ["Gemma 4 12B", "Mistral Nemo 12B", "Qwen 2.5 7B",
-                  "Llama 3.1 8B", "Gemma 2 9B IT", "Gemma 4 26B",
-                  "Llama 3.2 3B"],
+        # One capable model does the whole run: it plans the searches and
+        # writes the brief, so there is only ever one engine load. Order
+        # matters — count is 1, so the first installed pick is the agent.
+        # Hermes leads because it is tuned for instruction-following and
+        # structured output, which is most of what planning queries is.
+        "picks": ["Hermes 3 8B", "Gemma 4 12B", "Mistral Nemo 12B",
+                  "Qwen 2.5 7B", "Llama 3.1 8B", "Gemma 2 9B IT",
+                  "Gemma 4 26B", "Llama 3.2 3B"],
         "count": 1,
         "research": True,
     },
