@@ -216,6 +216,28 @@ address…" for 16k characters. Title generation requires a ≥2.4 GB model.
 examples, they echo the examples instead of reading the actual message.
 Direct instructions work; few-shot does not.
 
+**Reasoning arrives in `delta.reasoning`, not `delta.content`.** mlx_lm
+streams a reasoning model's chain of thought in its own field. The parser read
+only `content`, so Gemma 4 appeared to answer with *nothing* — and because
+Gemma 4 is the preferred merger, every blended answer died with "the server
+answered but sent no usable completion". `reasoning` is now wrapped in
+`<think>` tags and flows into the same collapsible block DeepSeek R1 uses.
+
+**Native reasoning is requested OFF** via
+`chat_template_kwargs: {"enable_thinking": false}`. Gemma 4 26B does not
+converge: asked for a taco recommendation it emitted 11,937 characters of
+deliberation, hit the token ceiling and returned no answer at all, in 77
+seconds. The same question answers in 8.9s with thinking off, and a five-draft
+merge went from *15k characters of thought and no answer* to a clean merge in
+5.2s. Templates that don't know the flag ignore it, so it is safe to send to
+every model. `run_model(..., thinking=True)` can still opt back in.
+
+**Never feed reasoning back into a prompt.** It runs many times longer than
+the answer it precedes, so an unstripped draft blows straight past the
+1,500-character merge truncation and buries the actual answers. `strip_think()`
+is applied to council drafts, titles and extracted memories; only the text
+streamed to the user keeps its `<think>` block.
+
 **Two CSS animations on one property: the last in the list wins, silently.**
 The wordmark already ran `hueshift`, which animates `filter`. Adding a fly-in
 that also animated `filter: blur()` meant one of them was simply discarded —

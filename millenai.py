@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.1.1"   # bump here — UI, window, DMG all follow
-APP_BUILD = 27               # integer compared against the GitHub release tag
+APP_VERSION = "1.1.2"   # bump here — UI, window, DMG all follow
+APP_BUILD = 28               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -683,7 +683,8 @@ def make_title(text: str) -> str:
             run_model(label, [{"role": "user",
                                "content": TITLE_PROMPT + text[:600]}],
                       parts.append)
-            title = " ".join(strip_special("".join(parts)).split())
+            title = " ".join(
+                strip_think(strip_special("".join(parts))).split())
             title = title.split("\n")[0]
             title = re.sub(r"^(topic|title)\s*:?\s*", "", title, flags=re.I)
             title = title.strip("\"'*#\u2014- .")
@@ -1444,7 +1445,8 @@ def stream_ollama(tag: str, messages: list, emit) -> None:
                 break
 
 
-def stream_openai_compat(port: int, model_label: str, messages: list, emit) -> None:
+def stream_openai_compat(port: int, model_label: str, messages: list, emit,
+                         thinking: bool = False) -> None:
     """Stream from an OpenAI-compatible server (MLX / llama.cpp / LM Studio).
 
     Robust to servers that ignore `stream: true` and reply with one JSON
@@ -1455,9 +1457,19 @@ def stream_openai_compat(port: int, model_label: str, messages: list, emit) -> N
         # mlx_lm validates this as a HF repo id — the UI label 404s
         "model": MLX_REPOS.get(model_label, "default_model"),
         "messages": messages,
-        "max_tokens": 2048,
+        # a reasoning model spends most of its budget thinking before it
+        # writes a word — 2048 ran out mid-thought and produced nothing
+        "max_tokens": 4096,
         "temperature": 0.75,
         "stream": True,
+        # Native reasoning is OFF by default. Gemma 4 26B does not converge:
+        # asked for a taco recommendation it produced 11,937 characters of
+        # deliberation, hit the token ceiling and returned no answer at all,
+        # after 77 seconds. With it off the same question answers in ~5s.
+        # The parser below still handles reasoning if a server sends it
+        # anyway; we simply stop asking for it. Templates that don't know the
+        # flag ignore it, so this is safe to send to every model.
+        "chat_template_kwargs": {"enable_thinking": thinking},
     }).encode("utf-8")
     req = urllib.request.Request(
         f"http://127.0.0.1:{port}/v1/chat/completions",
@@ -1465,6 +1477,7 @@ def stream_openai_compat(port: int, model_label: str, messages: list, emit) -> N
         headers={"Content-Type": "application/json"},
     )
     emitted = False
+    in_think = False
     raw_body = []
     with urllib.request.urlopen(req, timeout=600) as resp:
         for raw_line in resp:
@@ -1481,11 +1494,29 @@ def stream_openai_compat(port: int, model_label: str, messages: list, emit) -> N
             except json.JSONDecodeError:
                 continue
             choice = obj.get("choices", [{}])[0]
-            chunk = (choice.get("delta", {}).get("content", "")
-                     or choice.get("message", {}).get("content", ""))
+            delta = choice.get("delta") or {}
+            whole = choice.get("message") or {}
+            # Reasoning models stream their chain of thought in a separate
+            # `reasoning` field — it is *not* `content`. Reading only
+            # `content` meant a model like Gemma 4 appeared to answer with
+            # nothing at all. Wrap it so it lands in the same collapsible
+            # block the UI already renders for DeepSeek R1's <think> tags.
+            think = delta.get("reasoning") or whole.get("reasoning") or ""
+            if think:
+                if not in_think:
+                    in_think = True
+                    emit("<think>")
+                emitted = True
+                emit(think)
+            chunk = delta.get("content", "") or whole.get("content", "")
             if chunk:
+                if in_think:
+                    in_think = False
+                    emit("</think>")
                 emitted = True
                 emit(chunk)
+    if in_think:                      # ran out of budget still thinking
+        emit("</think>")
 
     if not emitted:
         # server didn't stream — try the body as one plain JSON completion
@@ -1515,6 +1546,22 @@ def strip_special(text: str) -> str:
     return text
 
 
+# an unterminated block counts too — a model cut off mid-thought never
+# closes the tag
+_THINK_RE = re.compile(r"<think>.*?(?:</think>|$)", re.S)
+
+
+def strip_think(text: str) -> str:
+    """Drop chain-of-thought, leaving only the answer.
+
+    Reasoning is worth showing a person but never worth feeding back into a
+    prompt: it is many times longer than the answer it precedes, so leaving
+    it in blows straight past the merge-prompt truncation and buries the
+    actual answers.
+    """
+    return _THINK_RE.sub("", text).strip()
+
+
 def fold_system(messages: list) -> list:
     """Some chat templates (Gemma 2) reject the system role outright —
     merge the system prompt into the first user turn instead."""
@@ -1529,7 +1576,7 @@ def fold_system(messages: list) -> list:
     return out
 
 
-def run_model(label: str, messages: list, emit) -> None:
+def run_model(label: str, messages: list, emit, thinking: bool = False) -> None:
     """Stream one model's answer, handling engine startup and templates."""
     kind, target = MODEL_ROUTES.get(label, ("ollama", "llama3.3:70b"))
     if kind == "mlx":
@@ -1541,7 +1588,7 @@ def run_model(label: str, messages: list, emit) -> None:
             if kind == "ollama":
                 stream_ollama(target, msgs, emit)
             else:
-                stream_openai_compat(target, label, msgs, emit)
+                stream_openai_compat(target, label, msgs, emit, thinking)
             return
         except urllib.error.HTTPError as e:
             detail = ""
@@ -1618,7 +1665,8 @@ def run_council(labels: list, messages: list, emit, status) -> None:
         except Exception as exc:
             drafts.append((label, f"(no answer — {type(exc).__name__})"))
             continue
-        text = "".join(parts).strip()
+        # the merger gets answers, never the reasoning that produced them
+        text = strip_think("".join(parts))
         if _looks_degenerate(text):
             # a runaway repetition loop would poison the merge prompt
             drafts.append((label, "(no answer — degenerate output)"))
