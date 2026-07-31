@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.0.4"   # bump here — UI, window, DMG all follow
-APP_BUILD = 20               # integer compared against the GitHub release tag
+APP_VERSION = "1.1.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 21               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -196,16 +196,16 @@ TIERS = {
                   "Gemma 2 9B IT", "Mistral Nemo 12B"],
         "count": 3,
     },
-    "Power": {
-        "icon": "\u269b\ufe0f", "desc": "every model that fits, blended",
-        "picks": [],          # purely memory-driven
-        "count": 99,
-    },
     "Pro": {
         "icon": "\u2728", "desc": "several models, blended",
         "picks": ["Mistral Nemo 12B", "Gemma 2 9B IT", "Qwen 2.5 7B",
                   "Llama 3.1 8B", "Llama 3.2 3B"],
         "count": 5,
+    },
+    "Power": {
+        "icon": "\u269b\ufe0f", "desc": "every model that fits, blended",
+        "picks": [],          # purely memory-driven
+        "count": 99,
     },
 }
 
@@ -298,8 +298,6 @@ def chip_name() -> str:
 def build_tier_rows() -> str:
     out = []
     for name, t in TIERS.items():
-        if name == "Power":
-            continue          # lives under "All models", not up top
         out.append(
             f'  <div class="tier" data-tier="{name}">'
             f'<span class="ico">{t["icon"]}</span>'
@@ -2207,11 +2205,6 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 .meter i.lit{background:var(--accent)}
 .meter i.hot{background:var(--accent-hot)}
-#toks-big{
-  font-size:22px;color:var(--accent);font-weight:600;line-height:1;
-  margin:2px 0 1px;font-variant-numeric:tabular-nums;
-}
-#toks-big span{font-size:10px;color:var(--faint);font-weight:400;margin-left:4px}
 body:not(.perf) #telemetry .live{animation:blink 1.6s ease infinite}
 @keyframes blink{50%{opacity:.25}}
 /* performance mode: telemetry goes dark AND stops polling (the GPU probe
@@ -2563,9 +2556,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 
   <div class="group-label adv" id="adv-toggle"><span id="adv-caret">▸</span> All models</div>
   <div id="adv-wrap" hidden>
-  <div class="tier" data-tier="Power"><span class="ico">⚛️</span>
-    <span class="tname">Power Mode</span>
-    <span class="infobtn" title="Which models does this use?">i</span></div>
 __MODEL_ROWS__
   <div class="model" id="open-setup" title="Download more models">
     <span class="ico">⬇</span>Add models…</div>
@@ -2585,10 +2575,6 @@ __MODEL_ROWS__
 
   <div id="telemetry">
     <div class="t-head"><span>__CHIP__</span><span class="live">●&nbsp;LIVE</span></div>
-    <div class="meter-row">
-      <div class="meter-label"><span>THROUGHPUT</span><b id="toks-label">idle</b></div>
-      <div id="toks-big">0<span>tok/s</span></div>
-    </div>
     <div class="meter-row">
       <div class="meter-label"><span>UNIFIED MEMORY</span><b id="mem-label">—</b></div>
       <div class="meter" id="mem-meter"></div>
@@ -2773,7 +2759,7 @@ setVoice(voiceChat);
 /* --------------------------------------------------------------- tiers */
 // Fast / Pro / Thinking replace hand-picking models. The backend resolves
 // each tier to whatever is downloaded and fits RAM, and Gemma blends.
-let tier=localStorage.getItem("millen.tier")||"Pro";
+let tier=localStorage.getItem("millen.tier")||"Fast";
 function setTier(name){
   tier=name;localStorage.setItem("millen.tier",name);
   councilManual=false;
@@ -2871,11 +2857,9 @@ function addMsg(role,text){
 }
 
 /* -------------------------------------------------------- tok/s meter */
-const toksBig=$("#toks-big"),toksLabel=$("#toks-label");
-function setToks(rate,state){
-  toksBig.innerHTML=(rate>0?rate.toFixed(1):"0")+"<span>tok/s</span>";
-  toksLabel.textContent=state;
-}
+// throughput readout was removed from the panel; per-message tok/s still
+// appears under each answer
+function setToks(){}
 
 /* --------------------------------------------------------------- send */
 const input=$("#input"),sendBtn=$("#send");
