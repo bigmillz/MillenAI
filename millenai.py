@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "V1 Beta 10"   # bump here — UI, window, DMG all follow
-APP_BUILD = 10               # integer compared against the GitHub release tag
+APP_VERSION = "V1 Beta 11"   # bump here — UI, window, DMG all follow
+APP_BUILD = 11               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2242,6 +2242,41 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 .about-btn.primary{background:var(--accent);color:#1a1a1a;border:none;margin-top:14px}
 .about-btn.primary:hover{background:var(--accent-hot);color:#000}
 
+/* ------------------------------------ downloads-complete celebration */
+/* card lifts away like a macOS sheet, a rainbow sweeps the window, then
+   collapses into the wordmark */
+#setup-card.done{animation:cardPoof .75s cubic-bezier(.2,.7,.3,1) forwards}
+@keyframes cardPoof{
+  40%{transform:scale(1.06);opacity:1}
+  100%{transform:scale(1.5);opacity:0;filter:blur(10px)}
+}
+#setup-veil.fading{animation:veilOut .75s ease forwards;pointer-events:none}
+@keyframes veilOut{to{opacity:0}}
+
+#celebrate{position:fixed;inset:0;z-index:90;pointer-events:none;overflow:hidden}
+#celebrate[hidden]{display:none}
+#celebrate .sweep{
+  position:absolute;top:0;bottom:0;width:60%;
+  background:linear-gradient(90deg,transparent,#ff8f8f,#ffc46e,#f5e663,
+             #7ef0a6,#6ec7ff,#8f9dff,#c98fff,transparent);
+  filter:blur(2px);opacity:.75;mix-blend-mode:screen;
+  animation:sweep 1s cubic-bezier(.4,0,.2,1) forwards;
+}
+@keyframes sweep{from{left:-65%}to{left:105%}}
+#celebrate .converge{
+  position:absolute;border-radius:14px;
+  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff);
+  opacity:.5;mix-blend-mode:screen;filter:blur(8px);
+  transition:all .85s cubic-bezier(.5,0,.2,1);
+}
+#hero h1.absorb{animation:absorb .9s ease-out}
+@keyframes absorb{
+  0%{filter:brightness(1)}
+  45%{filter:brightness(2.1) drop-shadow(0 0 22px rgba(255,255,255,.5))}
+  100%{filter:brightness(1)}
+}
+
 /* ------------------------------------------------------- first-run setup */
 #setup-veil{
   position:fixed;inset:0;z-index:50;background:rgba(0,0,0,.66);
@@ -2386,7 +2421,7 @@ __MODEL_ROWS__
     <div id="hero">
       <div class="h1row"><h1>MillenAI</h1><span class="live-tag" hidden>LIVE</span></div>
       <div class="beta-tag">__APP_BETA__</div>
-      <p>What's going on today?</p>
+      <p class="greet">What's going on today?</p>
     </div>
   </div></div>
 
@@ -2408,6 +2443,7 @@ __MODEL_ROWS__
 </main>
 
 <div id="tierpop" hidden></div>
+<div id="celebrate" hidden></div>
 
 <div id="update-veil" hidden>
   <div id="about-card">
@@ -2768,13 +2804,23 @@ async function send(){
   input.focus();
 }
 
+/* ------------------------------------------------------------- greeting */
+const GREETINGS=[
+  "What's going on today?","What's on your mind?","Where should we start?",
+  "What are you working on?","What can I help with?","What's up today?",
+  "Ask me anything.","What are you curious about?",
+  "What shall we get into?","How can I help right now?",
+];
+function greeting(){return GREETINGS[Math.floor(Math.random()*GREETINGS.length)];}
+(function(){const g=$(".greet");if(g)g.textContent=greeting();})();
+
 /* ------------------------------------------------- chats: list + store */
 let chats=[];
 try{chats=JSON.parse(localStorage.getItem("millen.chats"))||[];}catch(e){}
 let curChat=null;   // every launch starts fresh; history stays in the list
 
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1>MillenAI</h1><span class="live-tag" hidden>LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p>What\'s going on today?</p></div>';
+  inner.innerHTML='<div id="hero"><div class="h1row"><h1>MillenAI</h1><span class="live-tag" hidden>LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
   paintLive();
 }
 function saveChats(){
@@ -3126,11 +3172,49 @@ function renderSetup(st){
   }
 }
 
+let wasDownloading=false;
+function celebrateDownloads(){
+  const card=$("#setup-card"),veil=$("#setup-veil"),cel=$("#celebrate");
+  if(perf){closeSetup();return;}          // performance mode: no theatre
+  // 1. the card grows and dissolves
+  card.classList.add("done");veil.classList.add("fading");
+  setTimeout(()=>{
+    closeSetup();card.classList.remove("done");veil.classList.remove("fading");
+    // 2. a rainbow sweeps the window
+    cel.hidden=false;
+    cel.innerHTML='<div class="sweep"></div>';
+    setTimeout(()=>{
+      // 3. …then collapses into the wordmark
+      const h1=$("#hero h1");
+      const box=document.createElement("div");
+      box.className="converge";
+      box.style.left="6%";box.style.top="34%";
+      box.style.width="88%";box.style.height="32%";
+      cel.appendChild(box);
+      requestAnimationFrame(()=>{
+        const r=h1?h1.getBoundingClientRect():{left:innerWidth/2,top:innerHeight/2,width:10,height:10};
+        box.style.left=r.left+"px";box.style.top=r.top+"px";
+        box.style.width=r.width+"px";box.style.height=r.height+"px";
+        box.style.opacity="0";
+        if(h1)setTimeout(()=>h1.classList.add("absorb"),380);
+      });
+      setTimeout(()=>{
+        cel.hidden=true;cel.innerHTML="";
+        if(h1)h1.classList.remove("absorb");
+      },1300);
+    },820);
+  },760);
+}
+
 async function setupTick(){
   try{
     const st=await(await fetch("/api/setup")).json();
     renderSetup(st);
     pollEngines();
+    if(st.busy)wasDownloading=true;
+    else if(wasDownloading&&setupAllReady&&!veil.hidden){
+      wasDownloading=false;celebrateDownloads();
+    }
   }catch(e){}
 }
 function openSetup(){
