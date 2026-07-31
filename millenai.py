@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "V1 Beta 5"   # bump here — UI, window, DMG all follow
-APP_BUILD = 5               # integer compared against the GitHub release tag
+APP_VERSION = "V1 Beta 6"   # bump here — UI, window, DMG all follow
+APP_BUILD = 6               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -172,13 +172,13 @@ TIERS = {
         "icon": "\U0001f9e0", "desc": "reasons it through, blended",
         "picks": ["Phi-4 14B", "DeepSeek R1 7B", "Qwen 2.5 Coder 14B",
                   "Gemma 2 9B IT", "Mistral Nemo 12B"],
-        "count": 3,
+        "count": 5,
     },
     "Pro": {
         "icon": "\u2728", "desc": "several models, blended",
         "picks": ["Mistral Nemo 12B", "Gemma 2 9B IT", "Qwen 2.5 7B",
                   "Llama 3.1 8B", "Llama 3.2 3B"],
-        "count": 3,
+        "count": 5,
     },
 }
 
@@ -187,17 +187,33 @@ THINK_HINT = ("Work through this carefully and step by step before giving "
 
 
 def resolve_tier(name: str) -> list:
-    """Concrete model list for a tier, given what's actually usable now."""
+    """Concrete model list for a tier, given what's actually usable now.
+
+    The tier's own picks come first, then any other installed model that
+    fits in RAM is blended in (strongest first) up to the tier's cap — so
+    downloading more models makes Pro and Thinking richer automatically.
+    """
     t = TIERS.get(name)
     if not t:
         return []
     pulled = ollama_pulled_tags() or set()
-    ready = [l for l in t["picks"]
-             if l in MODEL_ROUTES and model_cached(l, pulled)
-             and model_fits_memory(l)]
-    if not ready:  # nothing from the tier is here — fall back to anything
-        ready = [l for l in MERGE_RANK
-                 if model_cached(l, pulled) and model_fits_memory(l)]
+
+    def usable(l):
+        return (l in MODEL_ROUTES and model_cached(l, pulled)
+                and model_fits_memory(l))
+
+    ready = [l for l in t["picks"] if usable(l)]
+    if t["count"] > 1:
+        # Only blend in models that leave room for the others. A 70B needs
+        # most of the machine, so pairing it with four more would thrash
+        # (and take many minutes) even if it fits on its own right now.
+        total = psutil.virtual_memory().total if HAS_PSUTIL else 0
+        budget = total * 0.45 if total else float("inf")
+        ready += [l for l in MERGE_RANK
+                  if usable(l) and l not in ready
+                  and MODEL_MEM_BYTES.get(l, 0) <= budget]
+    if not ready:  # nothing at all from the tier — fall back to anything
+        ready = [l for l in MERGE_RANK if usable(l)]
     return ready[:t["count"]]
 
 
@@ -1294,6 +1310,10 @@ def run_council(labels: list, messages: list, emit, status) -> None:
 
     drafts = []
     for i, label in enumerate(labels, 1):
+        # free RAM drops as each engine loads — re-check before committing
+        if i > 1 and not model_fits_memory(label):
+            drafts.append((label, "(no answer — low memory)"))
+            continue
         status(f"asking {label} · {i} of {len(labels)}")
         parts = []
         try:
