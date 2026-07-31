@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "V1 Beta 12"   # bump here — UI, window, DMG all follow
-APP_BUILD = 12               # integer compared against the GitHub release tag
+APP_VERSION = "V1 Beta 13"   # bump here — UI, window, DMG all follow
+APP_BUILD = 13               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2245,12 +2245,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 /* ------------------------------------ downloads-complete celebration */
 /* card lifts away like a macOS sheet, a rainbow sweeps the window, then
    collapses into the wordmark */
-#setup-card.done{animation:cardPoof .75s cubic-bezier(.2,.7,.3,1) forwards}
+#setup-card.done{animation:cardPoof .9s cubic-bezier(.2,.7,.3,1) forwards}
 @keyframes cardPoof{
   40%{transform:scale(1.06);opacity:1}
   100%{transform:scale(1.5);opacity:0;filter:blur(10px)}
 }
-#setup-veil.fading{animation:veilOut .75s ease forwards;pointer-events:none}
+#setup-veil.fading{animation:veilOut .9s ease forwards;pointer-events:none}
 @keyframes veilOut{to{opacity:0}}
 
 #celebrate{position:fixed;inset:0;z-index:90;pointer-events:none;overflow:hidden}
@@ -2258,15 +2258,15 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 /* a diagonal band of light that travels across the window */
 #celebrate .sweep{
   position:absolute;top:50%;left:50%;
-  width:46vw;height:260vh;margin:-130vh 0 0 -23vw;
+  width:88vw;height:280vh;margin:-140vh 0 0 -44vw;
   background:linear-gradient(90deg,transparent,#ff8f8f,#ffc46e,#f5e663,
              #7ef0a6,#6ec7ff,#8f9dff,#c98fff,transparent);
-  filter:blur(10px);opacity:.7;mix-blend-mode:screen;
-  animation:sweepDiag 1.05s cubic-bezier(.35,0,.25,1) forwards;
+  filter:blur(16px);opacity:.8;mix-blend-mode:screen;
+  animation:sweepDiag 1.6s cubic-bezier(.35,0,.25,1) forwards;
 }
 @keyframes sweepDiag{
-  from{transform:rotate(24deg) translate(-110vw,-26vh)}
-  to  {transform:rotate(24deg) translate(110vw,26vh)}
+  from{transform:rotate(24deg) translate(-135vw,-32vh)}
+  to  {transform:rotate(24deg) translate(135vw,32vh)}
 }
 /* soft blurred glow that collapses into the wordmark — no hard edges, so
    nothing ever reads as a box sitting on top of the text */
@@ -2275,11 +2275,11 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   background:linear-gradient(115deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
              #6ec7ff,#8f9dff,#c98fff);
   opacity:.6;mix-blend-mode:screen;filter:blur(30px);
-  transition:left .85s cubic-bezier(.45,0,.2,1),
-             top .85s cubic-bezier(.45,0,.2,1),
-             width .85s cubic-bezier(.45,0,.2,1),
-             height .85s cubic-bezier(.45,0,.2,1),
-             opacity .85s ease-in;
+  transition:left 1s cubic-bezier(.45,0,.2,1),
+             top 1s cubic-bezier(.45,0,.2,1),
+             width 1s cubic-bezier(.45,0,.2,1),
+             height 1s cubic-bezier(.45,0,.2,1),
+             opacity 1s ease-in;
 }
 #hero h1.absorb{animation:absorb .9s ease-out}
 @keyframes absorb{
@@ -3212,14 +3212,14 @@ function celebrateDownloads(){
         box.style.left=(cx-w2/2)+"px";box.style.top=(cy-h2/2)+"px";
         box.style.width=w2+"px";box.style.height=h2+"px";
         box.style.opacity="0";
-        if(h1)setTimeout(()=>h1.classList.add("absorb"),420);
+        if(h1)setTimeout(()=>h1.classList.add("absorb"),520);
       });
       setTimeout(()=>{
         cel.hidden=true;cel.innerHTML="";
         if(h1)h1.classList.remove("absorb");
-      },1300);
-    },820);
-  },760);
+      },1600);
+    },1240);
+  },910);
 }
 
 async function setupTick(){
