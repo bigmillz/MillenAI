@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "V1 Beta 13"   # bump here — UI, window, DMG all follow
-APP_BUILD = 13               # integer compared against the GitHub release tag
+APP_VERSION = "1.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 14               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1484,11 +1484,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             html = (HTML_CONTENT
                     .replace("__MODEL_ROWS__", build_model_rows())
                     .replace("__APP_VER_TAG__",
-                             APP_VERSION.upper().replace("V1", "1.0")
-                             .replace(" ", "&nbsp;"))
+                             APP_VERSION.replace(" ", "&nbsp;"))
                     .replace("__APP_BETA__",
-                             '<b class="vnum">1.0</b> '
-                             + APP_VERSION.replace("V1 ", "").upper())
+                             'VERSION <b class="vnum">%s</b>' % APP_VERSION)
                     .replace("__TIER_ROWS__", build_tier_rows())
                     .replace("__CHIP__", chip_name())
                     .replace("__APP_VER__", APP_VERSION))
@@ -2225,7 +2223,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #about-icon{width:96px;height:96px;margin-bottom:16px}
 #about-name{font-family:var(--helv);font-size:24px;font-weight:600;color:var(--text)}
 #about-name em{font-style:italic;font-weight:400;opacity:.85}
-#about-ver{font-family:var(--helv);font-size:14px;color:var(--dim);margin-top:6px}
+#about-ver,#up-ver{font-family:var(--helv);font-size:14px;color:var(--dim);margin-top:6px}
 #up-detail{font-size:11.5px;color:var(--faint);margin:10px 0 4px;line-height:1.5}
 #about-sub{font-size:11.5px;color:var(--faint);margin-top:10px;line-height:1.5}
 #about-facts{
@@ -2459,7 +2457,7 @@ __MODEL_ROWS__
 <div id="update-veil" hidden>
   <div id="about-card">
     <div id="about-name">Update available</div>
-    <div id="about-ver" id="up-ver"></div>
+    <div id="up-ver"></div>
     <div id="up-detail"></div>
     <div class="big-bar" id="up-bar" hidden><i></i></div>
     <button class="about-btn primary" id="up-go">Update now</button>
@@ -3315,7 +3313,7 @@ async function checkUpdate(){
 }
 function openUpdate(){
   if(!upInfo)return;
-  $("#about-ver").textContent=upInfo.latest+"  \u2022  you have "+upInfo.current;
+  $("#up-ver").textContent=upInfo.latest+"  \u2022  you have "+upInfo.current;
   $("#up-detail").textContent=
     "Downloads "+upInfo.size_mb+" MB from GitHub, then restarts. "+
     "Your chats and everything it remembers are kept.";

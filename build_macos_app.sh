@@ -49,8 +49,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleName</key>            <string>MillenAI</string>
   <key>CFBundleDisplayName</key>     <string>MillenAI</string>
   <key>CFBundleIdentifier</key>      <string>com.millen.millenai</string>
-  <key>CFBundleVersion</key>         <string>${APP_BUILD}.0</string>
-  <key>CFBundleShortVersionString</key> <string>${APP_BUILD}.0 (${APP_VERSION})</string>
+  <key>CFBundleVersion</key>         <string>${APP_BUILD}</string>
+  <key>CFBundleShortVersionString</key> <string>${APP_VERSION}</string>
   <key>CFBundleExecutable</key>      <string>MillenAI</string>
   <key>CFBundleIconFile</key>        <string>MillenAI</string>
   <key>CFBundlePackageType</key>     <string>APPL</string>
