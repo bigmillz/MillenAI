@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.1.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 26               # integer compared against the GitHub release tag
+APP_VERSION = "1.1.1"   # bump here — UI, window, DMG all follow
+APP_BUILD = 27               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -435,7 +435,35 @@ OLLAMA_TGZ_URL = "https://ollama.com/download/ollama-darwin.tgz"
 # used automatically with no extra setup
 # Windows ships two builds: amd64 bundles the CUDA runtime, arm64 is
 # CPU-only (Windows-on-ARM has no NVIDIA support).
-IS_WIN_ARM = IS_WIN and platform.machine().lower() in ("arm64", "aarch64")
+#
+# On Windows-on-ARM the app itself normally runs as *emulated x64*, because
+# pythonnet (pywebview's backend) and ctranslate2 (faster-whisper) publish
+# win_amd64 wheels only. So `platform.machine()` reports the architecture of
+# this process, not of the machine, and would send an ARM laptop after the
+# 1.5 GB CUDA build it can never use. Ollama is a separate process talked to
+# over HTTP, so it should always be the *native* build — emulated UI, native
+# inference.
+def _win_native_machine() -> str:
+    """Hardware architecture, seeing through x64/x86 emulation."""
+    try:
+        import ctypes
+        proc, native = ctypes.c_ushort(), ctypes.c_ushort()
+        if ctypes.windll.kernel32.IsWow64Process2(
+                ctypes.windll.kernel32.GetCurrentProcess(),
+                ctypes.byref(proc), ctypes.byref(native)):
+            return {0xAA64: "arm64", 0x8664: "amd64",
+                    0x14C: "x86"}.get(native.value, "amd64")
+    except Exception:
+        pass  # pre-1709 Windows, or a non-Windows import — fall through
+    return (os.environ.get("PROCESSOR_ARCHITEW6432")
+            or os.environ.get("PROCESSOR_ARCHITECTURE")
+            or platform.machine()).lower().replace("aarch64", "arm64")
+
+
+IS_WIN_ARM = IS_WIN and _win_native_machine() == "arm64"
+# true when an ARM box is running us through x64 emulation
+IS_WIN_EMULATED = IS_WIN_ARM and platform.machine().lower() not in (
+    "arm64", "aarch64")
 OLLAMA_ZIP_URL = ("https://github.com/ollama/ollama/releases/latest/download/"
                   + ("ollama-windows-arm64.zip" if IS_WIN_ARM
                      else "ollama-windows-amd64.zip"))
@@ -2532,6 +2560,61 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   45%{filter:brightness(2.1) drop-shadow(0 0 22px rgba(255,255,255,.5))}
   100%{filter:brightness(1)}
 }
+/* The wordmark is *deposited* by the sweep: it rushes in oversized and
+   blurred and lands just as the band crosses the middle of the window.
+   `rainbow` is restated because setting `animation` on a class replaces the
+   whole list rather than adding to it. `hueshift` is deliberately dropped for
+   the duration: it animates `filter` too, and the later entry in the list
+   wins, so leaving it in silently cancelled the blur — the fly-in rendered as
+   a bare scale. 45s of hue drift is imperceptible across one second. */
+/* Timing is `linear` on purpose — the deceleration is written into the
+   keyframes instead. An eased curve here is far too front-loaded: the
+   wordmark had already settled by 0.35s, well before the band reached it, so
+   it read as a separate event rather than as something the sweep delivered.
+   These stops put it at ~1.7x when the band is entering and landing at
+   ~0.8s, exactly when the band crosses the middle. */
+#hero h1.flyin{
+  animation:rainbow 16s linear infinite,heroIn 1.05s linear both;
+}
+@keyframes heroIn{
+  0%  {opacity:0;transform:scale(2.3) translateY(12px);filter:blur(22px)}
+  22% {opacity:1}
+  40% {transform:scale(1.62) translateY(7px);filter:blur(9px)}
+  62% {transform:scale(1.2) translateY(3px);filter:blur(3px)}
+  78% {transform:scale(.972) translateY(0);filter:blur(0)}  /* slight overshoot */
+  100%{opacity:1;transform:scale(1) translateY(0);filter:blur(0)}
+}
+/* the small type follows a beat later, so the screen assembles rather than
+   simply appearing all at once */
+#hero .beta-tag.flyin,#hero .greet.flyin{
+  animation:heroRise .7s cubic-bezier(.2,.8,.3,1) .34s both;
+}
+@keyframes heroRise{
+  from{opacity:0;transform:translateY(9px)}
+  to  {opacity:1;transform:translateY(0)}
+}
+/* a narrow bright core riding just behind the wide band — gives the sweep a
+   leading edge instead of one soft smear */
+#celebrate .spark{
+  position:absolute;top:50%;left:50%;
+  width:11vw;height:280vh;margin:-140vh 0 0 -5.5vw;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.9),transparent);
+  filter:blur(5px);opacity:.85;mix-blend-mode:screen;
+  animation:sweepDiag 1.6s cubic-bezier(.35,0,.25,1) .07s forwards;
+}
+/* the impact — a soft bloom centred on the wordmark as the band reaches it */
+#celebrate .bloom{
+  position:absolute;border-radius:50%;
+  background:radial-gradient(circle,rgba(255,255,255,.85),
+             rgba(255,255,255,.16) 45%,transparent 70%);
+  mix-blend-mode:screen;opacity:0;
+  animation:bloomPop .85s ease-out .62s forwards;
+}
+@keyframes bloomPop{
+  0%  {opacity:0;transform:translate(-50%,-50%) scale(.35)}
+  22% {opacity:.85}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.9)}
+}
 
 /* ------------------------------------------------------- first-run setup */
 #setup-veil{
@@ -3482,42 +3565,75 @@ function renderSetup(st){
   }
 }
 
+/* The rainbow wipe — a diagonal band of light crosses the window, then
+   collapses into the wordmark. Shared by the app-open flourish and the
+   downloads-complete celebration so the two are always identical. */
+let wipeBusy=false;
+function rainbowWipe(){
+  const cel=$("#celebrate");
+  if(perf||!cel||wipeBusy)return;         // performance mode: no theatre
+  wipeBusy=true;
+  cel.hidden=false;
+  cel.innerHTML='<div class="sweep"></div><div class="spark"></div>';
+  // the wordmark flies in under the band. Measure first — once .flyin is on,
+  // the element is scaled and the rect no longer describes its resting place.
+  const hero1=$("#hero h1");
+  if(hero1){
+    const r0=hero1.getBoundingClientRect();
+    const bloom=document.createElement("div");
+    bloom.className="bloom";
+    const D=Math.max(r0.width*1.5,420);
+    bloom.style.width=D+"px";bloom.style.height=D+"px";
+    bloom.style.left=(r0.left+r0.width/2)+"px";
+    bloom.style.top=(r0.top+r0.height/2)+"px";
+    cel.appendChild(bloom);
+    hero1.classList.add("flyin");
+    [$("#hero .beta-tag"),$("#hero .greet")].forEach(e=>{
+      if(e)e.classList.add("flyin");
+    });
+  }
+  setTimeout(()=>{
+    // …then collapses into the wordmark
+    const h1=$("#hero h1");
+    // drop the entry classes before measuring, so the rect is the resting one
+    if(h1)h1.classList.remove("flyin");
+    [$("#hero .beta-tag"),$("#hero .greet")].forEach(e=>{
+      if(e)e.classList.remove("flyin");
+    });
+    const r=h1?h1.getBoundingClientRect()
+              :{left:innerWidth/2-60,top:innerHeight/2-20,width:120,height:40};
+    const cx=r.left+r.width/2, cy=r.top+r.height/2;
+    const box=document.createElement("div");
+    box.className="converge";
+    // enters along the same diagonal the sweep travelled
+    const W=r.width*2.6, H=r.height*4.5;
+    box.style.width=W+"px";box.style.height=H+"px";
+    box.style.left=(cx-W/2-170)+"px";box.style.top=(cy-H/2-110)+"px";
+    cel.appendChild(box);
+    requestAnimationFrame(()=>{
+      const w2=r.width*.55, h2=r.height*.5;
+      box.style.left=(cx-w2/2)+"px";box.style.top=(cy-h2/2)+"px";
+      box.style.width=w2+"px";box.style.height=h2+"px";
+      box.style.opacity="0";
+      if(h1)setTimeout(()=>h1.classList.add("absorb"),520);
+    });
+    setTimeout(()=>{
+      cel.hidden=true;cel.innerHTML="";
+      if(h1)h1.classList.remove("absorb");
+      wipeBusy=false;
+    },1600);
+  },1240);
+}
+
 let wasDownloading=false;
 function celebrateDownloads(){
-  const card=$("#setup-card"),veil=$("#setup-veil"),cel=$("#celebrate");
+  const card=$("#setup-card"),veil=$("#setup-veil");
   if(perf){closeSetup();return;}          // performance mode: no theatre
-  // 1. the card grows and dissolves
+  // the card grows and dissolves, then the wipe runs
   card.classList.add("done");veil.classList.add("fading");
   setTimeout(()=>{
     closeSetup();card.classList.remove("done");veil.classList.remove("fading");
-    // 2. a rainbow sweeps the window
-    cel.hidden=false;
-    cel.innerHTML='<div class="sweep"></div>';
-    setTimeout(()=>{
-      // 3. …then collapses into the wordmark
-      const h1=$("#hero h1");
-      const r=h1?h1.getBoundingClientRect()
-                :{left:innerWidth/2-60,top:innerHeight/2-20,width:120,height:40};
-      const cx=r.left+r.width/2, cy=r.top+r.height/2;
-      const box=document.createElement("div");
-      box.className="converge";
-      // enters along the same diagonal the sweep travelled
-      const W=r.width*2.6, H=r.height*4.5;
-      box.style.width=W+"px";box.style.height=H+"px";
-      box.style.left=(cx-W/2-170)+"px";box.style.top=(cy-H/2-110)+"px";
-      cel.appendChild(box);
-      requestAnimationFrame(()=>{
-        const w2=r.width*.55, h2=r.height*.5;
-        box.style.left=(cx-w2/2)+"px";box.style.top=(cy-h2/2)+"px";
-        box.style.width=w2+"px";box.style.height=h2+"px";
-        box.style.opacity="0";
-        if(h1)setTimeout(()=>h1.classList.add("absorb"),520);
-      });
-      setTimeout(()=>{
-        cel.hidden=true;cel.innerHTML="";
-        if(h1)h1.classList.remove("absorb");
-      },1600);
-    },1240);
+    rainbowWipe();
   },910);
 }
 
@@ -3544,6 +3660,11 @@ setupGo.addEventListener("click",async()=>{
   setupTick();
 });
 $("#open-setup").addEventListener("click",openSetup);
+// Every launch opens with the wipe. It deliberately does *not* wait on the
+// /api/setup round trip below — that call enumerates every model on disk and
+// can take seconds, which would leave the window sitting there looking frozen
+// before the flourish finally played.
+requestAnimationFrame(rainbowWipe);
 (async()=>{
   try{
     const st=await(await fetch("/api/setup")).json();

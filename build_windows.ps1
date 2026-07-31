@@ -55,6 +55,17 @@ REQUIREMENTS
   * NVIDIA GPU strongly recommended — Ollama uses CUDA automatically.
     It runs on CPU without one, just slowly.
 
+WINDOWS ON ARM (Snapdragon / Surface / ARM VMs)
+  Install the "Windows installer (64-bit)" — the x64 one, NOT ARM64.
+  Two of the dependencies (pythonnet, which draws the window, and
+  ctranslate2, which does voice input) ship x64 wheels only, so an ARM64
+  Python cannot install them. Windows 11 runs the x64 build under
+  emulation with no setup on your part.
+
+  Only the app runs emulated. MillenAI still downloads the native ARM64
+  Ollama, so the models themselves run at full speed. There is no CUDA on
+  Windows-on-ARM, so inference is CPU-only either way.
+
 INSTALL
   1. Unzip anywhere (e.g. Documents\MillenAI)
   2. Double-click MillenAI.bat

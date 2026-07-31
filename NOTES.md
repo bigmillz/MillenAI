@@ -4,7 +4,7 @@ A local-only LLM desktop app for macOS. Everything runs on the user's machine:
 models, transcription, speech, memory. Nothing is sent anywhere except
 optional DuckDuckGo lookups and the GitHub update check.
 
-Current: **1.0** (build 14) · repo `bigmillz/MillenAI`
+Current: **1.1.0** (build 26) · repo `bigmillz/MillenAI`
 
 ---
 
@@ -130,6 +130,26 @@ available" prompt — so shipping a release that adds models surfaces them
 instead of leaving them buried in "Add models…". First run records the whole
 catalog as seen, so nothing is announced to a brand-new install.
 
+### The opening flourish
+`rainbowWipe()` runs on every launch and again when downloads finish — one
+function, so the two are always identical. A rainbow band crosses the window
+diagonally (1.6s) with a narrow white core just behind it; the wordmark rushes
+in from 2.3× scale under 22px of blur and lands at ~0.8s, exactly when the band
+crosses the middle, with a bloom flaring behind it. The version tag and
+greeting rise in on a 0.34s delay so the screen assembles rather than appears.
+Then the existing converge-and-absorb finish plays.
+
+Two things to preserve if this is ever retouched:
+
+- **It must not wait on `/api/setup`.** That call enumerates every model on
+  disk and took 2.3s here; gating the flourish on it left the window sitting
+  there looking frozen. It now fires on the first `requestAnimationFrame`
+  (measured: 22ms) and the setup check runs independently.
+- **The fly-in easing is `linear` on purpose.** Deceleration is written into
+  the keyframes. Any eased curve is far too front-loaded — the wordmark had
+  settled by 0.35s, well before the band reached it, so it read as an
+  unrelated event instead of something the sweep delivered.
+
 ### Memory
 Facts about the user are extracted in the background after each message by
 whichever model just answered, stored in `memory.json`, and folded into the
@@ -196,6 +216,14 @@ address…" for 16k characters. Title generation requires a ≥2.4 GB model.
 examples, they echo the examples instead of reading the actual message.
 Direct instructions work; few-shot does not.
 
+**Two CSS animations on one property: the last in the list wins, silently.**
+The wordmark already ran `hueshift`, which animates `filter`. Adding a fly-in
+that also animated `filter: blur()` meant one of them was simply discarded —
+no warning, no console error, the blur just never rendered and the effect
+degraded to a bare scale. `hueshift` is now dropped for the duration of the
+fly-in. Related: setting `animation` on a class **replaces** the whole list
+rather than adding to it, so `#hero h1.flyin` has to restate `rainbow`.
+
 **Temporal dead zone kills the whole script silently.** A `let` referenced
 during boot before its declaration throws, aborting everything after it —
 with no console error if the tab attached late. Declare shared state at the
@@ -242,9 +270,24 @@ Build with `powershell -ExecutionPolicy Bypass -File build_windows.ps1`.
 Like the Mac build the zip is tiny: the launcher creates a venv on first run
 and the app fetches Ollama and models itself.
 
+**Windows-on-ARM must run the app as emulated x64.** Not a preference — a
+hard dependency wall. `pythonnet` 3.1.0 (pywebview's Windows backend; there
+is no alternative, `cefpython3` stopped at Python 3.7) publishes a single
+`win32.win_amd64` wheel, and `ctranslate2` 4.8.1 (faster-whisper) is
+`win_amd64` only. On an ARM64 Python both fall back to building from source
+and fail, so the window never opens. Install the x64 python.org build; Win11
+emulates it transparently.
+
+Ollama stays **native ARM64** regardless, because it is a separate process
+reached over HTTP — the architecture of the Python process is irrelevant to
+it. Emulation cost therefore lands on the UI, where it is invisible, not on
+inference. This is why `IS_WIN_ARM` comes from `IsWow64Process2` (the
+*machine*) and not `platform.machine()` (this *process*): an emulated x64
+process reports `AMD64` and would otherwise pull the 1.5 GB CUDA build onto
+a machine that can never load it.
+
 **Windows-on-ARM has no CUDA** — no NVIDIA support exists for it, so those
-machines run CPU-only and `faster-whisper` likely has no ARM64 wheel
-(voice input degrades to unavailable rather than crashing).
+machines are CPU-only whichever build they run.
 
 **CUDA needs no code.** Ollama detects an NVIDIA GPU and offloads on its own;
 the Windows zip ships the CUDA runtime. A 4090 will comfortably outrun an
