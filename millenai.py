@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.3.2"   # bump here — UI, window, DMG all follow
-APP_BUILD = 35               # integer compared against the GitHub release tag
+APP_VERSION = "1.3.3"   # bump here — UI, window, DMG all follow
+APP_BUILD = 36               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2124,7 +2124,6 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "mem_used_gb": round(vm.used / 1e9, 1),
                 "mem_total_gb": round(vm.total / 1e9, 1),
                 "mem_pct": vm.percent,
-                "cpu_pct": psutil.cpu_percent(interval=None),
                 "gpu_pct": gpu,  # None when ioreg has no accelerator stats
             }
         else:
@@ -3030,10 +3029,6 @@ __MODEL_ROWS__
       <div class="meter" id="mem-meter"></div>
     </div>
     <div class="meter-row">
-      <div class="meter-label"><span>SYSTEM COMPUTE</span><b id="cpu-label">—</b></div>
-      <div class="meter" id="cpu-meter"></div>
-    </div>
-    <div class="meter-row">
       <div class="meter-label"><span>GPU COMPUTE</span><b id="gpu-label">—</b></div>
       <div class="meter" id="gpu-meter"></div>
     </div>
@@ -3547,14 +3542,14 @@ $("#newchat").addEventListener("click",()=>{
 
 /* ---------------------------------------------------------- telemetry */
 function buildMeter(el,n){for(let i=0;i<n;i++)el.appendChild(document.createElement("i"));}
-buildMeter($("#mem-meter"),18);buildMeter($("#cpu-meter"),18);buildMeter($("#gpu-meter"),18);
+buildMeter($("#mem-meter"),18);buildMeter($("#gpu-meter"),18);
 function paintMeter(el,pct){
   const segs=el.children,lit=Math.round(pct/100*segs.length);
   for(let i=0;i<segs.length;i++){
     segs[i].className=i<lit?(i>=segs.length*0.8?"hot":"lit"):"";
   }
 }
-let simMem=58,simCpu=22,simGpu=12;
+let simMem=58,simGpu=12;
 function paintGpu(pct){
   if(pct==null){$("#gpu-label").textContent="—";paintMeter($("#gpu-meter"),0);return;}
   $("#gpu-label").textContent=pct.toFixed(0)+"%";
@@ -3568,19 +3563,14 @@ async function pollStats(){
     if(st.real){
       $("#mem-label").textContent=st.mem_used_gb+" / "+st.mem_total_gb+" GB";
       paintMeter($("#mem-meter"),st.mem_pct);
-      $("#cpu-label").textContent=st.cpu_pct.toFixed(0)+"%";
-      paintMeter($("#cpu-meter"),st.cpu_pct);
       paintGpu(gpu);
       return;
     }
   }catch(e){}
   // ambient fallback — clearly approximate
   simMem=Math.max(35,Math.min(88,simMem+(Math.random()-0.5)*4+(generating?1.5:-0.8)));
-  simCpu=Math.max(6,Math.min(96,simCpu+(Math.random()-0.5)*10+(generating?14:-9)));
   $("#mem-label").textContent="~"+(simMem*0.48).toFixed(0)+" / 48 GB";
   paintMeter($("#mem-meter"),simMem);
-  $("#cpu-label").textContent="~"+simCpu.toFixed(0)+"%";
-  paintMeter($("#cpu-meter"),simCpu);
   if(gpu!=null){paintGpu(gpu);return;}  // ioreg is real even without psutil
   simGpu=Math.max(2,Math.min(97,simGpu+(Math.random()-0.5)*8+(generating?22:-16)));
   $("#gpu-label").textContent="~"+simGpu.toFixed(0)+"%";
