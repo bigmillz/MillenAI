@@ -66,7 +66,7 @@ the Keychain; nothing is stored in the repo.
 ## How it works
 
 ### Model catalog
-One `CATALOG` list defines all 17 models: label, icon, MLX repo, Ollama tag,
+One `CATALOG` list defines all 19 models: label, icon, MLX repo, Ollama tag,
 port, RAM need, download size. Everything else derives from it —
 `MODEL_ROUTES`, `MLX_REPOS`, `MODEL_MEM_BYTES`, `SUPPORTED`, the sidebar rows.
 Adding a model is one line.
@@ -87,8 +87,9 @@ Excluded from auto-blending: vision models (`LLaVA`) and anything under
 2.4 GB (1B-class models produce degenerate output).
 
 ### The merger
-Gemma 2 9B IT writes the final blended answer. This was measured, not
-assumed — same three drafts containing nine distinct facts, merged by each
+Gemma writes the final blended answer, preferring the newest generation
+installed: **Gemma 4 12B → Gemma 4 26B → Gemma 2 9B IT**, then the strongest
+model that fits. The choice of Gemma was measured, not assumed — same three drafts containing nine distinct facts, merged by each
 candidate:
 
 | merger | time | words | facts kept | notes |

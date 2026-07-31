@@ -73,8 +73,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.1.1"   # bump here — UI, window, DMG all follow
-APP_BUILD = 22               # integer compared against the GitHub release tag
+APP_VERSION = "1.2.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 23               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -145,6 +145,8 @@ CATALOG = [
     ("Qwen 2.5 7B",        "🧭", "7B",  "core", "mlx-community/Qwen2.5-7B-Instruct-4bit",          "qwen2.5:7b",        8896,  5.0,  4.3, False),
     ("Qwen 2.5 Coder 7B",  "💻", "7B",  "code", "mlx-community/Qwen2.5-Coder-7B-Instruct-4bit",    "qwen2.5-coder:7b",  8898,  5.0,  4.3, False),
     ("Qwen 2.5 Coder 14B", "🛠️", "14B", "code", "mlx-community/Qwen2.5-Coder-14B-Instruct-4bit",   "qwen2.5-coder:14b", 8900,  9.5,  8.1, False),
+    ("Gemma 4 12B",        "💠", "12B", "core", "mlx-community/gemma-4-12B-it-4bit",               "gemma4:12b",        8908,  8.2,  6.8, True),
+    ("Gemma 4 26B",        "🔷", "26B", "core", "mlx-community/gemma-4-26b-a4b-it-4bit",           "gemma4:26b",        8910, 17.0, 15.4, False),
     ("Phi-4 14B",          "🔬", "14B", "core", "mlx-community/phi-4-4bit",                        "phi4:14b",          8902,  9.5,  8.2, False),
     ("DeepSeek R1 7B",     "🧠", "7B",  "core", "mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit",  "deepseek-r1:7b",    8904,  5.0,  4.3, False),
     ("Mistral Small 24B",  "🧊", "24B", "big",  "mlx-community/Mistral-Small-24B-Instruct-2501-4bit", "mistral-small:24b", 8906, 15.0, 13.0, False),
@@ -192,14 +194,14 @@ TIERS = {
     },
     "Thinking": {
         "icon": "\U0001f9e0", "desc": "reasons it through, blended",
-        "picks": ["Phi-4 14B", "DeepSeek R1 7B", "Qwen 2.5 Coder 14B",
-                  "Gemma 2 9B IT", "Mistral Nemo 12B"],
+        "picks": ["Gemma 4 26B", "Phi-4 14B", "DeepSeek R1 7B",
+                  "Qwen 2.5 Coder 14B", "Gemma 4 12B"],
         "count": 3,
     },
     "Pro": {
         "icon": "\u2728", "desc": "several models, blended",
-        "picks": ["Mistral Nemo 12B", "Gemma 2 9B IT", "Qwen 2.5 7B",
-                  "Llama 3.1 8B", "Llama 3.2 3B"],
+        "picks": ["Gemma 4 12B", "Mistral Nemo 12B", "Gemma 2 9B IT",
+                  "Qwen 2.5 7B", "Llama 3.1 8B"],
         "count": 5,
     },
     "Power": {
@@ -1572,9 +1574,11 @@ def run_council(labels: list, messages: list, emit, status) -> None:
     answered = [l for l, _t in good]
     merger = next((l for l in MERGE_RANK
                    if l in answered and model_fits_memory(l)), answered[0])
-    pref = "Gemma 2 9B IT"
-    if model_cached(pref) and model_fits_memory(pref):
-        merger = pref
+    # Gemma writes the merge; prefer the newest generation that's installed
+    for pref in ("Gemma 4 12B", "Gemma 4 26B", "Gemma 2 9B IT"):
+        if model_cached(pref) and model_fits_memory(pref):
+            merger = pref
+            break
 
     # feed the merger only the strongest few answers, each truncated:
     # an unbounded merge prompt overflows small models' context and sends
