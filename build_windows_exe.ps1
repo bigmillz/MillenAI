@@ -9,11 +9,13 @@
 #   MillenAI-<ver>-Setup.exe                installer, if ISCC.exe is found
 #   MillenAI-<ver>-Windows-exe.zip          otherwise, a zip of the folder
 #
-# ON A WINDOWS-ON-ARM VM: run this under an *x64* Python. PyInstaller bakes
-# in whatever architecture built it, so an ARM64 Python yields an exe that
-# only runs on ARM machines - and those have no CUDA. Building under emulated
-# x64 gives the x64 exe an NVIDIA machine actually needs. The script checks
-# and stops if you get this wrong.
+# PyInstaller bakes in whatever architecture built it, so the interpreter you
+# run this with decides who can run the result:
+#   x64 Python   -> x64 exe   : any normal PC, CUDA works. What a friend needs.
+#   ARM64 Python -> ARM64 exe : Snapdragon/Surface/ARM VMs only, never CUDA.
+# On an ARM box, an x64 Python runs fine under emulation and is the one to
+# use for a shareable build. The script prefers x64 automatically when both
+# are installed, and tells you which it picked.
 #
 # KEEP THIS FILE PURE ASCII. Windows PowerShell 5.1 reads a .ps1 with no BOM
 # as the ANSI codepage, not UTF-8. A UTF-8 em-dash arrives as three CP1252
@@ -67,18 +69,23 @@ function Find-Python {
     }
   }
 
+  # Prefer x64 - it is the build an NVIDIA machine can actually run - but
+  # fall back to ARM64 rather than claiming nothing is installed.
   $seen = @{}
   $script:PyReport = @()
+  $armFallback = $null
   foreach ($exe in $cands) {
     if (-not (Test-Path $exe)) { continue }
     $key = $exe.ToLower()
     if ($seen.ContainsKey($key)) { continue }
     $seen[$key] = $true
     $arch = Get-PyArch $exe
-    $script:PyReport += ("    {0,-8} {1}" -f ($arch, $exe))
+    if (-not $arch) { continue }
+    $script:PyReport += ("    {0,-8} {1}" -f $arch, $exe)
     if ($arch -match 'AMD64|x86_64') { return $exe }
+    if (-not $armFallback -and $arch -match 'ARM64|aarch64') { $armFallback = $exe }
   }
-  return $null
+  return $armFallback
 }
 
 $py = Find-Python
@@ -87,9 +94,9 @@ if (-not $py) {
   Write-Host "  Python is not installed." -ForegroundColor Yellow
   Write-Host ""
   Write-Host "  Get it from  https://www.python.org/downloads/windows/"
-  Write-Host "  Choose 'Windows installer (64-bit)' - the x64 one."
-  Write-Host "  Do NOT choose ARM64: PyInstaller would then build an exe that"
-  Write-Host "  only runs on ARM machines, and those have no CUDA."
+  Write-Host "  Choose 'Windows installer (64-bit)' - the x64 one - if you"
+  Write-Host "  want a build an NVIDIA machine can run. ARM64 also works, but"
+  Write-Host "  the exe it makes runs only on ARM machines and has no CUDA."
   Write-Host ""
   Write-Host "  Tick 'Add python.exe to PATH' in the installer."
   Write-Host ""
@@ -103,16 +110,25 @@ if (-not $py) {
   throw "no Python interpreter found"
 }
 Write-Host "python: $py"
+if ($script:PyReport -and $script:PyReport.Count -gt 1) {
+  Write-Host "  interpreters found:"
+  $script:PyReport | ForEach-Object { Write-Host $_ }
+}
 
 $arch = & $py -c "import platform;print(platform.machine())"
 Write-Host "python architecture: $arch"
-if ($arch -notmatch 'AMD64|x86_64') {
+$isArm = $arch -match 'ARM64|aarch64'
+if ($isArm) {
   Write-Host ""
-  Write-Host "  STOP - this Python is $arch, not x64." -ForegroundColor Yellow
-  Write-Host "  The exe it builds would run only on ARM machines, which have no CUDA."
-  Write-Host "  Install the x64 python.org build and run this again with that one."
-  Write-Host "  (Windows 11 runs it under emulation; nothing else to set up.)"
-  throw "need an x64 Python"
+  Write-Host "  Building an ARM64 exe." -ForegroundColor Yellow
+  Write-Host "  Runs on: this VM, Snapdragon and Surface ARM machines."
+  Write-Host "  Does NOT run on an x64 PC - x64 Windows cannot execute ARM64"
+  Write-Host "  binaries; emulation only works the other way round. There is"
+  Write-Host "  also no CUDA on Windows-on-ARM, so this build is CPU-only."
+  Write-Host "  For an NVIDIA machine, rerun this under the x64 python.org build."
+  Write-Host ""
+} elseif ($arch -notmatch 'AMD64|x86_64') {
+  throw "unrecognised architecture: $arch"
 }
 
 $ver = (Select-String -Path millenai.py -Pattern 'APP_VERSION = "([^"]+)"').Matches[0].Groups[1].Value
@@ -127,7 +143,17 @@ if (-not (Test-Path "$bv\Scripts\python.exe")) {
 $bpy = "$bv\Scripts\python.exe"
 Write-Host "-> installing build dependencies (a few minutes the first time)"
 & $bpy -m pip install --upgrade pip | Out-Null
-& $bpy -m pip install pyinstaller pywebview ddgs psutil huggingface_hub faster-whisper | Out-Null
+$deps = @("pyinstaller", "pywebview", "ddgs", "psutil", "huggingface_hub")
+if ($isArm) {
+  # pythonnet - pywebview's default Windows backend - has no ARM64 wheel, so
+  # drive the Qt backend instead; PySide6 and QtWebEngine do ship one.
+  # ctranslate2 has no ARM64 wheel either, so voice input is left out and the
+  # app degrades to "voice unavailable" rather than failing to start.
+  $deps += "pyside6"
+} else {
+  $deps += "faster-whisper"
+}
+& $bpy -m pip install @deps | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
 
 # ------------------------------------------------------------------- build
@@ -141,12 +167,15 @@ $pyiArgs = @(
   "--noconfirm", "--clean", "--windowed", "--onedir",
   "--name", "MillenAI",
   "--icon", "MillenAI.ico",
-  # pywebview resolves its backend dynamically, so PyInstaller cannot see it
-  "--hidden-import", "webview.platforms.edgechromium",
-  "--hidden-import", "clr",
-  "--collect-all", "webview",
-  "millenai.py"
+  "--collect-all", "webview"
 )
+# pywebview resolves its backend dynamically, so PyInstaller cannot see it
+if ($isArm) {
+  $pyiArgs += @("--hidden-import", "webview.platforms.qt", "--collect-all", "PySide6")
+} else {
+  $pyiArgs += @("--hidden-import", "webview.platforms.edgechromium", "--hidden-import", "clr")
+}
+$pyiArgs += "millenai.py"
 Write-Host "-> running PyInstaller"
 & $bpy -m PyInstaller @pyiArgs
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
@@ -159,6 +188,9 @@ $iscc = @(
   "$env:ProgramFiles\Inno Setup 6\ISCC.exe"
 ) | Where-Object { Test-Path $_ } | Select-Object -First 1
 
+$suffix   = if ($isArm) { "arm64" } else { "x64" }
+$archMode = if ($isArm) { "arm64" } else { "x64compatible" }
+
 if ($iscc) {
   Write-Host "-> found Inno Setup, building the installer"
   $iss = @"
@@ -167,11 +199,11 @@ AppName=MillenAI
 AppVersion=$ver
 DefaultDirName={autopf}\MillenAI
 DefaultGroupName=MillenAI
-OutputBaseFilename=MillenAI-$ver-Setup
+OutputBaseFilename=MillenAI-$ver-Setup-$suffix
 OutputDir=.
 Compression=lzma2
 SolidCompression=yes
-ArchitecturesInstallIn64BitMode=x64compatible
+ArchitecturesInstallIn64BitMode=$archMode
 SetupIconFile=MillenAI.ico
 UninstallDisplayIcon={app}\MillenAI.exe
 PrivilegesRequired=lowest
@@ -190,9 +222,9 @@ Filename: "{app}\MillenAI.exe"; Description: "Launch MillenAI"; Flags: nowait po
   & $iscc "MillenAI.iss"
   if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
   Write-Host ""
-  Write-Host "built MillenAI-$ver-Setup.exe" -ForegroundColor Green
+  Write-Host "built MillenAI-$ver-Setup-$suffix.exe" -ForegroundColor Green
 } else {
-  $zip = "MillenAI-$ver-Windows-exe.zip"
+  $zip = "MillenAI-$ver-Windows-exe-$suffix.zip"
   if (Test-Path $zip) { Remove-Item $zip }
   Compress-Archive -Path "dist\MillenAI" -DestinationPath $zip
   Write-Host ""
