@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.3.3"   # bump here — UI, window, DMG all follow
-APP_BUILD = 36               # integer compared against the GitHub release tag
+APP_VERSION = "1.4.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 37               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1056,10 +1056,20 @@ def _speak(text: str):
     """Read a reply aloud with the system voice; new speech cuts off old."""
     global _say_proc
     _stop_speaking()
+    # Reasoning is for reading, never for listening. The markdown pass below
+    # does not know about the tags either, so "<think" was being spoken as a
+    # word before the entire chain of thought.
+    plain = strip_think(text)
+    # a research brief ends in a bibliography — reading a list of source
+    # titles aloud roughly doubled the length of every spoken answer
+    plain = re.split(r"\n\s*\**\s*Sources\s*\**\s*\n", plain)[0]
     # strip the markdown the models produce so `say` doesn't read symbols
-    plain = re.sub(r"```[\s\S]*?```", " code block omitted. ", text)
+    plain = re.sub(r"```[\s\S]*?```", " code block omitted. ", plain)
+    plain = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", plain)   # links before refs
+    plain = re.sub(r"\[\d+(?:\s*,\s*\d+)*\]", "", plain)     # "[1]", "[2, 5]"
     plain = re.sub(r"[*_#`>|]", "", plain)
-    plain = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", plain)
+    plain = re.sub(r"[ \t]{2,}", " ", plain)
+    plain = re.sub(r"\s+([.,;:!?])", r"\1", plain)   # tidy the gap a cite left
     text = plain.strip()[:4000]
     if not text:
         return
@@ -1762,26 +1772,37 @@ def run_council(labels: list, messages: list, emit, status) -> None:
     labels = (usable or labels[:1])[:12]
 
     drafts = []
+
+    def took_part(label, text):
+        """Record a draft and show it. Blending is the whole point of these
+        modes, and until now its only visible trace was a status line."""
+        drafts.append((label, text))
+        try:
+            emit(NUL + "DRAFT:" +
+                 json.dumps({"m": label, "t": text[:1200]}) + NUL)
+        except Exception:
+            pass          # never let the display break the answer
+
     for i, label in enumerate(labels, 1):
         # free RAM drops as each engine loads — re-check before committing
         if i > 1 and not model_fits_memory(label):
-            drafts.append((label, "(no answer — low memory)"))
+            took_part(label, "(no answer — low memory)")
             continue
         status(f"asking {label} · {i} of {len(labels)}")
         parts = []
         try:
             run_model(label, messages, parts.append)
         except Exception as exc:
-            drafts.append((label, f"(no answer — {type(exc).__name__})"))
+            took_part(label, f"(no answer — {type(exc).__name__})")
             continue
         # the merger gets answers, never the reasoning that produced them
         text = strip_think("".join(parts))
         if _looks_degenerate(text):
             # a runaway repetition loop would poison the merge prompt
-            drafts.append((label, "(no answer — degenerate output)"))
+            took_part(label, "(no answer — degenerate output)")
             continue
         if text:
-            drafts.append((label, text))
+            took_part(label, text)
 
     good = [d for d in drafts if not d[1].startswith("(no answer")]
     if not good:
@@ -2689,6 +2710,30 @@ body.perf .msg{animation:none}
 }
 .body details[open] summary{border-bottom:1px solid var(--line-soft);color:var(--dim)}
 .body details .think-body{padding:10px 14px;color:var(--dim);font-size:13.5px;line-height:1.6}
+/* ---- who contributed to a blended answer */
+.contrib{margin:0 0 10px}
+.contrib>summary{
+  cursor:pointer;list-style:none;display:inline-flex;align-items:center;gap:7px;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
+  color:var(--faint);padding:3px 0;user-select:none;
+}
+.contrib>summary::-webkit-details-marker{display:none}
+.contrib>summary:hover{color:var(--dim)}
+.contrib>summary .caretmark{transition:transform .16s}
+.contrib[open]>summary .caretmark{transform:rotate(90deg)}
+.draft{
+  border-left:2px solid var(--line);margin:8px 0 0;padding:2px 0 2px 12px;
+  animation:draftIn .32s ease-out both;
+}
+@keyframes draftIn{from{opacity:0;transform:translateY(-4px)}to{opacity:1;transform:none}}
+.draft .dm{
+  font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+  color:var(--accent);text-transform:uppercase;
+}
+.draft .dt{color:var(--dim);font-size:13px;line-height:1.55;margin-top:3px;
+  max-height:150px;overflow:hidden;white-space:pre-wrap}
+.draft.empty .dt{color:var(--faint);font-style:italic}
+body.perf .draft{animation:none}
 
 .statusline{
   display:block;font-family:var(--mono);font-size:11px;
@@ -3305,7 +3350,34 @@ function renderMD(raw){
 
 /* ----------------------------------------------------------- chat ui */
 const inner=$("#chat-inner"), scroller=$("#chat-scroll");
-function addMsg(role,text){
+/* Renders "who contributed" above a blended answer. Open while the drafts
+   are still arriving so you can watch them land, collapsed once the merge
+   starts - by then the merged answer is the thing worth reading. */
+function paintDrafts(div,drafts,live){
+  if(!div||!drafts||!drafts.length)return;
+  let d=div.querySelector(".contrib");
+  if(!d){
+    d=document.createElement("details");
+    d.className="contrib";
+    div.insertBefore(d,div.querySelector(".body"));
+  }
+  // open while drafts are landing, collapse once on the switch to merged -
+  // keyed on the transition so a repaint never overrides a manual toggle
+  if(d.dataset.live!==String(!!live)){d.open=!!live;d.dataset.live=String(!!live);}
+  const answered=drafts.filter(x=>!/^\(no answer/.test(x.t)).length;
+  d.innerHTML='<summary><span class="caretmark">\u203a</span>'
+    +(live?"asking "+drafts.length+" model"+(drafts.length===1?"":"s")+"\u2026"
+          :answered+" of "+drafts.length+" models contributed")
+    +'</summary>'
+    +drafts.map(x=>{
+       const none=/^\(no answer/.test(x.t);
+       return '<div class="draft'+(none?" empty":"")+'">'
+         +'<div class="dm">'+esc(x.m)+'</div>'
+         +'<div class="dt">'+esc(x.t)+'</div></div>';}).join("");
+  return d;
+}
+
+function addMsg(role,text,drafts){
   const hero=$("#hero"); if(hero)hero.remove();
   const div=document.createElement("div");
   div.className="msg "+(role==="user"?"user":"ai");
@@ -3313,6 +3385,7 @@ function addMsg(role,text){
   div.innerHTML='<div class="who">'+who+'</div><div class="body"></div>';
   const body=div.querySelector(".body");
   if(role==="user")body.textContent=text; else body.innerHTML=renderMD(text);
+  if(role!=="user"&&drafts&&drafts.length)paintDrafts(div,drafts,false);
   inner.appendChild(div);
   scroller.scrollTop=scroller.scrollHeight;
   return div;
@@ -3365,7 +3438,7 @@ async function send(){
   body.innerHTML='<span class="caret"></span>';
 
   abortCtl=new AbortController();
-  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null;
+  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[];
   lastModels="";
 
   try{
@@ -3386,7 +3459,13 @@ async function send(){
       raw+=dec.decode(value,{stream:true});
       // pull progress markers out so they never land in the answer
       full=raw.replace(/\u0000STATUS:(.*?)\u0000/g,(_,t)=>{status=t;return "";})
-              .replace(/\u0000STATUS:[^\u0000]*$/,"");   // partial marker
+              .replace(/\u0000STATUS:[^\u0000]*$/,"")    // partial marker
+              .replace(/\u0000DRAFT:(.*?)\u0000/g,(_,j)=>{
+                 try{const d=JSON.parse(j);
+                     if(!drafts.some(x=>x.m===d.m))drafts.push(d);}catch(e){}
+                 return "";})
+              .replace(/\u0000DRAFT:[^\u0000]*$/,"");
+      if(drafts.length)paintDrafts(aiDiv,drafts,true);
       // a merge that collapsed mid-stream sends RESET \u2014 discard
       // everything streamed before it, keep the replacement answer
       const cut=full.lastIndexOf("\u0000RESET\u0000");
@@ -3405,6 +3484,7 @@ async function send(){
     else full+="\n\n⚠️ "+err.message;
   }
 
+  if(drafts.length)paintDrafts(aiDiv,drafts,false);   // merge done: collapse
   body.innerHTML=(searched&&full?'<span class="websrc">🌐 searched the web</span>':"")
     +renderMD(full||(wasAborted?"*(stopped)*":
     "⚠️ The engine returned nothing. Is the model server for **"+model+"** actually running?"));
@@ -3414,7 +3494,8 @@ async function send(){
     const meta=document.createElement("div");meta.className="meta";
     meta.innerHTML="<b>"+lastRate.toFixed(1)+" tok/s</b> · ~"+Math.round(tokEst)+" tokens · "+secs.toFixed(1)+"s";
     aiDiv.appendChild(meta);
-    messages.push({role:"assistant",content:full});
+    messages.push(drafts.length?{role:"assistant",content:full,drafts:drafts}
+                              :{role:"assistant",content:full});
     persistCurrent();
   }else{
     // error or empty: keep it out of the model's context, refresh the dots
@@ -3525,7 +3606,7 @@ function loadChat(id){
   curChat=id;
   messages=c.messages.slice();
   inner.innerHTML="";
-  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",m.content));
+  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",m.content,m.drafts));
   renderChats();
 }
 renderChats();

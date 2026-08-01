@@ -27,34 +27,56 @@ Set-Location $PSScriptRoot
 # Windows ships a stub python.exe under WindowsApps that only prints an advert
 # for the Microsoft Store. It is on PATH even when Python is not installed, so
 # resolve a real interpreter rather than trusting the name.
+function Get-PyArch([string]$exe) {
+  try {
+    $a = & $exe -c "import platform;print(platform.machine())" 2>$null
+    if ($LASTEXITCODE -eq 0) { return ("" + $a).Trim() }
+  } catch { }
+  return $null
+}
+
+# Collect every interpreter on the machine, then pick an x64 one. Testing
+# only the first thing found is what went wrong before: on an ARM box the
+# py.exe launcher is itself ARM64, so it answered for the whole machine and
+# hid a perfectly good x64 install sitting next to it.
 function Find-Python {
-  # 1. whatever is on PATH already, ignoring the Store stub
+  $cands = New-Object System.Collections.Generic.List[string]
+
   foreach ($name in @("python", "python3")) {
     $cmd = Get-Command $name -ErrorAction SilentlyContinue
     if ($cmd -and $cmd.Source -and $cmd.Source -notlike "*\WindowsApps\*") {
-      return $cmd.Source
+      $cands.Add($cmd.Source)
     }
   }
-  # 2. ask the py launcher, which installs to C:\Windows and is always on PATH
+  # the launcher can enumerate every registered interpreter for us
   $launcher = Get-Command py -ErrorAction SilentlyContinue
-  if ($launcher -and $launcher.Source -notlike "*\WindowsApps\*") {
-    $exe = & $launcher.Source -3 -c "import sys;print(sys.executable)" 2>$null
-    if ($exe -and (Test-Path $exe)) { return $exe }
+  if ($launcher) {
+    foreach ($line in (& $launcher.Source -0p 2>$null)) {
+      if ("$line" -match '([A-Za-z]:\\[^\r\n]*python\.exe)') { $cands.Add($matches[1]) }
+    }
   }
-  # 3. look where the installer actually puts it. A shell captures PATH when
-  #    it starts, so a PowerShell window opened BEFORE Python was installed
-  #    will never see it however many times you re-run this.
-  $globs = @(
-    "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe",
-    "$env:ProgramFiles\Python3*\python.exe",
-    "${env:ProgramFiles(x86)}\Python3*\python.exe",
-    "C:\Python3*\python.exe"
-  )
-  $hit = Get-ChildItem -Path $globs -ErrorAction SilentlyContinue |
-         Sort-Object FullName -Descending | Select-Object -First 1
-  if ($hit) {
-    Write-Host "  (found off-PATH: this shell predates the install)" -ForegroundColor DarkGray
-    return $hit.FullName
+  # and the standard install locations, since a shell opened before the
+  # installer ran captured the old PATH and will never see the new entry
+  foreach ($g in @(
+      "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe",
+      "$env:ProgramFiles\Python3*\python.exe",
+      "${env:ProgramFiles(x86)}\Python3*\python.exe",
+      "C:\Python3*\python.exe")) {
+    foreach ($f in (Get-ChildItem -Path $g -ErrorAction SilentlyContinue)) {
+      $cands.Add($f.FullName)
+    }
+  }
+
+  $seen = @{}
+  $script:PyReport = @()
+  foreach ($exe in $cands) {
+    if (-not (Test-Path $exe)) { continue }
+    $key = $exe.ToLower()
+    if ($seen.ContainsKey($key)) { continue }
+    $seen[$key] = $true
+    $arch = Get-PyArch $exe
+    $script:PyReport += ("    {0,-8} {1}" -f ($arch, $exe))
+    if ($arch -match 'AMD64|x86_64') { return $exe }
   }
   return $null
 }

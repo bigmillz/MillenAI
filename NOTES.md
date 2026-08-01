@@ -126,6 +126,20 @@ query before the next could use it.
 matched, so a model cannot emit a `javascript:` or `data:` href; anything else
 stays escaped text. Verified — no anchor, no tag, nothing live.
 
+### Showing the blend
+The drafts already existed in `run_council`; they were just thrown away. Each
+one is now pushed to the UI as `\0DRAFT:{json}\0` the moment its model
+finishes, and rendered as a card above the answer — open while they land, then
+collapsed to "*2 of 3 models contributed*" once the merge starts. Models that
+produced nothing are listed too, greyed, with the reason; a blend that quietly
+ran on one model is worth seeing.
+
+Drafts ride on the assistant message (`{role, content, drafts}`) so a reopened
+chat still shows the panel, and `addMsg` takes them as a third argument. They
+are deliberately kept **out of `content`** — that string is what goes back to
+the model as context, what gets spoken aloud, and what a title is generated
+from.
+
 ### The merger
 Gemma writes the final blended answer, preferring the newest generation
 installed: **Gemma 4 12B → Gemma 4 26B → Gemma 2 9B IT**, then the strongest
@@ -230,6 +244,15 @@ STT is Whisper large-v3-turbo via MLX (Apple silicon only, ~1.6 GB, fetched
 on first mic tap). TTS is the macOS `say` binary — free, no download, works
 on Intel. Voice chat mode auto-sends after transcription and reads replies
 aloud; a new message or mic tap barges in.
+
+**What is read aloud is not what is on screen.** `_speak()` used to receive
+the raw reply, so voice chat spoke three things nobody wants to hear: the
+whole chain of thought (with the tag itself pronounced, because the markdown
+pass turned `<think>` into the word "<think"), the research brief's `Sources`
+bibliography — which roughly doubled the length of every spoken answer — and
+inline citations as bare numbers mid-sentence. It now strips think blocks,
+cuts everything from a trailing `Sources` heading, drops `[1]` / `[2, 5]`
+markers, and tidies the space they leave before punctuation.
 
 ### Updates
 Polls GitHub Releases once a day. A release counts as newer if its
