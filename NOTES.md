@@ -187,6 +187,30 @@ crosses the middle, with a bloom flaring behind it. The version tag and
 greeting rise in on a 0.34s delay so the screen assembles rather than appears.
 Then the existing converge-and-absorb finish plays.
 
+**The wordmark is a neon sign** (since the neon-strike redesign). Unpowered
+it is a grey glass tube; the launch sweep is the power arriving — it paints
+the letters, the tube catches with a two-dip strike flicker, then hums. Two
+pseudo-copies of the text do all of it: `::before` is the halo (same
+travelling gradient, `blur(16px) saturate(1.4)`, z-index −1), `::after` is
+the lit tube. Both are revealed by the same paint mask, so glow and colour
+arrive together under the band. The flicker (`neonCatch`) is scoped to
+`body.painting`, so a later new-chat repaint never re-flickers. `hueshift`
+was removed entirely — it animated `filter`, exactly where the halo's blur
+lives (the property-collision gotcha above). The colour motion is the 16s
+`rainbow` background-position slide.
+
+**The wipe must not depend on an animation frame to start or finish.** An
+occluded window gets no rAF callbacks at all — measured in the embedded pane:
+the boot `requestAnimationFrame(rainbowWipe)` simply never fired, and since
+`painted` is only ever set by the wipe, the wordmark stayed grey forever.
+Boot now races rAF against a 450ms timeout (first one wins), and the 3.2s
+teardown re-asserts `painted` in case the mid-flight frame died.
+
+The sweep gained a leading edge: a 7vw hot-white line on the same path with
+`animation-delay: -0.22s` — a negative delay starts it partway through the
+travel, which in space puts it ~21vw ahead of the band centre, crossing the
+wordmark right as the paint mask begins to reveal.
+
 The wordmark is **painted by the band**, not simply coloured. It sits in flat
 light grey (`#9a9a9a`); a second copy of the text rides on top via
 `h1::after { content: attr(data-word) }` carrying the rainbow, revealed

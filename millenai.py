@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.4.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 37               # integer compared against the GitHub release tag
+APP_VERSION = "1.5.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 38               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2599,16 +2599,21 @@ body.perf #chat-scroll{scroll-behavior:auto}
 }
 /* one typeface across the whole landing screen */
 #hero,#hero h1,#hero p{font-family:var(--helv)}
-/* the whole wordmark rides the rainbow, not just the version tag */
-/* The wordmark sits unpainted in light grey. A second copy of the same text
-   rides on top carrying the rainbow, revealed through a diagonal mask that
-   travels with the sweep — so the band appears to paint the letters as it
-   crosses them, and the colour stays behind it. */
+/* The wordmark is a neon sign. Unpowered it is a grey glass tube; the launch
+   sweep is the power arriving — it paints the letters, the tube catches with
+   a strike flicker, then hums. Two pseudo-copies of the same text do all of
+   it: ::before is the glow (same travelling gradient, heavily blurred, behind
+   the glyphs), ::after is the lit tube (crisp). Both are revealed through the
+   same diagonal mask that rides with the band, so glow and colour arrive
+   together under it. `hueshift` is gone for good — it animated `filter`,
+   which is exactly where the glow blur lives (the property-collision gotcha
+   in NOTES). The colour movement comes entirely from `rainbow` sliding the
+   gradient across the letterforms. */
 #hero h1{
   font-size:92px;font-weight:700;letter-spacing:-.015em;
-  position:relative;color:#9a9a9a;-webkit-text-fill-color:#9a9a9a;
+  position:relative;z-index:0;color:#9a9a9a;-webkit-text-fill-color:#9a9a9a;
 }
-#hero h1::after{
+#hero h1::before,#hero h1::after{
   content:attr(data-word);
   position:absolute;left:0;top:0;white-space:nowrap;pointer-events:none;
   /* tile starts and ends on the same color; sliding one full tile
@@ -2618,7 +2623,7 @@ body.perf #chat-scroll{scroll-behavior:auto}
   background-size:200% 100%;
   -webkit-background-clip:text;background-clip:text;
   color:transparent;-webkit-text-fill-color:transparent;
-  animation:rainbow 16s linear infinite,hueshift 45s linear infinite;
+  animation:rainbow 16s linear infinite;
   /* the mask is far wider than the text and slides across it: the opaque
      half trails the band, the transparent half runs ahead of it */
   -webkit-mask-image:linear-gradient(114deg,#000 0 42%,transparent 58% 100%);
@@ -2626,19 +2631,39 @@ body.perf #chat-scroll{scroll-behavior:auto}
   -webkit-mask-size:300% 100%;mask-size:300% 100%;
   -webkit-mask-position:100% 0;mask-position:100% 0;
 }
+/* the tube's halo: the same travelling colours, thrown 16px */
+#hero h1::before{
+  z-index:-1;opacity:.85;
+  filter:blur(16px) saturate(1.4);
+}
 /* once painted it stays painted */
-body.painted #hero h1::after{
+body.painted #hero h1::before,body.painted #hero h1::after{
   -webkit-mask-position:0 0;mask-position:0 0;
 }
-body.painting #hero h1::after{
+body.painting #hero h1::before,body.painting #hero h1::after{
   transition:-webkit-mask-position .5s linear,mask-position .5s linear;
   transition-delay:1.28s;
+  /* the strike: power has just reached the tube — it catches, drops out
+     twice, then holds. Runs only during the launch sequence; scoping it to
+     .painting means a later new-chat repaint never re-flickers. */
+  animation:rainbow 16s linear infinite,neonCatch 1s 1.8s both;
 }
-@keyframes hueshift{to{filter:hue-rotate(360deg)}}
+@keyframes neonCatch{
+  0%{opacity:1}8%{opacity:.15}16%{opacity:1}28%{opacity:.45}
+  36%{opacity:1}46%{opacity:.82}56%,100%{opacity:1}
+}
+/* the glow layer keeps its blur through the strike (animation list above has
+   no filter animation, so nothing collides with it) — but its base opacity
+   is .85, so restate the resting value after the strike settles */
+body.painting #hero h1::before{animation:rainbow 16s linear infinite,neonCatchGlow 1s 1.8s both}
+@keyframes neonCatchGlow{
+  0%{opacity:.85}8%{opacity:.1}16%{opacity:.85}28%{opacity:.35}
+  36%{opacity:.85}46%{opacity:.68}56%,100%{opacity:.85}
+}
 @keyframes rainbow{from{background-position:0% 50%}to{background-position:200% 50%}}
 body.perf #hero h1{animation:none}
-/* performance mode skips the theatre — show it painted immediately */
-body.perf #hero h1::after{
+/* performance mode skips the theatre — show it lit immediately */
+body.perf #hero h1::before,body.perf #hero h1::after{
   animation:none;-webkit-mask-position:0 0;mask-position:0 0;
 }
 #hero p{color:var(--dim);font-size:15px}
@@ -2882,7 +2907,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
     rgba(201,143,255,.52) 89%,
     rgba(201,143,255,0)  100%);
   /* enough blur to dissolve the banding, not so much the hues grey out */
-  filter:blur(44px);opacity:1;mix-blend-mode:screen;
+  filter:blur(44px) saturate(1.25);opacity:1;mix-blend-mode:screen;
   -webkit-mask-image:radial-gradient(ellipse 70% 54% at 50% 50%,
     #000 0%,rgba(0,0,0,.88) 52%,transparent 88%);
           mask-image:radial-gradient(ellipse 70% 54% at 50% 50%,
@@ -2895,11 +2920,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 /* The wordmark is *deposited* by the sweep: it rushes in oversized and
    blurred and lands just as the band crosses the middle of the window.
-   `rainbow` is restated because setting `animation` on a class replaces the
-   whole list rather than adding to it. `hueshift` is deliberately dropped for
-   the duration: it animates `filter` too, and the later entry in the list
-   wins, so leaving it in silently cancelled the blur — the fly-in rendered as
-   a bare scale. 45s of hue drift is imperceptible across one second. */
+   The colour layers live on the pseudo-elements, so animating the h1 itself
+   here collides with nothing. */
 /* Timing is `linear` on purpose — the deceleration is written into the
    keyframes instead. An eased curve here is far too front-loaded: the
    wordmark had already settled by 0.35s, well before the band reached it, so
@@ -2939,6 +2961,21 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
     #000 0%,transparent 80%);
   animation:sweepDiag 2.8s linear .09s forwards;
 }
+/* a thin hot-white line riding the front of the band — the leading edge.
+   Same path, negative delay: starting .22s into the travel puts it ~21vw
+   ahead of the band centre, so it crosses the wordmark right as the paint
+   mask begins to reveal (~1.31s vs 1.28s). */
+#celebrate .edge{
+  position:absolute;top:50%;left:50%;
+  width:7vw;height:320vh;margin:-160vh 0 0 -3.5vw;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.85),transparent);
+  filter:blur(9px);opacity:.8;mix-blend-mode:screen;
+  -webkit-mask-image:radial-gradient(ellipse 60% 46% at 50% 50%,
+    #000 0%,transparent 82%);
+          mask-image:radial-gradient(ellipse 60% 46% at 50% 50%,
+    #000 0%,transparent 82%);
+  animation:sweepDiag 2.8s linear -0.22s forwards;
+}
 /* the impact — a soft bloom centred on the wordmark as the band reaches it */
 #celebrate .bloom{
   position:absolute;border-radius:50%;
@@ -2973,7 +3010,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 .setup-row .nm{color:var(--text)}
 .setup-row .st{font-family:var(--mono);font-size:11px;align-self:center}
-.setup-row .st.ok{color:#5fbf77}
+.setup-row.done{align-items:center}
+.setup-row .tick{width:17px;height:17px;align-self:center;flex-shrink:0}
+.setup-row .tick circle{fill:#3ecf8e}
+.setup-row .tick path{stroke:var(--panel2)}
 .setup-row .st.dl{color:var(--accent)}
 .setup-row .st.err{color:var(--red);cursor:help}
 .setup-row .st.wait{color:var(--faint)}
@@ -3888,6 +3928,12 @@ const veil=$("#setup-veil"),setupList=$("#setup-list"),
       setupGo=$("#setup-go"),setupLater=$("#setup-later"),setupNote=$("#setup-note");
 let setupTimer=null,setupAllReady=false;
 
+// verified-style badge: filled disc, knocked-out tick
+const TICK='<svg class="tick" viewBox="0 0 24 24" aria-label="installed">'
+  +'<circle cx="12" cy="12" r="11"/>'
+  +'<path d="M7 12.4l3.3 3.3L17 9" fill="none" stroke-width="2.7"'
+  +' stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 function renderSetup(st){
   const stars=st.models.filter(m=>m.star);
   setupAllReady=stars.every(m=>m.status==="ready");
@@ -3904,16 +3950,21 @@ function renderSetup(st){
 
   // …then every model individually, so anything can be added on its own
   const state=m=>{
-    if(m.status==="ready")   return '<span class="st ok">installed</span>';
+    if(m.status==="ready")   return TICK;
     if(m.status==="downloading") return '<span class="st dl">'+m.pct+'%</span>';
     if(m.status==="queued")  return '<span class="st wait">queued</span>';
     if(m.status==="error")   return '<span class="st err" title="'+esc(m.note)+'">failed</span>';
     return '<span class="st get">'+m.est_gb+' GB \u2193</span>';
   };
+  // an installed model gets its name and a tick - a full progress bar on
+  // something already at 100% is just noise on every row you have finished
   const row=m=>
-    '<div class="setup-row'+(m.status==="ready"?"":" clickable")+'"'+
-    ' data-model="'+esc(m.label)+'"><span class="nm">'+esc(m.label)+'</span>'+
-    state(m)+'<div class="bar"><i style="width:'+(m.pct||0)+'%"></i></div></div>';
+    m.status==="ready"
+      ? '<div class="setup-row done"><span class="nm">'+esc(m.label)+'</span>'
+        +TICK+'</div>'
+      : '<div class="setup-row clickable" data-model="'+esc(m.label)+'">'
+        +'<span class="nm">'+esc(m.label)+'</span>'+state(m)
+        +'<div class="bar"><i style="width:'+(m.pct||0)+'%"></i></div></div>';
   const missing=st.models.filter(m=>m.status!=="ready");
   const have=st.models.filter(m=>m.status==="ready");
   if(missing.length)
@@ -3960,7 +4011,7 @@ function rainbowWipe(){
   if(perf||!cel||wipeBusy)return;         // performance mode: no theatre
   wipeBusy=true;
   cel.hidden=false;
-  cel.innerHTML='<div class="sweep"></div><div class="spark"></div>';
+  cel.innerHTML='<div class="sweep"></div><div class="spark"></div><div class="edge"></div>';
   // the wordmark flies in under the band. Measure first — once .flyin is on,
   // the element is scaled and the rect no longer describes its resting place.
   const hero1=$("#hero h1");
@@ -3991,13 +4042,18 @@ function rainbowWipe(){
   },1240);
   setTimeout(()=>{
     cel.hidden=true;cel.innerHTML="";
-    // leave `painted` on — the colour stays where the band left it
+    // leave `painted` on — the colour stays where the band left it. Set it
+    // here too: the animated add rides an animation frame, and if the window
+    // was occluded that frame never came.
+    document.body.classList.add("painted");
     document.body.classList.remove("painting");
     wipeBusy=false;
   },3200);
 }
 
 let wasDownloading=false;
+// true when the panel was opened to add models rather than by first-run setup
+let setupManual=false;
 function celebrateDownloads(){
   const card=$("#setup-card"),veil=$("#setup-veil");
   if(perf){closeSetup();return;}          // performance mode: no theatre
@@ -4015,12 +4071,17 @@ async function setupTick(){
     renderSetup(st);
     pollEngines();
     if(st.busy)wasDownloading=true;
-    else if(wasDownloading&&setupAllReady&&!veil.hidden){
+    else if(wasDownloading&&setupAllReady&&!veil.hidden&&!setupManual){
+      // only first-run setup finishes with the celebration; when the panel
+      // was opened to add models it stays open until it is dismissed
       wasDownloading=false;celebrateDownloads();
+    }else if(!st.busy){
+      wasDownloading=false;
     }
   }catch(e){}
 }
 function openSetup(){
+  setupManual=true;
   veil.hidden=false;setupTick();
   if(!setupTimer)setupTimer=setInterval(setupTick,1200);
 }
@@ -4036,12 +4097,18 @@ $("#open-setup").addEventListener("click",openSetup);
 // /api/setup round trip below — that call enumerates every model on disk and
 // can take seconds, which would leave the window sitting there looking frozen
 // before the flourish finally played.
-requestAnimationFrame(rainbowWipe);
+// rAF for the fast path, a timeout as the guarantee: an occluded window gets
+// NO animation frames, and a wipe that never runs would leave the wordmark
+// grey forever — `painted` is only ever set by the wipe.
+let wipeKicked=false;
+function kickWipe(){if(wipeKicked)return;wipeKicked=true;rainbowWipe();}
+requestAnimationFrame(kickWipe);
+setTimeout(kickWipe,450);
 (async()=>{
   try{
     const st=await(await fetch("/api/setup")).json();
     // auto-open only when the app can't hold a conversation yet
-    if(st.needs_setup)openSetup();
+    if(st.needs_setup){openSetup();setupManual=false;}
   }catch(e){}
 })();
 
