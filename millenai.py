@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.6.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 39               # integer compared against the GitHub release tag
+APP_VERSION = "1.7.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 40               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -84,6 +84,12 @@ APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 UPDATE_REPO = "bigmillz/MillenAI"
 
 PORT = 8889
+# Opt-in remote-access gate. The backend has no auth of its own — it was
+# built to listen on 127.0.0.1 for a window on the same machine. Before
+# exposing it through a tunnel (Tailscale Funnel, cloudflared, ...), set
+# MILLENAI_KEY: every request must then carry the key once (?key=... sets a
+# cookie) or be refused. Unset = exactly the old behaviour.
+ACCESS_KEY = os.environ.get("MILLENAI_KEY", "").strip()
 
 # delimiter for out-of-band progress lines in the chat stream — the UI
 # strips these so they never appear inside an answer
@@ -1317,6 +1323,7 @@ def setup_status() -> dict:
         models.append({"label": label, "est_gb": round(est / 1e9, 1),
                        "status": status, "pct": pct,
                        "star": label in STARTER_LABELS,
+                       "supported": SUPPORTED.get(label, True),
                        "note": job.get("note", "")})
 
     ready_n = sum(1 for x in models if x["status"] == "ready")
@@ -1995,8 +2002,36 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
     def log_message(self, *args):
         pass
 
+    def _gate(self):
+        """True = let the request through; False = already answered it."""
+        if not ACCESS_KEY:
+            return True
+        cookie = self.headers.get("Cookie", "") or ""
+        if "millen_key=" + ACCESS_KEY in cookie:
+            return True
+        if self.path.startswith("/?key="):
+            if self.path[len("/?key="):] == ACCESS_KEY:
+                self.send_response(302)
+                self.send_header("Set-Cookie",
+                                 "millen_key=%s; Path=/; Max-Age=2592000; "
+                                 "SameSite=Lax" % ACCESS_KEY)
+                self.send_header("Location", "/")
+                self.end_headers()
+                return False
+        self.send_response(403)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        try:
+            self.wfile.write(b"MillenAI: access key required. Open the link "
+                             b"exactly as it was shared with you.")
+        except Exception:
+            pass
+        return False
+
     # ------------------------------------------------------------------ GET
     def do_GET(self):
+        if not self._gate():
+            return
         if self.path == "/":
             html = (HTML_CONTENT
                     .replace("__MODEL_ROWS__", build_model_rows())
@@ -2162,6 +2197,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
     # ----------------------------------------------------------------- POST
     def do_POST(self):
+        if not self._gate():
+            return
         if self.path == "/api/setup/install":
             self._send_json({"started": start_model_downloads()})
             return
@@ -2426,11 +2463,22 @@ body{
 ::-webkit-scrollbar-track{background:transparent}
 
 /* ---------------------------------------------------------------- sidebar */
+/* Frosted glass, not plain transparency: the skyline now runs under the
+   whole window, and unblurred video behind 13px chat titles is unreadable
+   noise. 70% panel over a 24px blur is the macOS material look — the city
+   reads as light and colour through the glass, never as detail. */
 #sidebar{
-  position:relative;
+  position:relative;z-index:1;
   width:284px;min-width:284px;height:100%;
-  background:var(--panel);border-right:1px solid var(--line-soft);
+  background:rgba(21,23,29,.60);
+  -webkit-backdrop-filter:blur(34px) saturate(1.35);
+          backdrop-filter:blur(34px) saturate(1.35);
+  border-right:1px solid var(--line-soft);
   display:flex;flex-direction:column;padding:20px 16px 14px;gap:4px;
+}
+body.perf #sidebar{
+  background:var(--panel);
+  -webkit-backdrop-filter:none;backdrop-filter:none;
 }
 #sb-resize{
   position:absolute;top:0;right:-3px;width:7px;height:100%;
@@ -2449,7 +2497,17 @@ body.resizing{cursor:col-resize;user-select:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
    sitting it on the wordmark's baseline hangs it low against the taller type */
 #brand{display:flex;align-items:center;gap:8px}
-#brand .name{font-weight:700;font-size:26px;letter-spacing:.02em}
+#brand .name{
+  font-weight:700;font-size:26px;letter-spacing:.02em;
+  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff,#ff8fd8,#ff8f8f);
+  background-size:200% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  color:transparent;-webkit-text-fill-color:transparent;
+  animation:rainbow 26s linear infinite;
+  filter:drop-shadow(0 1px 7px rgba(150,160,255,.30));
+}
+body.perf #brand .name{animation:none;filter:none}
 #brand .tag{font-family:var(--mono);font-size:10px;color:var(--accent);
   border:1px solid var(--accent-dim);background:var(--accent-dim);
   padding:2px 6px;border-radius:4px;letter-spacing:.08em}
@@ -2600,7 +2658,7 @@ body.perf #telemetry{opacity:.13;filter:grayscale(1);pointer-events:none}
 
 /* ------------------------------------------------------------------ main */
 #main{flex:1;height:100%;display:flex;flex-direction:column;position:relative}
-#stars{position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
+#stars{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
 body.perf #stars{display:none}
 /* The skyline: one of Apple's ATV aerial clips of New York, greyscale until
    the launch wipe colours it, exactly the way the wordmark is painted — a
@@ -2609,10 +2667,10 @@ body.perf #stars{display:none}
    starfield beneath is already ramping, so the skyline appears to shatter
    into the starstream, and reassembles when the answer lands. */
 #skyline{
-  position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;
+  position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;
   overflow:hidden;pointer-events:none;
-  transition:transform 1.5s cubic-bezier(.55,0,.85,.45),
-             opacity 1.15s ease,filter 1.5s ease;
+  /* no transition: starTick writes the zoom transform every frame, and a
+     transition here would smear each frame's update over 1.5s */
 }
 #skyline[hidden]{display:none}
 #skyline video{
@@ -2630,9 +2688,8 @@ body.painted #sky-color{-webkit-mask-position:0 0;mask-position:0 0}
 /* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
    follows it edge-for-edge, unlike the wordmark's tighter window */
 body.painting #sky-color{
-  transition:-webkit-mask-position 1.5s linear .5s,mask-position 1.5s linear .5s;
+  transition:-webkit-mask-position 4.2s linear .3s,mask-position 4.2s linear .3s;
 }
-body.gen #skyline{transform:scale(1.6);opacity:0;filter:blur(7px)}
 body.perf #skyline{display:none}
 #chat-scroll{flex:1;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth;position:relative;z-index:1}
 body.perf #chat-scroll{scroll-behavior:auto}
@@ -2689,12 +2746,12 @@ body.painted #hero h1::before,body.painted #hero h1::after{
   -webkit-mask-position:0 0;mask-position:0 0;
 }
 body.painting #hero h1::before,body.painting #hero h1::after{
-  transition:-webkit-mask-position .5s linear,mask-position .5s linear;
-  transition-delay:1.28s;
+  transition:-webkit-mask-position .55s linear,mask-position .55s linear;
+  transition-delay:2.15s;
   /* the strike: power has just reached the tube — it catches, drops out
      twice, then holds. Runs only during the launch sequence; scoping it to
      .painting means a later new-chat repaint never re-flickers. */
-  animation:rainbow 16s linear infinite,neonCatch 1s 1.8s both;
+  animation:rainbow 16s linear infinite,neonCatch 1s 2.75s both;
 }
 @keyframes neonCatch{
   0%{opacity:1}8%{opacity:.15}16%{opacity:1}28%{opacity:.45}
@@ -2703,7 +2760,7 @@ body.painting #hero h1::before,body.painting #hero h1::after{
 /* the glow layer keeps its blur through the strike (animation list above has
    no filter animation, so nothing collides with it) — but its base opacity
    is .85, so restate the resting value after the strike settles */
-body.painting #hero h1::before{animation:rainbow 16s linear infinite,neonCatchGlow 1s 1.8s both}
+body.painting #hero h1::before{animation:rainbow 16s linear infinite,neonCatchGlow 1s 2.75s both}
 @keyframes neonCatchGlow{
   0%{opacity:.85}8%{opacity:.1}16%{opacity:.85}28%{opacity:.35}
   36%{opacity:.85}46%{opacity:.68}56%,100%{opacity:.85}
@@ -2933,6 +2990,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 .about-btn:hover{background:var(--panel);border-color:var(--dim)}
 .about-btn.primary{background:var(--accent);color:#1a1a1a;border:none;margin-top:14px}
 .about-btn.primary:hover{background:var(--accent-hot);color:#000}
+.about-btn.quiet{border:none;color:var(--faint);font-size:12px;padding:5px;margin-top:4px}
+.about-btn.quiet:hover{background:none;color:var(--dim)}
 
 /* ------------------------------------ downloads-complete celebration */
 /* card lifts away like a macOS sheet, a rainbow sweeps the window, then
@@ -2954,30 +3013,32 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
    carries its own alpha, the blur is heavy enough to dissolve the banding,
    and an elliptical mask fades the whole thing out at its edges — closer to
    light spilling across the window than a strip passing over it. */
+/* A WASH, not a pass. The colour field is stationary and fills the window;
+   what moves is only a hugely feathered reveal front (a 44%-wide soft edge
+   in the mask), crossing over ~4.2s. Once fully arrived the colour
+   dissolves in place — nothing ever slides off-screen, so nothing reads as
+   an object passing by. A gentle scale-breathe keeps the field liquid. */
 #celebrate .sweep{
-  position:absolute;top:50%;left:50%;
-  width:112vw;height:220vh;margin:-110vh 0 0 -56vw;
-  background:linear-gradient(90deg,
-    rgba(255,143,143,0)    0%,
-    rgba(255,143,143,.62) 13%,
-    rgba(255,196,110,.95) 26%,
-    rgba(245,230,99,.72)  36%,
-    rgba(126,240,166,1)   49%,
-    rgba(110,199,255,.80) 63%,
-    rgba(143,157,255,.96) 77%,
-    rgba(201,143,255,.52) 89%,
-    rgba(201,143,255,0)  100%);
-  /* enough blur to dissolve the banding, not so much the hues grey out */
-  filter:blur(44px) saturate(1.25);opacity:1;mix-blend-mode:screen;
-  -webkit-mask-image:radial-gradient(ellipse 70% 54% at 50% 50%,
-    #000 0%,rgba(0,0,0,.88) 52%,transparent 88%);
-          mask-image:radial-gradient(ellipse 70% 54% at 50% 50%,
-    #000 0%,rgba(0,0,0,.88) 52%,transparent 88%);
-  animation:sweepDiag 2.8s linear forwards;
+  position:absolute;top:-8%;left:-8%;width:116%;height:116%;
+  background:linear-gradient(114deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff,#ff8fd8);
+  opacity:0;mix-blend-mode:screen;filter:saturate(1.2) blur(2px);
+  -webkit-mask-image:linear-gradient(114deg,#000 0 28%,transparent 72% 100%);
+          mask-image:linear-gradient(114deg,#000 0 28%,transparent 72% 100%);
+  -webkit-mask-size:320% 100%;mask-size:320% 100%;
+  -webkit-mask-position:100% 0;mask-position:100% 0;
+  animation:washIn 4.2s linear .3s both,
+            washBreathe 6.4s ease-in-out both,
+            washOut 1.5s ease 4.7s forwards;
 }
-@keyframes sweepDiag{
-  from{transform:rotate(24deg) translate(-120vw,-30vh)}
-  to  {transform:rotate(24deg) translate(120vw,30vh)}
+@keyframes washIn{
+  from{-webkit-mask-position:100% 0;mask-position:100% 0;opacity:.82}
+  to  {-webkit-mask-position:0 0;mask-position:0 0;opacity:.82}
+}
+@keyframes washOut{to{opacity:0}}
+@keyframes washBreathe{
+  0%{transform:scale(1)}55%{transform:scale(1.045)}100%{transform:scale(1.01)}
+}
 }
 /* The wordmark is *deposited* by the sweep: it rushes in oversized and
    blurred and lands just as the band crosses the middle of the window.
@@ -3007,43 +3068,15 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   from{opacity:0;transform:translateY(9px)}
   to  {opacity:1;transform:translateY(0)}
 }
-/* a narrow bright core riding just behind the wide band — gives the sweep a
-   leading edge instead of one soft smear */
-/* the bright core, kept only as a diffuse hot spot — as a thin hard line it
-   was the single most ribbon-like thing on the screen */
-#celebrate .spark{
-  position:absolute;top:50%;left:50%;
-  width:26vw;height:220vh;margin:-110vh 0 0 -13vw;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.62),transparent);
-  filter:blur(38px);opacity:.55;mix-blend-mode:screen;
-  -webkit-mask-image:radial-gradient(ellipse 62% 44% at 50% 50%,
-    #000 0%,transparent 80%);
-          mask-image:radial-gradient(ellipse 62% 44% at 50% 50%,
-    #000 0%,transparent 80%);
-  animation:sweepDiag 2.8s linear .09s forwards;
-}
-/* a thin hot-white line riding the front of the band — the leading edge.
-   Same path, negative delay: starting .22s into the travel puts it ~21vw
-   ahead of the band centre, so it crosses the wordmark right as the paint
-   mask begins to reveal (~1.31s vs 1.28s). */
-#celebrate .edge{
-  position:absolute;top:50%;left:50%;
-  width:7vw;height:320vh;margin:-160vh 0 0 -3.5vw;
-  background:linear-gradient(90deg,transparent,rgba(255,255,255,.85),transparent);
-  filter:blur(9px);opacity:.8;mix-blend-mode:screen;
-  -webkit-mask-image:radial-gradient(ellipse 60% 46% at 50% 50%,
-    #000 0%,transparent 82%);
-          mask-image:radial-gradient(ellipse 60% 46% at 50% 50%,
-    #000 0%,transparent 82%);
-  animation:sweepDiag 2.8s linear -0.22s forwards;
-}
+
+
 /* the impact — a soft bloom centred on the wordmark as the band reaches it */
 #celebrate .bloom{
   position:absolute;border-radius:50%;
   background:radial-gradient(circle,rgba(255,255,255,.85),
              rgba(255,255,255,.16) 45%,transparent 70%);
   mix-blend-mode:screen;opacity:0;
-  animation:bloomPop 1.1s ease-out 1.35s forwards;
+  animation:bloomPop 1.2s ease-out 2.3s forwards;
 }
 @keyframes bloomPop{
   0%  {opacity:0;transform:translate(-50%,-50%) scale(.35)}
@@ -3223,6 +3256,7 @@ __MODEL_ROWS__
     <div id="new-list"></div>
     <button class="about-btn primary" id="new-get">Download</button>
     <button class="about-btn" id="new-skip">Not now</button>
+    <button class="about-btn quiet" id="new-off" hidden>Don&rsquo;t remind me again</button>
   </div>
 </div>
 
@@ -3917,16 +3951,29 @@ function starResize(){
 }
 starResize();
 window.addEventListener("resize",starResize);
+let skyCreep=0;
 function starTick(ts){
   requestAnimationFrame(starTick);
   if(perf){warpLast=0;return;}
   // clamp dt so a backgrounded tab doesn't resume at full speed
   const dt=Math.min(0.05,warpLast?(ts-warpLast)/1000:0.016);
   warpLast=ts||0;
-  sctx.clearRect(0,0,sw,sh);
   warpT=Math.max(0,Math.min(1,warpT+(generating?dt/WARP_UP:-dt/WARP_DOWN)));
   const e=warpT*warpT*(3-2*warpT);      // smoothstep: eases in and settles
   warpSpeed=WARP_IDLE+(WARP_FULL-WARP_IDLE)*e;
+
+  // when the skyline is up, the city IS the warp: dive into it on the same
+  // ramp, creeping deeper through a long generation, easing home after
+  if(skyline&&!skyline.hidden){
+    if(generating&&warpT>=1)skyCreep=Math.min(.5,skyCreep+dt*.022);
+    else skyCreep=Math.max(0,skyCreep-dt*.3);
+    const z=1+1.3*e+skyCreep*e;
+    skyline.style.transform=z>1.0005?"scale("+z.toFixed(4)+")":"";
+    sctx.clearRect(0,0,sw,sh);          // no stars over the city
+    return;
+  }
+  if(skyline)skyline.style.transform="";
+  sctx.clearRect(0,0,sw,sh);
   const cx=sw/2,cy=sh/2,fov=sw*0.45,move=warpSpeed*(sw/1400);
   sctx.lineCap="round";
   for(const s of starList){
@@ -4123,7 +4170,7 @@ function rainbowWipe(){
   if(perf||!cel||wipeBusy)return;         // performance mode: no theatre
   wipeBusy=true;
   cel.hidden=false;
-  cel.innerHTML='<div class="sweep"></div><div class="spark"></div><div class="edge"></div>';
+  cel.innerHTML='<div class="sweep"></div>';
   // the wordmark flies in under the band. Measure first — once .flyin is on,
   // the element is scaled and the rect no longer describes its resting place.
   const hero1=$("#hero h1");
@@ -4160,7 +4207,7 @@ function rainbowWipe(){
     document.body.classList.add("painted");
     document.body.classList.remove("painting");
     wipeBusy=false;
-  },3200);
+  },6400);
 }
 
 let wasDownloading=false;
@@ -4264,46 +4311,74 @@ async function openAbout(){
   }catch(e){$("#about-facts").textContent="";}
 }
 /* ------------------------------------------- new models in this release */
-// Anything in the catalog the user has never been offered gets announced
-// once, so a release that adds models surfaces them instead of hiding in
-// "Add models…".
-async function announceNewModels(){
+// Two tiers of model discovery, one card. Models the user has NEVER been
+// offered are announced once with a download button (a release adding models
+// must surface them). Beyond that, a gentle daily nudge points at anything
+// still uninstalled — primary action is Browse, never download-everything
+// (the full missing set can top 100 GB), and it carries its own permanent
+// opt-out. At most one card per launch, and never during first-run setup.
+const REMIND_GAP=20*60*60*1000;       // "daily", forgiving of launch times
+async function announceModels(){
   try{
     const [st,prefs]=await Promise.all([
       (await fetch("/api/setup")).json(),
       (await fetch("/api/prefs")).json()]);
+    if(st.needs_setup)return;         // the installer owns the screen
     const seen=prefs.seen_models||[];
     const all=st.models.map(m=>m.label);
-    const fresh=st.models.filter(m=>m.status!=="ready"&&seen.indexOf(m.label)<0);
-    if(!seen.length){                 // first run: nothing is "new" yet
-      await fetch("/api/prefs",{method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({seen_models:all})});
+    const stamp=extra=>fetch("/api/prefs",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(Object.assign({seen_models:all,
+        remind_models_ts:Date.now()},extra||{}))});
+    if(!seen.length){await stamp();return;}   // first run: nothing is "new"
+
+    const veil=$("#new-veil"),title=document.querySelector("#new-veil #about-name");
+    const missing=st.models.filter(m=>m.status!=="ready"&&m.supported!==false);
+    const fresh=missing.filter(m=>seen.indexOf(m.label)<0);
+
+    if(fresh.length){                 // tier 1: genuinely new — announce once
+      const gb=fresh.reduce((a,m)=>a+m.est_gb,0);
+      title.textContent="New models available";
+      $("#up-detail").textContent="This version adds models you don\u2019t have yet.";
+      $("#new-list").innerHTML=fresh.map(m=>
+        "\u2022 "+esc(m.label)+"  <span style='color:var(--faint)'>"
+        +m.est_gb+" GB</span>").join("<br>");
+      $("#new-get").textContent="Download \u00b7 "+gb.toFixed(1)+" GB";
+      $("#new-off").hidden=true;
+      veil.hidden=false;
+      $("#new-skip").onclick=async()=>{veil.hidden=true;await stamp();};
+      $("#new-get").onclick=async()=>{
+        veil.hidden=true;await stamp();
+        await fetch("/api/model/download",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({labels:fresh.map(m=>m.label)})});
+        openSetup();                  // watch them come down
+      };
       return;
     }
-    if(!fresh.length)return;
-    const gb=fresh.reduce((a,m)=>a+m.est_gb,0);
-    $("#new-list").innerHTML=fresh.map(m=>
+
+    // tier 2: the daily nudge
+    if(prefs.remind_models_off)return;
+    if(!missing.length)return;
+    if(Date.now()-(prefs.remind_models_ts||0)<REMIND_GAP)return;
+    title.textContent="More models to try";
+    $("#up-detail").textContent=missing.length+" model"+(missing.length===1?"":"s")+
+      " in the catalog aren\u2019t installed yet \u2014 each one you add makes "+
+      "blends and Power Mode stronger.";
+    $("#new-list").innerHTML=missing.slice(0,5).map(m=>
       "\u2022 "+esc(m.label)+"  <span style='color:var(--faint)'>"
-      +m.est_gb+" GB</span>").join("<br>");
-    $("#new-get").textContent="Download \u00b7 "+gb.toFixed(1)+" GB";
-    $("#new-veil").hidden=false;
-    const remember=async()=>{
-      await fetch("/api/prefs",{method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({seen_models:all})});
-    };
-    $("#new-skip").onclick=async()=>{$("#new-veil").hidden=true;await remember();};
-    $("#new-get").onclick=async()=>{
-      $("#new-veil").hidden=true;await remember();
-      await fetch("/api/model/download",{method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({labels:fresh.map(m=>m.label)})});
-      openSetup();                    // watch them come down
-    };
+      +m.est_gb+" GB</span>").join("<br>")+
+      (missing.length>5?"<br>\u2026and "+(missing.length-5)+" more":"");
+    $("#new-get").textContent="Browse models\u2026";
+    $("#new-off").hidden=false;
+    veil.hidden=false;
+    $("#new-skip").onclick=async()=>{veil.hidden=true;await stamp();};
+    $("#new-get").onclick=async()=>{veil.hidden=true;await stamp();openSetup();};
+    $("#new-off").onclick=async()=>{
+      veil.hidden=true;await stamp({remind_models_off:true});};
   }catch(e){}
 }
-setTimeout(announceNewModels,2500);   // after the first paint
+setTimeout(announceModels,2500);      // after the first paint
 
 $("#settings-btn").addEventListener("click",openAbout);
 $("#persona-save").addEventListener("click",async ev=>{
@@ -4417,6 +4492,8 @@ if __name__ == "__main__":
         print("  (telemetry simulated — pip install psutil for real numbers)")
     print()
     url = f"http://127.0.0.1:{PORT}"
+    if ACCESS_KEY:
+        url += "?key=" + ACCESS_KEY   # the app window authenticates itself
 
     if HAS_WEBVIEW and IS_MAC:
         # WKWebView ships with getUserMedia dead in two separate ways, and

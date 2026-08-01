@@ -171,6 +171,15 @@ highlighted. This matters beyond cosmetics: the backend prefers `tier` over
 `models`, so leaving a stale tier set made explicit model picks silently
 ignored.
 
+**The daily model nudge.** Beyond the one-time announce below, anything
+still uninstalled earns a gentle once-a-day card ("More models to try",
+20-hour gap so launch times drift freely). Its primary action is
+**Browse models…**, deliberately not download-everything — the full missing
+set can top 100 GB — and it carries its own permanent "Don't remind me
+again" (`remind_models_off` in prefs.json, with `remind_models_ts` as the
+clock). At most one card per launch, fresh-model announce wins the slot,
+and nothing shows during first-run setup.
+
 **New models announce themselves.** `prefs.json` records which model labels
 the user has already been offered. On launch, anything in the catalog that is
 neither installed nor previously offered gets a one-time "New models
@@ -206,10 +215,16 @@ the boot `requestAnimationFrame(rainbowWipe)` simply never fired, and since
 Boot now races rAF against a 450ms timeout (first one wins), and the 3.2s
 teardown re-asserts `painted` in case the mid-flight frame died.
 
-The sweep gained a leading edge: a 7vw hot-white line on the same path with
-`animation-delay: -0.22s` — a negative delay starts it partway through the
-travel, which in space puts it ~21vw ahead of the band centre, crossing the
-wordmark right as the paint mask begins to reveal.
+The launch effect is a **wash, not a pass** (since the slow-wash redesign):
+the colour field is stationary and window-sized; only a hugely feathered
+reveal front (a 44%-wide soft edge in a sliding mask) crosses, over 4.2s,
+and the colour then dissolves in place. Nothing ever slides off-screen —
+sliding off is precisely what read as "a moving image passing by". The old
+band's spark and hot leading edge were removed for the same reason: a bright
+moving object is a pass cue. Timeline: front crosses 0.3–4.5s, wordmark
+paints 2.15–2.7s, bloom 2.3s, neon strike 2.75s, dissolve 4.7–6.2s,
+teardown 6.4s. The backdrop's own mask runs 4.2s linear .3s so city colour
+arrives edge-for-edge under the wash.
 
 The wordmark is **painted by the band**, not simply coloured. It sits in flat
 light grey (`#9a9a9a`); a second copy of the text rides on top via
@@ -262,9 +277,16 @@ viewport, not the wordmark's slice. Measured sync drift between the copies:
 timer: a cold cache was still buffering at 10s, so any fixed deadline is
 wrong.
 
-Sending a query zooms into the city (`scale 1.6`) while it fades and blurs
-out — the starfield beneath is already ramping, so the skyline reads as
-shattering into the starstream; it reassembles when the answer lands.
+Sending a query dives INTO the city — no stars. `starTick` drives the
+skyline's transform every frame on the same eased 3s ramp the stars used
+(1 → 2.3), then a slow creep keeps a long generation drifting deeper
+(capped ~2.8) instead of freezing, and it eases home when the answer lands.
+The starfield draws **only when the skyline isn't up** (offline, stream
+error, perf mode) — it is the fallback, not a layer underneath. Two traps
+encoded here: the skyline must have NO CSS transition on transform (a
+per-frame JS write smeared over a 1.5s transition is mush), and don't try
+this with a CSS animation — removing an animation snaps to the base value
+without transitioning, so the ease-home would jump.
 
 **Failure is the old behaviour.** The div starts hidden and is shown only
 after BOTH videos fire `playing`; any error hides it again. Offline, blocked,
@@ -341,6 +363,27 @@ build number. Downloading hands off to a helper script that waits for the app
 to quit, swaps the bundle, strips quarantine, and relaunches.
 
 ---
+
+### Remote access (phone / friends) — no GPU hosting needed
+The app already IS a web app: pywebview is just a shell over
+`http://127.0.0.1:8889`, every fetch is relative, and the viewport meta is
+set. So "hosting" is exposing the Mac's own backend — the models keep
+running on the M4 Pro, and no cloud GPU is ever involved. The Mac must be
+awake.
+
+**The backend has no auth of its own** — it was built for a same-machine
+window. `MILLENAI_KEY` (env) is the opt-in gate: when set, every request
+needs the key — `/?key=...` once sets a 30-day cookie, everything else is
+403, and the app's own window appends the key automatically. Unset = old
+behaviour, byte for byte. Verified: no/wrong key 403, right key 302+cookie,
+cookie passes page and API, POST without cookie 403.
+
+Personal use: Tailscale (free) — the port is reachable at the Mac's tailnet
+address from the phone; nothing public. Friends: `cloudflared tunnel --url
+http://127.0.0.1:8889` gives a free public HTTPS URL — set MILLENAI_KEY
+first and share the URL with `?key=` included. Quirks: TTS (`say`) speaks
+on the Mac, not the phone; mic input works remotely because tunnels are
+HTTPS.
 
 ## Gotchas
 
