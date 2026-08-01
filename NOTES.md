@@ -277,7 +277,17 @@ viewport, not the wordmark's slice. Measured sync drift between the copies:
 timer: a cold cache was still buffering at 10s, so any fixed deadline is
 wrong.
 
-Sending a query dives INTO the city — no stars. `starTick` drives the
+Sending a query TEARS the city apart while diving in. A `<video>` element
+cannot slice itself, so during the warp its frames are redrawn on the stars
+canvas as ~16 offset horizontal bands (the element hides but keeps playing
+as the source); at rest the element shows and the canvas is empty, so the
+handoff is two copies of the same frame. The rip pattern re-randomizes every
+90–150ms — per-frame jitter strobes, a frozen pattern reads as a broken
+pane. Tear amplitude rides the same eased ramp as the zoom, so it knits
+itself back together as the answer lands. NB: drawing the (CORS-less) Apple
+video taints the canvas — drawing is fine, but `getImageData` throws
+SecurityError forever after, so no code may ever read pixels from the stars
+canvas. Base dive: `starTick` drives the
 skyline's transform every frame on the same eased 3s ramp the stars used
 (1 → 2.3), then a slow creep keeps a long generation drifting deeper
 (capped ~2.8) instead of freezing, and it eases home when the answer lands.
