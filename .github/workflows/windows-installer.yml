@@ -83,7 +83,7 @@ jobs:
           & "$wix\heat.exe" dir dist\MillenAI -cg AppFiles -dr INSTALLDIR `
               -gg -sfrag -srd -sreg -scom -var var.SourceDir -out Files.wxs
           if ($LASTEXITCODE -ne 0) { throw "heat failed" }
-          & "$wix\candle.exe" -arch x64 -dVer=$ver -dSourceDir=dist\MillenAI `
+          & "$wix\candle.exe" -arch x64 "-dVer=$ver" "-dSourceDir=dist\MillenAI" `
               packaging\msi\Product.wxs Files.wxs
           if ($LASTEXITCODE -ne 0) { throw "candle failed" }
           & "$wix\light.exe" -sval -out "MillenAI-$ver-x64.msi" Product.wixobj Files.wixobj
