@@ -183,6 +183,10 @@ if (-not (Test-Path "dist\MillenAI\MillenAI.exe")) { throw "no exe was produced"
 Write-Host "-> built dist\MillenAI\MillenAI.exe"
 
 # --------------------------------------------------------------- installer
+if ($env:MILLENAI_NO_PACKAGE -eq "1") {
+  Write-Host "MILLENAI_NO_PACKAGE=1 - dist\MillenAI is the product; skipping zip/installer"
+  exit 0
+}
 $iscc = @(
   "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe",
   "$env:ProgramFiles\Inno Setup 6\ISCC.exe"

@@ -1,0 +1,95 @@
+# Builds MillenAI.exe with PyInstaller on a real x64 Windows runner, wraps it
+# in a per-user MSI with WiX, and attaches it to the release. Runs on every
+# published release; workflow_dispatch backfills any existing tag.
+#
+# This exists because PyInstaller cannot cross-compile — the Mac that cuts
+# releases can never produce the Windows binary itself.
+name: windows-installer
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "release tag to build for (empty = latest release)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+jobs:
+  msi:
+    runs-on: windows-latest
+    steps:
+      - name: resolve tag
+        id: tag
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          [ -z "$TAG" ] && TAG="${{ inputs.tag }}"
+          [ -z "$TAG" ] && TAG=$(gh release view --repo "$GITHUB_REPOSITORY" --json tagName -q .tagName)
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "building for release: $TAG"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.tag.outputs.tag }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          architecture: x64
+
+      - name: build the exe (PyInstaller)
+        shell: powershell
+        env:
+          MILLENAI_NO_PACKAGE: "1"   # CI wraps dist/ itself — skip the zip/Inno step
+        run: powershell -ExecutionPolicy Bypass -File build_windows_exe.ps1
+
+      - name: locate WiX (install if the runner image dropped it)
+        id: wix
+        shell: powershell
+        run: |
+          $cands = @("$env:WIX\bin",
+                     "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin",
+                     "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin")
+          $bin = $cands | Where-Object { $_ -and (Test-Path "$_\heat.exe") } | Select-Object -First 1
+          if (-not $bin) {
+            choco install wixtoolset -y --no-progress
+            $bin = @("${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin",
+                     "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin") |
+                   Where-Object { Test-Path "$_\heat.exe" } | Select-Object -First 1
+          }
+          if (-not $bin) { throw "WiX not found after install" }
+          "bin=$bin" | Out-File -Append $env:GITHUB_OUTPUT
+          Write-Host "wix at: $bin"
+
+      - name: build the MSI
+        shell: powershell
+        run: |
+          $wix = "${{ steps.wix.outputs.bin }}"
+          $ver = (Select-String -Path millenai.py -Pattern 'APP_VERSION = "([^"]+)"').Matches[0].Groups[1].Value
+          Write-Host "version: $ver"
+          & "$wix\heat.exe" dir dist\MillenAI -cg AppFiles -dr INSTALLDIR `
+              -gg -sfrag -srd -sreg -scom -var var.SourceDir -out Files.wxs
+          if ($LASTEXITCODE -ne 0) { throw "heat failed" }
+          & "$wix\candle.exe" -arch x64 -dVer=$ver -dSourceDir=dist\MillenAI `
+              packaging\msi\Product.wxs Files.wxs
+          if ($LASTEXITCODE -ne 0) { throw "candle failed" }
+          & "$wix\light.exe" -sval -out "MillenAI-$ver-x64.msi" Product.wixobj Files.wixobj
+          if ($LASTEXITCODE -ne 0) { throw "light failed" }
+          Get-Item "MillenAI-$ver-x64.msi" | ForEach-Object {
+            Write-Host ("built {0}  {1:N1} MB" -f $_.Name, ($_.Length/1MB)) }
+
+      - name: attach to the release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $msi = Get-ChildItem MillenAI-*-x64.msi | Select-Object -First 1
+          gh release upload "${{ steps.tag.outputs.tag }}" $msi.FullName --clobber
+          Write-Host "attached $($msi.Name) to ${{ steps.tag.outputs.tag }}"

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MillenAI per-user MSI. Built in CI by .github/workflows/windows-installer.yml:
+     heat harvests the PyInstaller onedir into Files.wxs (ComponentGroup
+     AppFiles rooted at INSTALLDIR); candle gets -dVer and -dSourceDir.
+     Per-user on purpose: installs without admin, mirrors the Inno installer's
+     PrivilegesRequired=lowest, and CUDA needs nothing at install time anyway
+     (Ollama fetches the CUDA runtime itself on first use). -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="MillenAI" Language="1033" Version="$(var.Ver)"
+           Manufacturer="MillenAI" UpgradeCode="CEB4BA13-C46D-4BC2-838B-82B632F1C418">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perUser"
+             Description="MillenAI $(var.Ver) - local AI for Windows"/>
+    <MajorUpgrade DowngradeErrorMessage="A newer version of MillenAI is already installed."
+                  AllowSameVersionUpgrades="yes"/>
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high"/>
+
+    <Icon Id="AppIcon.ico" SourceFile="MillenAI.ico"/>
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico"/>
+
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="LocalAppDataFolder">
+        <Directory Id="AppProgramsFolder" Name="Programs">
+          <Directory Id="INSTALLDIR" Name="MillenAI"/>
+        </Directory>
+      </Directory>
+      <Directory Id="ProgramMenuFolder"/>
+      <Directory Id="DesktopFolder"/>
+    </Directory>
+
+    <DirectoryRef Id="ProgramMenuFolder">
+      <Component Id="StartMenuShortcut" Guid="8C1B62E4-5A0E-4C5D-9B7F-3D2B1A9E6F01">
+        <Shortcut Id="AppStartShortcut" Name="MillenAI"
+                  Target="[INSTALLDIR]MillenAI.exe"
+                  WorkingDirectory="INSTALLDIR" Icon="AppIcon.ico"/>
+        <RegistryValue Root="HKCU" Key="Software\MillenAI" Name="installed"
+                       Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+    </DirectoryRef>
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcut" Guid="2F7D9C3A-1E64-4B08-8D25-6C4A0B7E9F02">
+        <Shortcut Id="AppDesktopShortcut" Name="MillenAI"
+                  Target="[INSTALLDIR]MillenAI.exe"
+                  WorkingDirectory="INSTALLDIR" Icon="AppIcon.ico"/>
+        <RegistryValue Root="HKCU" Key="Software\MillenAI" Name="desktop"
+                       Type="integer" Value="1" KeyPath="yes"/>
+      </Component>
+    </DirectoryRef>
+
+    <Feature Id="Main" Title="MillenAI" Level="1">
+      <ComponentGroupRef Id="AppFiles"/>
+      <ComponentRef Id="StartMenuShortcut"/>
+      <ComponentRef Id="DesktopShortcut"/>
+    </Feature>
+  </Product>
+</Wix>
