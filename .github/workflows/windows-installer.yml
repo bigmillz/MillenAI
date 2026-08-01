@@ -35,9 +35,15 @@ jobs:
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "building for release: $TAG"
 
+      # Build scripts and packaging come from main (they may postdate old
+      # tags); the app itself is pinned to the release tag.
       - uses: actions/checkout@v4
-        with:
-          ref: ${{ steps.tag.outputs.tag }}
+      - name: pin app code to the release tag
+        shell: bash
+        run: |
+          git fetch --depth=1 origin tag "${{ steps.tag.outputs.tag }}"
+          git checkout "${{ steps.tag.outputs.tag }}" -- millenai.py MillenAI.ico
+          grep -o 'APP_VERSION = "[^"]*"' millenai.py
 
       - uses: actions/setup-python@v5
         with:
