@@ -81,9 +81,10 @@ gh release create "v$BUILD" "$DMG" "$ZIP" \
 
 **macOS** — download the .dmg. Existing installs update themselves.
 
-**Windows** — download the .zip, unzip anywhere, run MillenAI.bat. Needs
-Python 3.10+ from python.org. On an NVIDIA machine it uses CUDA
-automatically; no setup, nothing extra to install."
+**Windows** — the .msi installer (attached by CI a few minutes after
+release) needs nothing else: no Python, no admin. On an NVIDIA machine CUDA
+is used automatically. The .zip is the same app for people who prefer a
+portable copy (needs Python 3.10+)."
 
 echo ""
 echo "✓ published $VERSION — existing installs will offer it within the hour."

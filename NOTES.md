@@ -245,6 +245,33 @@ Three things to preserve if this is ever retouched:
   settled by 0.35s, well before the band reached it, so it read as an
   unrelated event instead of something the sweep delivered.
 
+### The skyline backdrop
+One of Apple's classic ATV aerial loops of New York (the H.264 set on
+`a1.phobos.apple.com` — the same feed the open-source Aerial screensaver
+streams; all six URLs verified live, 87–230 MB each, streamed progressively
+and never stored). A different clip every launch, never the same one twice
+running (`millen.sky` in localStorage).
+
+The greyscale→colour reveal reuses the wordmark's paint mechanism exactly:
+two `<video>` elements playing the same clip, the grey one beneath
+(`grayscale(1)`), a colour copy above behind the same travelling diagonal
+mask, keyed to the same `painting`/`painted` body classes — just with a wider
+transition window (1.5s from 0.5s) because the band crosses the whole
+viewport, not the wordmark's slice. Measured sync drift between the copies:
+13ms. Once painted, the grey copy is paused — condition-driven, not on a
+timer: a cold cache was still buffering at 10s, so any fixed deadline is
+wrong.
+
+Sending a query zooms into the city (`scale 1.6`) while it fades and blurs
+out — the starfield beneath is already ramping, so the skyline reads as
+shattering into the starstream; it reassembles when the answer lands.
+
+**Failure is the old behaviour.** The div starts hidden and is shown only
+after BOTH videos fire `playing`; any error hides it again. Offline, blocked,
+or slow → the starfield alone, exactly as before the feature. Perf mode never
+starts the videos. Note this is the one place the app talks to a third host
+(read-only, no user data); the About text's "no cloud" refers to chat.
+
 ### The starfield
 Idle drift; while a query streams the stars stretch into streaks. The ramp is
 a 0–1 progress driven by **real elapsed time** and then eased (smoothstep),
@@ -257,6 +284,19 @@ measured 0.5 → 2.7 → 7.1 → 12.3 → 17.4 → 21.0 → 22 across the three 
 brightness follows the same eased value; switching it on `generating`
 flickered at the moment a query started.
 
+### Standing preferences (the persona box)
+About panel ▸ "How should MillenAI reply?" — free text the user writes
+("be direct, I work in finance"), stored as `persona` in `prefs.json` and
+folded into the system prompt on every request, quoted verbatim in the
+user's own words with "the current message wins" as the tie-breaker.
+Deliberately distinct from memory: memory is *extracted guesses*, this is
+*authored instruction*, and the prompt ranks it above remembered facts.
+Because it rides `dated_system`, it flows into blends and Research briefs
+too, and the Gemma fold-system retry carries it automatically. Capped at
+2000 chars both in the UI (`maxlength`) and the backend (slice — the API
+can be hit directly). Verified end to end: "Always begin your reply with
+ACK, be extremely brief" produced `ACK, blue, typically a light blue…`.
+
 ### Memory
 Facts about the user are extracted in the background after each message by
 whichever model just answered, stored in `memory.json`, and folded into the
@@ -264,6 +304,22 @@ system prompt. Best-effort: failures never break a chat. Clear it from the
 About panel.
 
 ### Voice
+**getUserMedia in WKWebView is dead by default, and it fails as a silent
+hang, not an error** — measured: the promise neither resolves nor rejects,
+so the mic button just did nothing. Three gates stack: (1) media devices are
+disabled at the WebKit preferences level until the private
+`mediaDevicesEnabled` flag is set via KVC — Safari sets it, embedders must
+too; (2) pywebview (6.2.1) never implements
+`webView:requestMediaCapturePermissionForOrigin:…` on its UIDelegate, and
+WebKit waits forever on the missing decision; (3) macOS TCC, which needs
+`NSMicrophoneUsageDescription` in Info.plist (present) and shows the normal
+one-time prompt. millenai.py patches (1) and (2) at startup by wrapping
+`BrowserView.__init__` and `classAddMethods`-ing a grant onto the delegate —
+verified with an instrumented probe window: pref set → delegate invoked with
+type 1 (microphone) → grant delivered. Everything is wrapped in try/except so
+a future pywebview that fixes this natively (or changes internals) degrades
+to voice-unavailable instead of breaking launch.
+
 STT is Whisper large-v3-turbo via MLX (Apple silicon only, ~1.6 GB, fetched
 on first mic tap). TTS is the macOS `say` binary — free, no download, works
 on Intel. Voice chat mode auto-sends after transcription and reads replies
@@ -482,6 +538,22 @@ machines are CPU-only whichever build they run.
 **CUDA needs no code.** Ollama detects an NVIDIA GPU and offloads on its own;
 the Windows zip ships the CUDA runtime. A 4090 will comfortably outrun an
 M4 Pro here.
+
+### The MSI (built in CI)
+`.github/workflows/windows-installer.yml` — every published release gets
+`MillenAI-<ver>-x64.msi` attached automatically: a windows-latest runner
+builds the exe with `build_windows_exe.ps1` (PyInstaller cannot
+cross-compile, so the Mac that cuts releases can never do this itself), then
+WiX (heat harvest → candle → light) wraps `dist\MillenAI` in a per-user MSI —
+no admin, Start Menu + desktop shortcuts, uninstaller in Settings.
+`workflow_dispatch` with a `tag` input backfills old releases.
+
+Two CI gotchas that cost an iteration each: **the checkout must not be the
+release tag** — packaging files postdate old tags, so build scripts come from
+main and only `millenai.py` + the icon are pinned to the tag; and **PowerShell
+does not interpolate `-dVer=$ver`** — a token starting with `-` and containing
+`=` passes literally unless quoted (`"-dVer=$ver"`), which candle reports as
+version '$ver'.
 
 ### Status: written, not yet run on Windows
 No Windows machine or NVIDIA GPU was available. What *was* verified, by

@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.5.0"   # bump here — UI, window, DMG all follow
-APP_BUILD = 38               # integer compared against the GitHub release tag
+APP_VERSION = "1.6.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 39               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1337,6 +1337,10 @@ def setup_status() -> dict:
         "mlx_ok": _has_mlx() if IS_ARM else True,
         "ollama": _ollama_bin() is not None,
         "arch": "arm64" if IS_ARM else "x86_64",
+        # human name for the About panel: "MillenAI Apple Silicon" etc.
+        "plat": (("Apple Silicon" if IS_ARM else "Intel x64") if IS_MAC else
+                 ("Windows ARM64" if IS_WIN_ARM else "Windows x64") if IS_WIN
+                 else "Linux"),
         "disk_free_gb": round(
             shutil.disk_usage(os.path.expanduser("~")).free / 1e9),
         "models": models,
@@ -2300,6 +2304,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "\n\nFrom earlier conversations you remember these facts "
                 "about the user:\n" + mem +
                 "\nUse them naturally when relevant — don't recite them.")
+        # standing preferences the user wrote themselves (About panel) — they
+        # outrank remembered facts, which are extracted guesses
+        persona = (load_prefs().get("persona") or "").strip()[:2000]
+        if persona:
+            dated_system["content"] += (
+                "\n\nThe user has set standing instructions for how you "
+                "should respond, in their own words:\n\"" + persona + "\"\n"
+                "Follow them in every reply without restating them. If the "
+                "current message conflicts with them, the message wins.")
         full_messages = [dated_system] + messages
 
         route, route_label = None, None
@@ -2435,21 +2448,24 @@ body.resizing{cursor:col-resize;user-select:none}
 #update-flag[hidden]{display:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
    sitting it on the wordmark's baseline hangs it low against the taller type */
-#brand{display:flex;cursor:pointer;align-items:center;gap:8px}
+#brand{display:flex;align-items:center;gap:8px}
 #brand .name{font-weight:700;font-size:26px;letter-spacing:.02em}
 #brand .tag{font-family:var(--mono);font-size:10px;color:var(--accent);
   border:1px solid var(--accent-dim);background:var(--accent-dim);
   padding:2px 6px;border-radius:4px;letter-spacing:.08em}
 
-#newchat{
-  margin-left:auto;width:28px;height:28px;flex-shrink:0;
+#newchat,#settings-btn{
+  width:28px;height:28px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
   background:none;border:1px solid var(--line);border-radius:8px;
   color:var(--accent-hot);cursor:pointer;padding:0;
   transition:border-color .15s,background .15s,color .15s;
 }
+#settings-btn{margin-left:auto;color:var(--dim)}
+#newchat{margin-left:6px}
 #newchat svg{width:15px;height:15px}
-#newchat:hover{border-color:var(--accent-hot);background:var(--accent-dim);color:var(--text)}
+#settings-btn svg{width:15px;height:15px}
+#newchat:hover,#settings-btn:hover{border-color:var(--accent-hot);background:var(--accent-dim);color:var(--text)}
 
 .group-label{
   font-family:var(--mono);font-size:10px;letter-spacing:.14em;
@@ -2586,6 +2602,38 @@ body.perf #telemetry{opacity:.13;filter:grayscale(1);pointer-events:none}
 #main{flex:1;height:100%;display:flex;flex-direction:column;position:relative}
 #stars{position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
 body.perf #stars{display:none}
+/* The skyline: one of Apple's ATV aerial clips of New York, greyscale until
+   the launch wipe colours it, exactly the way the wordmark is painted — a
+   colour copy of the SAME video sits on top behind the same travelling
+   diagonal mask. Sending a query zooms INTO the city and dissolves it; the
+   starfield beneath is already ramping, so the skyline appears to shatter
+   into the starstream, and reassembles when the answer lands. */
+#skyline{
+  position:absolute;top:0;left:0;width:100%;height:100%;z-index:0;
+  overflow:hidden;pointer-events:none;
+  transition:transform 1.5s cubic-bezier(.55,0,.85,.45),
+             opacity 1.15s ease,filter 1.5s ease;
+}
+#skyline[hidden]{display:none}
+#skyline video{
+  position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;
+}
+#sky-grey{filter:grayscale(1) brightness(.42)}
+#sky-color{
+  filter:brightness(.5) saturate(1.15);
+  -webkit-mask-image:linear-gradient(114deg,#000 0 42%,transparent 58% 100%);
+          mask-image:linear-gradient(114deg,#000 0 42%,transparent 58% 100%);
+  -webkit-mask-size:300% 100%;mask-size:300% 100%;
+  -webkit-mask-position:100% 0;mask-position:100% 0;
+}
+body.painted #sky-color{-webkit-mask-position:0 0;mask-position:0 0}
+/* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
+   follows it edge-for-edge, unlike the wordmark's tighter window */
+body.painting #sky-color{
+  transition:-webkit-mask-position 1.5s linear .5s,mask-position 1.5s linear .5s;
+}
+body.gen #skyline{transform:scale(1.6);opacity:0;filter:blur(7px)}
+body.perf #skyline{display:none}
 #chat-scroll{flex:1;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth;position:relative;z-index:1}
 body.perf #chat-scroll{scroll-behavior:auto}
 #chat-inner{
@@ -2850,6 +2898,19 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   box-shadow:0 24px 80px rgba(0,0,0,.6);
 }
 #about-icon{width:96px;height:96px;margin-bottom:16px}
+#persona-label{
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--faint);text-align:left;
+  margin:16px 0 6px;
+}
+#persona{
+  width:100%;resize:none;padding:10px 12px;
+  font:13.5px/1.55 var(--helv);color:var(--text);
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  outline:none;
+}
+#persona:focus{border-color:var(--dim)}
+#persona::placeholder{color:var(--faint)}
 #about-name{font-family:var(--helv);font-size:24px;font-weight:600;color:var(--text)}
 #about-name em{font-style:italic;font-weight:400;opacity:.85}
 #about-ver,#up-ver{font-family:var(--helv);font-size:14px;color:var(--dim);margin-top:6px}
@@ -3069,6 +3130,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
       <span class="name">MillenAI</span>
       <span class="tag">__APP_VER_TAG__</span>
     </div>
+    <button id="settings-btn" title="Settings — preferences &amp; about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg></button>
     <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
@@ -3122,6 +3184,10 @@ __MODEL_ROWS__
 
 <main id="main">
   <canvas id="stars"></canvas>
+  <div id="skyline" hidden>
+    <video id="sky-grey" muted loop playsinline></video>
+    <video id="sky-color" muted loop playsinline></video>
+  </div>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
       <div class="h1row"><h1 data-word="MillenAI">MillenAI</h1><span class="live-big">LIVE</span></div>
@@ -3183,10 +3249,14 @@ __MODEL_ROWS__
       <rect x="81" y="52" width="14" height="50" rx="6" fill="url(#ag)"/>
       <circle cx="95" cy="24" r="7" fill="#4cc9e0"/>
     </svg>
-    <div id="about-name">MillenAI <em>for</em> Mac</div>
+    <div id="about-name">MillenAI</div>
     <div id="about-ver">Version __APP_VER__</div>
     <div id="about-sub">Everything runs on this Mac. No cloud, no accounts.</div>
     <div id="about-facts"></div>
+    <div id="persona-label">How should MillenAI reply?</div>
+    <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
+      placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
+    <button class="about-btn" id="persona-save">Save preferences</button>
     <button class="about-btn" id="about-check">Check for updates</button>
     <button class="about-btn" id="about-logs">Open logs folder</button>
     <button class="about-btn" id="about-forget">Forget what you know about me</button>
@@ -3773,6 +3843,48 @@ async function pollEngines(){
 }
 pollEngines();setInterval(pollEngines,8000);
 
+/* ------------------------------------------------- NYC skyline backdrop */
+// Apple's ATV aerial loops of New York (the classic H.264 set — streams
+// progressively, nothing is stored). A different one every launch. If the
+// network or a URL lets us down, the div stays hidden and the starfield is
+// simply what it was before this feature existed.
+const SKY_CLIPS=[
+  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b1-3.mov",
+  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b2-3.mov",
+  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b3-2.mov",
+  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b4-2.mov",
+  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b7-2.mov",
+  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b10-2.mov",
+];
+const skyline=$("#skyline");
+function bootSkyline(){
+  if(perf||!skyline)return;
+  let i=Math.floor(Math.random()*SKY_CLIPS.length);
+  const last=parseInt(localStorage.getItem("millen.sky")||"-1",10);
+  if(i===last)i=(i+1)%SKY_CLIPS.length;   // never the same city twice running
+  localStorage.setItem("millen.sky",i);
+  const g=$("#sky-grey"),c=$("#sky-color");
+  let playing=0;
+  [g,c].forEach(v=>{
+    v.addEventListener("error",()=>{skyline.hidden=true;},{once:true});
+    v.addEventListener("playing",()=>{
+      if(++playing===2)skyline.hidden=false;
+    },{once:true});
+    v.src=SKY_CLIPS[i];
+    const pr=v.play(); if(pr&&pr.catch)pr.catch(()=>{skyline.hidden=true;});
+  });
+}
+bootSkyline();
+// once the wipe has fully coloured the backdrop the grey copy underneath is
+// invisible — stop paying to decode it (also kills any slow sync drift).
+// Condition-driven, not clock-driven: a slow network can still be buffering
+// at any fixed deadline (seen at 10s on a cold cache).
+const skyTrim=setInterval(()=>{
+  if(document.body.classList.contains("painted")&&!skyline.hidden){
+    $("#sky-grey").pause();clearInterval(skyTrim);
+  }
+},1500);
+
 /* ------------------------------------------------------- warp starfield */
 // Idle: colored stars drift gently toward the viewer.
 // While a query streams, speed ramps up and stars stretch into light
@@ -4137,9 +4249,14 @@ const aboutVeil=$("#about-veil");
 async function openAbout(){
   aboutVeil.hidden=false;
   try{
+    const pr=await(await fetch("/api/prefs")).json();
+    $("#persona").value=pr.persona||"";
+  }catch(e){}
+  try{
     const [m,st]=await Promise.all([
       (await fetch("/api/memory")).json(),
       (await fetch("/api/setup")).json()]);
+    if(st.plat)$("#about-name").innerHTML="MillenAI <em>"+esc(st.plat)+"</em>";
     const ready=st.models.filter(x=>x.status==="ready").length;
     $("#about-facts").textContent=
       st.arch+" · "+ready+"/"+st.models.length+" models ready · "+
@@ -4188,7 +4305,17 @@ async function announceNewModels(){
 }
 setTimeout(announceNewModels,2500);   // after the first paint
 
-$("#brand").addEventListener("click",openAbout);
+$("#settings-btn").addEventListener("click",openAbout);
+$("#persona-save").addEventListener("click",async ev=>{
+  const b=ev.currentTarget;
+  try{
+    await fetch("/api/prefs",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({persona:$("#persona").value.trim()})});
+    b.textContent="Saved \u2713";
+  }catch(e){b.textContent="Couldn\u2019t save";}
+  setTimeout(()=>{b.textContent="Save preferences";},1800);
+});
 $("#about-close").addEventListener("click",()=>{aboutVeil.hidden=true;});
 aboutVeil.addEventListener("click",e=>{if(e.target===aboutVeil)aboutVeil.hidden=true;});
 $("#about-logs").addEventListener("click",()=>fetch("/api/open-logs",{method:"POST"}));
@@ -4290,6 +4417,49 @@ if __name__ == "__main__":
         print("  (telemetry simulated — pip install psutil for real numbers)")
     print()
     url = f"http://127.0.0.1:{PORT}"
+
+    if HAS_WEBVIEW and IS_MAC:
+        # WKWebView ships with getUserMedia dead in two separate ways, and
+        # both fail as a silent hang, not an error (measured: the promise
+        # neither resolves nor rejects). 1) media devices are OFF at the
+        # preferences level until the private 'mediaDevicesEnabled' flag is
+        # set — Safari sets it, embedders must too (via KVC). 2) pywebview's
+        # UIDelegate never implements requestMediaCapturePermission, and
+        # WebKit waits forever on a decision that never comes. After both,
+        # macOS TCC shows the normal one-time mic prompt (the usage string
+        # is in Info.plist). Guarded top to bottom: if any of this bridging
+        # breaks in a future pywebview, voice degrades — the window opens.
+        try:
+            import objc
+            from webview.platforms import cocoa as _cocoa
+
+            def _grant_mic(self, wv, origin, frame, media_type, handler):
+                handler(1)          # WKPermissionDecisionGrant
+
+            _sel = objc.selector(
+                _grant_mic,
+                selector=b"webView:requestMediaCapturePermissionForOrigin:"
+                         b"initiatedByFrame:type:decisionHandler:",
+                signature=b"v@:@@@q@?")
+            objc.classAddMethods(_cocoa.BrowserView.BrowserDelegate, [_sel])
+
+            _bv_init = _cocoa.BrowserView.__init__
+
+            def _bv_init_media(self, window):
+                _bv_init(self, window)
+                try:
+                    prefs = self.webview.configuration().preferences()
+                    for _k in ("mediaDevicesEnabled", "mediaStreamEnabled"):
+                        try:
+                            prefs.setValue_forKey_(True, _k)
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
+
+            _cocoa.BrowserView.__init__ = _bv_init_media
+        except Exception:
+            pass
 
     if HAS_WEBVIEW:
         # Native macOS window (WKWebView). Blocks until the window closes.
