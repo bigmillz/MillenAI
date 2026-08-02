@@ -3626,15 +3626,22 @@ body.resizing{cursor:col-resize;user-select:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
    sitting it on the wordmark's baseline hangs it low against the taller type */
 #brand{display:flex;align-items:center;gap:8px}
+/* the brand is a CHAMELEON: its gradient is sampled live from the
+   backdrop footage (see paintBrandFromSky) — an SF dusk turns it amber
+   and umber, the aurora turns it green-violet. The rainbow is only the
+   pre-video fallback. */
 #brand .name{
-  font-weight:700;font-size:26px;letter-spacing:.02em;
-  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff,#ff8fd8,#ff8f8f);
+  font-weight:700;font-size:34px;letter-spacing:.02em;
+  background:linear-gradient(90deg,
+             var(--bw1,#ff8f8f),var(--bw2,#ffc46e),var(--bw3,#f5e663),
+             var(--bw1,#7ef0a6),var(--bw2,#6ec7ff),var(--bw3,#8f9dff),
+             var(--bw1,#ff8f8f));
   background-size:200% 100%;
   -webkit-background-clip:text;background-clip:text;
   color:transparent;-webkit-text-fill-color:transparent;
   animation:rainbow 26s linear infinite;
   filter:drop-shadow(0 1px 7px rgba(150,160,255,.30));
+  transition:filter 1.2s ease;
 }
 body.perf #brand .name{animation:none;filter:none}
 #brand .tag{font-family:var(--mono);font-size:10px;color:var(--accent);
@@ -5494,6 +5501,36 @@ function harvestLights(ts){
     }
   }catch(err){}
 }
+/* the sidebar wordmark takes its colours FROM the footage: probe the
+   frame, average three luminance bands (shadow / mid / light), brighten
+   them into text-worthy tones, hand them to the CSS vars */
+let lastBrand=0;
+function paintBrandFromSky(ts){
+  const c=$("#sky-color");
+  if(!c||c.videoWidth<1||ts-lastBrand<6000)return;
+  lastBrand=ts;
+  try{
+    probeCtx.drawImage(c,0,0,160,90);
+    const d=probeCtx.getImageData(0,0,160,90).data;
+    const px=[];
+    for(let i=0;i<d.length;i+=24)
+      px.push([d[i],d[i+1],d[i+2],d[i]+d[i+1]+d[i+2]]);
+    px.sort((a,b)=>a[3]-b[3]);
+    const band=q=>{
+      const s=Math.floor(px.length*q),e=Math.floor(px.length*(q+.3));
+      let r=0,g=0,b=0,n=0;
+      for(let k=s;k<e;k++){r+=px[k][0];g+=px[k][1];b+=px[k][2];n++;}
+      // lift toward text-legible brightness, keep the hue
+      const lift=v=>Math.round(90+(v/n)*.72);
+      return "rgb("+lift(r)+","+lift(g)+","+lift(b)+")";
+    };
+    const root=document.documentElement.style;
+    root.setProperty("--bw1",band(.05));
+    root.setProperty("--bw2",band(.42));
+    root.setProperty("--bw3",band(.68));
+  }catch(err){}
+}
+
 function drawMotes(dt){
   if(!lightMotes.length)return;
   sctx.globalCompositeOperation="screen";
@@ -5663,6 +5700,12 @@ function starTick(ts){
   drawMotes(dt);
 }
 starTick();
+// the brand chameleon runs on its own gentle clock — the warp loop only
+// draws while a query runs, but the wordmark should match the city always
+(function brandTick(ts){
+  requestAnimationFrame(brandTick);
+  if(!perf)paintBrandFromSky(ts||0);
+})();
 
 /* ------------------------------------------- mic: whisper voice input */
 const micBtn=$("#mic");
