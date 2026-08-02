@@ -655,3 +655,15 @@ installs regardless). Needs `MILLENAI_HEADLESS=1` (no window, no
 webbrowser.open) and `MILLENAI_PORT` — both shipped in 1.8.0, so the live
 instance only works from v49 tags onward. The access key lives in
 `~/Library/MillenAI-live/key` (0600), never in the repo.
+
+### 1.9.x — the door, and why the web skyline was black
+1.9.0 replaced the plain-text 403 with THE DOOR: the bare public URL shows
+a styled key box (wrong key = note, API paths keep the terse 403), so the
+shareable address is just ai.millertechnology.net + a spoken key.
+1.9.1: the skyline never played on the https tunnel because the phobos
+clip URLs are http-only (its https cert is broken — curl exit 60) and
+browsers hard-block http media on an https page, silently. The clips now
+come from sylvan.apple.com (tvOS-13 CDN, valid TLS, H.264/AVC so every
+browser decodes them — the 2x/entries.json variants are HEVC-only, which
+Firefox can't play). NYC URLs live in Apple's resources-13.tar
+entries.json; guessing `NY_*_2K_SDR_HEVC.mov` names 404s.
