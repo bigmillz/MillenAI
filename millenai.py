@@ -2147,11 +2147,99 @@ def offline_hint(kind: str, err: Exception) -> str:
 # app_dir()/sky, and stream same-origin with Range support. One path that
 # works in the app, on the tunnel, and in every browser.
 SKY_SOURCES = [
+    # The COMPLETE Apple aerial catalog (89 clips: cities, ISS space
+    # flyovers, underwater) from resources-13.tar entries.json — every
+    # url-1080-H264 on sylvan. Clips download lazily on first pick and the
+    # cache is LRU-capped, so the list's size costs nothing up front.
+    "https://sylvan.apple.com/Videos/SE_A016_C009_SDR_20190717_3m30s_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A114_C001_0305OT_v10_SDR_FINAL_22062018_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GL_G002_C002_PSNK_v03_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT026_363A_103NC_E1027_KOREA_JAPAN_NIGHT_v18_SDR_PS_20180907_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/PA_A001_C007_SDR_20190717_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_LA_A008_C004_ALTB_ED_FROM_FLAME_RETIME_v46_SDR_PS_20180917_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/g201_WH_D004_L014_SDR_20191031_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_L007_C007_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT312_162NC_139M_1041_AFRICA_NIGHT_v14_SDR_FINAL_20180706_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_CH_C002_C005_PSNK_v05_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GL_G004_C010_PSNK_v04_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/PA_A004_C003_SDR_20190719_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_LA_A005_C009_PSNK_ALT_v09_SDR_PS_201809134_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A009_C001_010181A_v09_SDR_PS_FINAL_20180725_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/DL_B002_C011_SDR_20191122_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_LA_A011_C003_DGRN_LNFIX_STAB_v57_SDR_PS_20181002_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/KP_A010_C002_SDR_20190717_SDR_2K_AVC.mov",
     "https://sylvan.apple.com/Videos/comp_N013_C004_PS_v01_SDR_PS_20180925_F1970F7193_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT329_113NC_396B_1105_ITALY_v03_SDR_FINAL_20180706_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/g201_TH_803_A001_8_SDR_20191031_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_L012_c002_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A105_C002_v06_SDR_FINAL_25062018_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A013_C012_0122D6_CC_v01_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/RS_A008_C010_SDR_20191218_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_CH_C007_C004_PSNK_v02_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT314_139M_170NC_NORTH_AMERICA_AURORA__COMP_v22_SDR_20181206_v12CC_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_LA_A006_C008_PSNK_ALL_LOGOS_v10_SDR_PS_FINAL_20180801_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/BO_A018_C029_SDR_20190812_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_DB_D011_C010_PSNK_DENOISE_v19_SDR_PS_20180914_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A001_C004_1207W5_v23_SDR_FINAL_20180706_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A083_C002_1130KZ_v04_SDR_PS_FINAL_20180725_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/PA_A002_C009_SDR_20190730_ALT01_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT308_139K_142NC_CARIBBEAN_DAY_v09_SDR_FINAL_22062018_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_HK_B005_C011_PSNK_v16_SDR_PS_20180914_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GL_G010_C006_PSNK_NOSUN_v12_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT306_139NC_139J_3066_CALI_TO_VEGAS_v08_SDR_PS_20180824_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/MEX_A006_C008_SDR_20190923_SDR_2K_AVC.mov",
     "https://sylvan.apple.com/Videos/comp_N008_C009_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A015_C018_0128ZS_v03_SDR_PS_FINAL_20180709__SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/g201_TH_804_A001_8_SDR_20191031_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_LA_A006_C004_v01_SDR_FINAL_PS_20180730_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_H004_C009_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/g201_CA_A016_C002_SDR_20191114_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A108_C001_v09_SDR_FINAL_22062018_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT329_117NC_401C_1037_IRELAND_TO_ASIA_v48_SDR_PS_FINAL_20180725_F0F6300_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_DB_D008_C010_PSNK_v21_SDR_PS_20180914_F0F16157_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_C003_C003_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/g201_AK_A003_C014_SDR_20191113_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_H012_C009_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_H005_C012_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT329_113NC_396B_1105_CHINA_v04_SDR_FINAL_20180706_F900F2700_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_LA_A009_C009_PSNK_v02_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/FK_U009_C004_SDR_20191220_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A050_C004_1027V8_v16_SDR_FINAL_20180706_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_DB_D002_C003_PSNK_v04_SDR_PS_20180914_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_CH_C007_C011_PSNK_v02_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/BO_A012_C031_SDR_20190726_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A105_C003_0212CT_FLARE_v10_SDR_PS_FINAL_20180711_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_LW_L001_C003__PSNK_DENOISE_v04_SDR_PS_FINAL_20180803_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_HK_H004_C010_PSNK_v08_SDR_PS_20181009_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A351_C001_v06_SDR_PS_20180725_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/CR_A009_C007_SDR_20191113_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A001_C001_120530_v04_SDR_FINAL_20180706_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A006_C003_1219EE_CC_v01_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_DB_D001_C001_PSNK_v06_SDR_PS_20180824_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/BO_A014_C023_SDR_20190717_F240F3709_SDR_2K_AVC.mov",
     "https://sylvan.apple.com/Videos/comp_N008_C003_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT110_112NC_364D_1054_AURORA_ANTARTICA__COMP_FINAL_v34_PS_SDR_20181107_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_L010_C006_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_1223LV_FLARE_v21_SDR_PS_FINAL_20180709_F0F5700_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A103_C002_0205DG_v12_SDR_FINAL_20180706_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/PA_A010_C007_SDR_20190717_SDR_2K_AVC.mov",
     "https://sylvan.apple.com/Videos/comp_N003_C006_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_C001_C005_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A008_C007_011550_CC_v01_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
     "https://sylvan.apple.com/Videos/comp_GMT307_136NC_134K_8277_NY_NIGHT_01_v25_SDR_PS_20180907_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/BO_A014_C008_SDR_20190719_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_L004_C011_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_H004_C007_PS_v02_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_HK_H004_C013_t9_6M_HB_tag0.mov",
+    "https://sylvan.apple.com/Videos/comp_H007_C003_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_DB_D001_C005_COMP_PSNK_v12_SDR_PS_20180912_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A012_C014_1223PT_v53_SDR_PS_FINAL_20180709_F0F8700_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/AK_A004_C012_SDR_20191217_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_HK_H004_C008_PSNK_v19_SDR_PS_20180914_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_A007_C017_01156B_v02_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_LW_L001_C006_PSNK_DENOISE_v02_SDR_PS_FINAL_20180709_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT060_117NC_363D_1034_AUSTRALIA_v35_SDR_PS_FINAL_20180731_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_C004_C003_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
 ]
 
 _sky_lock = threading.Lock()
@@ -2163,7 +2251,10 @@ def _sky_dir() -> str:
 
 
 def _sky_path(i: int) -> str:
-    return os.path.join(_sky_dir(), "sky%d.mov" % i)
+    # keyed by URL hash, not list index — editing SKY_SOURCES must never
+    # make a cached file impersonate a different clip
+    h = hashlib.sha1(SKY_SOURCES[i].encode()).hexdigest()[:10]
+    return os.path.join(_sky_dir(), "sky-%s.mov" % h)
 
 
 def _atoms(fh, end):
@@ -2282,6 +2373,15 @@ def _sky_fetch(i: int):
         _faststart(tmp, _sky_path(i))
         with _sky_lock:
             _sky_jobs[i] = {"status": "ready", "pct": 100}
+        # LRU cap: 89 possible clips at ~400 MB each must never all land
+        # on disk — keep the 6 most recently played, drop the rest
+        try:
+            clips = sorted(glob.glob(os.path.join(_sky_dir(), "sky*.mov")),
+                           key=os.path.getmtime)
+            for old in clips[:-6]:
+                os.remove(old)
+        except Exception:
+            pass
     except Exception as exc:
         with _sky_lock:
             _sky_jobs[i] = {"status": "error", "pct": 0,
@@ -2590,6 +2690,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     .replace("__CHIP__", chip_name())
                     .replace("__WIN_WIPE__",
                              "1" if (HAS_WEBVIEW and IS_MAC) else "0")
+                    .replace("__SKY_N__", str(len(SKY_SOURCES)))
                     .replace("__APP_VER__", APP_VERSION))
             body = html.encode("utf-8")
             self.send_response(200)
@@ -4298,11 +4399,19 @@ function paintDrafts(div,drafts,live,statusText){
   return d;
 }
 
+// a wall of model names above every blend read as noise — count them
+// instead; a single model keeps its name
+function whoLabel(s){
+  if(!s)return s;
+  const n=s.split(",").length;
+  return n>1?("running "+n+" models"):s;
+}
+
 function addMsg(role,text,drafts){
   const hero=$("#hero"); if(hero)hero.remove();
   const div=document.createElement("div");
   div.className="msg "+(role==="user"?"user":"ai");
-  const who=role==="user"?"you":(lastModels||tier);
+  const who=role==="user"?"you":(whoLabel(lastModels)||tier);
   div.innerHTML='<div class="who">'+who+'</div><div class="body"></div>';
   const body=div.querySelector(".body");
   if(role==="user")body.textContent=text; else body.innerHTML=renderMD(text);
@@ -4370,7 +4479,7 @@ async function send(){
     });
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
-    if(lastModels){const w=aiDiv.querySelector(".who");if(w)w.textContent=lastModels;}
+    if(lastModels){const w=aiDiv.querySelector(".who");if(w)w.textContent=whoLabel(lastModels);}
     if(searched)body.innerHTML='<span class="websrc">🌐 searched the web</span><span class="caret"></span>';
     const reader=resp.body.getReader(),dec=new TextDecoder();
     let raw="";
@@ -4670,7 +4779,7 @@ pollEngines();setInterval(pollEngines,8000);
 // file lands). The server downloads once, remuxes fast-start, caches, and
 // streams with Range support. While it warms, the macOS-style #skyload bar
 // tracks the download; a different clip still plays every launch.
-const SKY_N=5;             // keep in step with SKY_SOURCES in the Python
+const SKY_N=parseInt("__SKY_N__",10)||5;   // injected: len(SKY_SOURCES)
 const skyline=$("#skyline");
 function bootSkyline(){
   if(perf||!skyline)return;
@@ -4757,8 +4866,8 @@ function buildTiles(vw,vh){
   // ~28px chips, TONS of them — the frame splits like pizza slices from
   // the centre and every chip streaks radially, "like stars" (Patrick,
   // after the slat era). Cap keeps the worst-case draw count sane.
-  let cols=Math.max(38,Math.round(sw/17)),rows=Math.max(26,Math.round(sh/17));
-  while(cols*rows>2400){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
+  let cols=Math.max(46,Math.round(sw/13)),rows=Math.max(32,Math.round(sh/13));
+  while(cols*rows>2800){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
   const cover=Math.max(sw/vw,sh/vh);
   const srcW=sw/cover,srcH=sh/cover;
   const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
@@ -4850,7 +4959,12 @@ function starTick(ts){
     const cap=Math.min(inv,1.6);
     const ww=m.tw*cap,hh=m.th*cap;
     const len=stretch*(1+(inv-1)*1.4);
-    const thin=.26/Math.sqrt(Math.max(1,len*.5));
+    // DISINTEGRATION: a fragment leaves at FULL cell size (the mosaic
+    // still reads as the picture) and erodes into a needle as it
+    // accelerates — the image visibly crumbles into shooting stars, and
+    // the settle reverses it: needles fatten back into the frame
+    const needle=.16/Math.sqrt(Math.max(1,len*.5));
+    const thin=1-(1-needle)*Math.min(1,scat*2.5);
     sctx.drawImage(snapCv,t.sx,t.sy,m.stw,m.sth,
       -ww*len*.35,-hh*thin/2,ww*len*.7,hh*thin);
   }
