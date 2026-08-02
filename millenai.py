@@ -5543,8 +5543,11 @@ async function bootSkyline(){
   // clips (night city passes, aurora, deep ocean); in daylight it avoids
   // them. Falls back to whatever exists rather than showing nothing.
   const darkSet=new Set(JSON.parse('__SKY_DARK__'));
-  const h=new Date().getHours(), night=(h>=19||h<7);
-  const mood=x=>night===darkSet.has(x);
+  // CURATED, for now: only the light-field clips — night city passes,
+  // aurora, deep-ocean glow. Dense bright points on dark are what make
+  // the warp a surreal starfield; a daylight bridge makes mush. The
+  // time-of-day switch is parked until the pool reopens.
+  const mood=x=>darkSet.has(x);
   let i;
   if(cached.length){
     let pool=cached.filter(x=>x!==last&&mood(x));
