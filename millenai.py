@@ -3635,6 +3635,13 @@ if("__WIN_WIPE__"==="1"&&
     if(localStorage.getItem("millen.perf")!=="1")
       document.documentElement.classList.add("winwipe");
   }catch(e){}
+  // DEAD-MAN'S SWITCH, in THIS script: the unclip normally runs from the
+  // main script — when a bug killed the main script, the page stayed
+  // clipped to nothing and the window was pure black (seen live, v85).
+  // Whatever happens below, the app becomes visible.
+  setTimeout(function(){
+    document.documentElement.classList.remove("winwipe","winwipe-run");
+  },3000);
 }
 </script>
 <title>MillenAI __APP_VER__</title>
