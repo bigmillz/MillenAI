@@ -595,3 +595,63 @@ Expect first-run friction on Windows: Python must be installed manually,
 SmartScreen will warn about an unknown publisher, and `faster-whisper` needs
 a working CUDA/cuDNN install for GPU transcription — it falls back to CPU
 rather than failing.
+
+## 1.8.0 — window-wipe boot, slat warp, the hardware ladder, go-live
+
+### Window-wipe boot (Mac native only)
+The NSWindow is born transparent (`setOpaque_(False)`, clear background,
+WKWebView `drawsBackground` off via KVC) and the page starts with
+`html.winwipe`: body clipped to `inset(0 0 0 100%)`, so launching the app
+wipes the UI in RIGHT-to-left over the desktop, and the rainbow wash then
+answers LEFT-to-right — always from the opposite side. Traps, learned hard:
+* **Canvas propagation** — body's background paints the whole viewport even
+  when body is clipped. During the wipe the background lives on
+  `body::before` (z-index -99), which clips with everything else.
+* **Occlusion** — no rAF, no animationend. `winWipeFinish` has a 1.6 s
+  timeout; the classes are always dropped, the page always appears.
+* **Remote visitors** share the server but sit in a real browser where a
+  transparent page flashes white — the head script gates on
+  `location.hostname` being 127.0.0.1/localhost.
+* The native window re-solidifies by an **NSTimer at 2 s** (opaque, #212121,
+  shadow + `invalidateShadow`) — deliberately not a JS bridge, so a dead
+  page still yields a normal window. All AppKit/WebKit selectors dry-run
+  in the app venv (`pyobjc` is not in system python).
+* Boot order: kickWipe → winWipeRun (double rAF so the clipped state
+  commits first) → winWipeFinish → rainbowWipe. Performance mode and
+  non-Mac/browser serve skip straight to rainbowWipe.
+
+### The warp is now VERTICAL SLATS (user-picked from a live A/B)
+~28 CSS-px-wide strips, THREE rows tall, no spin, no radial rotation:
+each slat keeps its own depth speed (`zj .82+rand*.5`), rushes the viewer
+with true 1/z perspective, and motion-stretch runs along the slat's LENGTH
+(`vstr`, ×5) so speed reads as longer lines, never sideways smear. Lateral
+drift is small (`.035`) and proportional to (1−z), so settling is exact:
+z pulls home at `dt*5`, scatter collapses to zero, the intact video fades
+up underneath. Square-shard and spin variants are dead — "split into long
+vertical lines and just zooms" is the spec, and it must "settle neatly".
+Tuning harness: scratchpad/warp.html (synthetic skyline — the pane blocks
+the Apple CDN — with `setGen()`/`step()` because the pane starves rAF).
+
+### The hardware ladder (catalog 2.0 groundwork)
+`HW_CLASSES` groups the sidebar by the MACHINE a model needs (Everyday /
+Performance 32 GB / Flagship 64–96 GB / Titan 128 GB+), and
+`model_fits_machine` (needs ≤ 75% of total RAM) HIDES what can't fit —
+sidebar, add-models panel, and setup all filter. New verified rungs (HF +
+Ollama registries, 2026-08-01): GPT-OSS 20B/120B, Qwen 3.6 27B/35B-A3B,
+Llama 3.3 70B (now MLX too), Llama 4 Scout, Qwen 3 235B-A22B, GLM-5.2 and
+DeepSeek R1 671B (MLX-only, 512 GB-class). `STARTER_LABELS` is now the
+AUTOSELECT: best fitting pick per tier only (~25 GB on a 48 GB Mac, three
+models), not every pick that fits (~118 GB — the bug this replaced).
+NB: this Mac is 48 GB total, budget 36 GB — the 70B correctly vanishes here.
+
+### go-live.sh — the always-on, self-updating instance
+One idempotent script: managed clone in `~/Library/MillenAI-live` pinned to
+the newest `v*` tag, LaunchAgent serving HEADLESS on :9889 (8890 was a trap —
+it's Gemma 2 9B's engine port; engines own 8884–8930), 6-hourly updater
+(fetch tags → checkout → `launchctl kickstart`), Cloudflare named tunnel at
+ai.millertechnology.net once `cert.pem` exists (the login click is the one
+human step; the script opens the page and waits, and everything else
+installs regardless). Needs `MILLENAI_HEADLESS=1` (no window, no
+webbrowser.open) and `MILLENAI_PORT` — both shipped in 1.8.0, so the live
+instance only works from v49 tags onward. The access key lives in
+`~/Library/MillenAI-live/key` (0600), never in the repo.

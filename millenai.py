@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.7.8"   # bump here — UI, window, DMG all follow
-APP_BUILD = 48               # integer compared against the GitHub release tag
+APP_VERSION = "1.8.0"   # bump here — UI, window, DMG all follow
+APP_BUILD = 49               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -83,7 +83,9 @@ APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 # attached; the app then offers a one-click in-place update.
 UPDATE_REPO = "bigmillz/MillenAI"
 
-PORT = 8889
+# MILLENAI_PORT: the go-live LaunchAgent runs a second, headless instance
+# beside the desktop app — it must not fight the app for 8889
+PORT = int(os.environ.get("MILLENAI_PORT", "8889"))
 # Opt-in remote-access gate. The backend has no auth of its own — it was
 # built to listen on 127.0.0.1 for a window on the same machine. Before
 # exposing it through a tunnel (Tailscale Funnel, cloudflared, ...), set
@@ -160,14 +162,58 @@ CATALOG = [
     ("DeepSeek R1 7B",     "🧠", "7B",  "core", "mlx-community/DeepSeek-R1-Distill-Qwen-7B-4bit",  "deepseek-r1:7b",    8904,  5.0,  4.3, False),
     ("Mistral Small 24B",  "🧊", "24B", "big",  "mlx-community/Mistral-Small-24B-Instruct-2501-4bit", "mistral-small:24b", 8906, 15.0, 13.0, False),
     ("LLaVA Vision 7B",    "👁️", "7B",  "code", None,                                              "llava:7b",          None,  5.0,  4.7, False),
-    ("Command R 35B",      "🔮", "35B", "big",  None,                                              "command-r",         None, 20.0, 18.0, False),
-    ("Llama 3.3 70B",      "🐋", "70B", "big",  None,                                              "llama3.3:70b",      None, 44.0, 42.0, False),
-    ("Qwen 2.5 72B",       "🐲", "72B", "big",  None,                                              "qwen2.5:72b",       None, 49.0, 47.0, False),
-    ("DeepSeek R1",        "☁️", "R1",  "big",  None,                                              "deepseek-r1",       None,  5.5,  4.7, False),
+    ("DeepSeek R1",        "☁️", "R1",  "core", None,                                              "deepseek-r1",       None,  5.5,  4.7, False),
+    # ---- the 2026 ladder: every repo/tag verified against HF + the Ollama
+    # registry on 2026-08-01. Strongest model per hardware class; anything
+    # that can't fit the machine is filtered out of the UI entirely.
+    ("GPT-OSS 20B",        "🌀", "20B",  "core", "mlx-community/gpt-oss-20b-MXFP4-Q4",             "gpt-oss:20b",       8914, 13.0, 12.0, False),
+    ("Qwen 3.6 27B",       "🐉", "27B",  "big",  "mlx-community/Qwen3.6-27B-4bit",                 None,                8916, 16.5, 15.0, False),
+    ("Qwen 3.6 35B MoE",   "🚀", "35B",  "big",  "mlx-community/Qwen3.6-35B-A3B-4bit",             "qwen3.6:35b",       8918, 20.0, 18.5, True),
+    ("Llama 3.3 70B",      "🐋", "70B",  "big",  "mlx-community/Llama-3.3-70B-Instruct-4bit",      "llama3.3:70b",      8920, 42.0, 40.0, False),
+    ("Llama 4 Scout",      "🦅", "109B", "big",  "mlx-community/Llama-4-Scout-17B-16E-Instruct-4bit","llama4:scout",    8922, 58.0, 55.0, False),
+    ("GPT-OSS 120B",       "🌌", "120B", "big",  "mlx-community/gpt-oss-120b-MXFP4-Q4",            "gpt-oss:120b",      8924, 64.0, 61.0, False),
+    ("Qwen 3 235B MoE",    "🐲", "235B", "big",  "mlx-community/Qwen3-235B-A22B-4bit",             "qwen3:235b",        8926, 125.0, 118.0, False),
+    ("GLM-5.2",            "👑", "744B", "big",  "mlx-community/GLM-5.2-4bit",                     None,                8928, 375.0, 360.0, False),
+    ("DeepSeek R1 671B",   "🌊", "671B", "big",  "mlx-community/DeepSeek-R1-0528-4bit",            None,                8930, 380.0, 360.0, False),
 ]
 
 GROUP_TITLES = {"core": "General Models", "code": "Coding & Vision",
                 "big": "Large Models"}
+
+# ------------------------------------------------- hardware-class ladder
+# The sidebar groups models by the MACHINE they need, not by family, and a
+# model that cannot fit this machine is not shown at all — a 16 GB Air
+# never sees a 70B, and only the 512 GB Studios ever see GLM-5.2.
+HW_CLASSES = [   # (key, header, resident-GB ceiling for the class)
+    ("everyday",    "Everyday · any machine",   10),
+    ("performance", "Performance · 32 GB",      20),
+    ("flagship",    "Flagship · 64–96 GB",      64),
+    ("titan",       "Titan · 128 GB+",          1e9),
+]
+
+
+def hw_class(mem_gb: float) -> str:
+    for key, _t, ceil in HW_CLASSES:
+        if mem_gb <= ceil:
+            return key
+    return "titan"
+
+
+def machine_budget_bytes():
+    """What this machine can ever hold resident: 75% of total memory (the
+    practical wired-limit on Apple silicon; a sane ceiling elsewhere).
+    None when psutil is missing — then nothing is hidden."""
+    if not HAS_PSUTIL:
+        return None
+    return int(psutil.virtual_memory().total * 0.75)
+
+
+def model_fits_machine(label: str) -> bool:
+    budget = machine_budget_bytes()
+    need = MODEL_MEM_BYTES.get(label)
+    if budget is None or need is None:
+        return True
+    return need <= budget
 
 MODEL_INFO = {c[0]: dict(icon=c[1], size=c[2], group=c[3], mlx=c[4],
                          ollama=c[5], port=c[6],
@@ -203,13 +249,19 @@ TIERS = {
     },
     "Thinking": {
         "icon": "\U0001f9e0", "desc": "reasons it through, blended",
-        "picks": ["Gemma 4 26B", "Phi-4 14B", "DeepSeek R1 7B",
+        # strongest-first ladder: whatever the machine holds and the user
+        # has installed autoselects \u2014 a Titan rig leads with the 235B, a
+        # 16 GB laptop lands on Phi-4, nobody configures anything
+        "picks": ["Qwen 3 235B MoE", "GPT-OSS 120B", "Llama 4 Scout",
+                  "Llama 3.3 70B", "Qwen 3.6 35B MoE", "GPT-OSS 20B",
+                  "Gemma 4 26B", "Phi-4 14B", "DeepSeek R1 7B",
                   "Qwen 2.5 Coder 14B", "Gemma 4 12B"],
         "count": 3,
     },
     "Pro": {
         "icon": "\u2728", "desc": "several models, blended",
-        "picks": ["Gemma 4 12B", "Mistral Nemo 12B", "Gemma 2 9B IT",
+        "picks": ["Qwen 3.6 35B MoE", "Qwen 3.6 27B", "GPT-OSS 20B",
+                  "Gemma 4 12B", "Mistral Nemo 12B", "Gemma 2 9B IT",
                   "Qwen 2.5 7B", "Llama 3.1 8B"],
         "count": 5,
     },
@@ -228,9 +280,9 @@ TIERS = {
         # matters — count is 1, so the first installed pick is the agent.
         # Hermes leads because it is tuned for instruction-following and
         # structured output, which is most of what planning queries is.
-        "picks": ["Hermes 3 8B", "Gemma 4 12B", "Mistral Nemo 12B",
-                  "Qwen 2.5 7B", "Llama 3.1 8B", "Gemma 2 9B IT",
-                  "Gemma 4 26B", "Llama 3.2 3B"],
+        "picks": ["Hermes 3 8B", "Qwen 3.6 35B MoE", "Gemma 4 12B",
+                  "Mistral Nemo 12B", "Qwen 2.5 7B", "Llama 3.1 8B",
+                  "Gemma 2 9B IT", "Gemma 4 26B", "Llama 3.2 3B"],
         "count": 1,
         "research": True,
     },
@@ -287,10 +339,23 @@ def resolve_tier(name: str) -> list:
     return ready[:t["count"]]
 
 
-# offered on first run: everything the three tiers can draw on
-STARTER_LABELS = [l for l in MODEL_INFO
-                  if SUPPORTED[l] and any(l in t["picks"]
-                                          for t in TIERS.values())]
+# First run downloads the AUTOSELECTED set: for each tier, the single best
+# pick this machine can hold — the strongest brain per job, nothing more.
+# A 48 GB Mac gets the 35B MoE; a 16 GB Air lands on Phi-4/Gemma; nobody
+# is asked for 100 GB of also-rans (that was possible when this listed
+# every tier pick).
+def _starter_labels() -> list:
+    picks = []
+    for t in TIERS.values():
+        for l in t["picks"]:
+            if SUPPORTED.get(l) and model_fits_machine(l):
+                if l not in picks:
+                    picks.append(l)
+                break            # only the best fitting pick per tier
+    return picks
+
+
+STARTER_LABELS = _starter_labels()
 
 # who merges in combine mode — strongest first
 MERGE_RANK = sorted((l for l in MODEL_ROUTES),
@@ -342,23 +407,29 @@ def build_tier_rows() -> str:
 
 
 def build_model_rows() -> str:
-    """Sidebar rows, grouped. Every model is listed; ones this Mac can't
-    run are marked unsupported and rendered greyed out."""
-    out, seen = [], set()
-    for label, info in MODEL_INFO.items():
-        g = info["group"]
-        if g not in seen:
-            seen.add(g)
-            cls = "mlx" if g == "core" else "ollama"
-            out.append(f'  <div class="group-label {cls}">'
-                       f'{GROUP_TITLES[g]}</div>')
-        ok = SUPPORTED[label]
-        out.append(
-            f'  <div class="model{"" if ok else " unsupported"}"'
-            f' data-model="{label}">'
-            f'<span class="ico">{info["icon"]}</span>{label}'
-            + ("" if ok else '<span class="memtag">APPLE SILICON ONLY</span>')
-            + f'<span class="size">{info["size"]}</span></div>')
+    """Sidebar rows grouped by HARDWARE CLASS, strongest last-to-first
+    within a class. Models that cannot fit this machine's memory are not
+    rendered at all — every visitor sees only their own ladder, with the
+    best option of each class present. Models the platform can't run
+    (MLX-only on Intel/Windows) stay visible but greyed."""
+    out = []
+    for key, title, _ceil in HW_CLASSES:
+        members = [(l, i) for l, i in MODEL_INFO.items()
+                   if hw_class(i["mem"] / 1e9) == key
+                   and model_fits_machine(l)]
+        if not members:
+            continue
+        members.sort(key=lambda p: -p[1]["mem"])   # strongest first
+        out.append(f'  <div class="group-label mlx">{title}</div>')
+        for label, info in members:
+            ok = SUPPORTED[label]
+            out.append(
+                f'  <div class="model{"" if ok else " unsupported"}"'
+                f' data-model="{label}">'
+                f'<span class="ico">{info["icon"]}</span>{label}'
+                + ("" if ok else
+                   '<span class="memtag">APPLE SILICON ONLY</span>')
+                + f'<span class="size">{info["size"]}</span></div>')
     return "\n".join(out)
 
 
@@ -1306,7 +1377,10 @@ def setup_status() -> dict:
                        else ejob.get("pct", 0),
                        "note": ejob.get("note", "")})
 
-    for label in [l for l in MODEL_INFO if SUPPORTED.get(l)]:
+    # fit-filtered like the sidebar: the add-models panel never offers a
+    # model this machine cannot hold resident
+    for label in [l for l in MODEL_INFO
+                  if SUPPORTED.get(l) and model_fits_machine(l)]:
         kind, _target = MODEL_ROUTES[label]
         est = MLX_EST_BYTES.get(label, 5_000_000_000)
         with _setup_lock:
@@ -2041,6 +2115,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                              'VERSION <b class="vnum">%s</b>' % APP_VERSION)
                     .replace("__TIER_ROWS__", build_tier_rows())
                     .replace("__CHIP__", chip_name())
+                    .replace("__WIN_WIPE__",
+                             "1" if (HAS_WEBVIEW and IS_MAC) else "0")
                     .replace("__APP_VER__", APP_VERSION))
             body = html.encode("utf-8")
             self.send_response(200)
@@ -2428,6 +2504,21 @@ HTML_CONTENT = r"""<!DOCTYPE html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<script>
+/* Window-wipe boot (native Mac app only): the NSWindow starts transparent
+   and the whole page is clipped to nothing, so tagging the root BEFORE the
+   first paint is what stops a flash of the normal UI. Performance mode
+   opts out here too — rainbowWipe() would skip its half later anyway. */
+if("__WIN_WIPE__"==="1"&&
+   (location.hostname==="127.0.0.1"||location.hostname==="localhost")){
+  // hostname check: remote/tunnel visitors share this server but sit in a
+  // real browser, where a transparent page is a white flash, not a desktop
+  try{
+    if(localStorage.getItem("millen.perf")!=="1")
+      document.documentElement.classList.add("winwipe");
+  }catch(e){}
+}
+</script>
 <title>MillenAI __APP_VER__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -2457,6 +2548,32 @@ body{
   background:var(--bg);color:var(--text);font-family:var(--sans);
   display:flex;overflow:hidden;font-size:15px;
 }
+/* ------------------------------------------------- window-wipe boot (Mac) */
+/* The macOS window itself wipes into existence: the NSWindow is created
+   transparent (see the cocoa block near create_window), the page is clipped
+   to a zero-width sliver at the RIGHT edge, then unclipped right-to-left.
+   The rainbow wash that follows travels left-to-right — always from the
+   opposite side of the window's arrival.
+   Two traps live here:
+   1. Canvas propagation — body's background paints the whole viewport even
+      when body is clipped, so during the wipe the background moves onto
+      body::before, which clips with everything else.
+   2. An occluded window gets no animation frames and no animationend; the
+      1.6s timeout in winWipeFinish is what guarantees the page ever becomes
+      visible. */
+html.winwipe,html.winwipe body{background:transparent}
+html.winwipe body{clip-path:inset(0 0 0 100%)}
+html.winwipe body::before{
+  content:"";position:fixed;inset:0;background:var(--bg);z-index:-99;
+}
+html.winwipe.winwipe-run body{
+  animation:winWipe .95s cubic-bezier(.3,.75,.25,1) forwards;
+}
+@keyframes winWipe{
+  from{clip-path:inset(0 0 0 100%)}
+  to  {clip-path:inset(0 0 0 0)}
+}
+
 ::selection{background:var(--accent-dim);color:var(--accent-hot)}
 ::-webkit-scrollbar{width:8px}
 ::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
@@ -3931,16 +4048,17 @@ const WARP_UP=1.4, WARP_DOWN=1.6;   // fast attack: a 3s query must SHOW it
 const WARP_IDLE=0.5, WARP_FULL=22;
 let warpT=0,warpLast=0,warpSpeed=WARP_IDLE,skyCreep=0;
 
-// The warp is the IMAGE ITSELF flying at you. The visible frame is tiled
-// into ~1000 pixel-tiles; at onset every tile sits at depth z=1, which
-// reconstructs the picture exactly — then the whole plane accelerates
-// through the viewer with true perspective (pos and scale both 1/z), tiles
-// blowing past the edges and recycling behind at staggered depths, so the
-// footage becomes an endless tunnel of its own pixels. Each tile samples
-// the LIVE video every frame, so the tunnel keeps playing the movie.
+// The warp is the IMAGE ITSELF flying at you, split into LONG VERTICAL
+// LINES — Patrick's spec, chosen from a live A/B against square shards:
+// ~28 CSS-px-wide slats, three per column height, each at its own depth
+// speed. At onset every slat sits at z=1, which reconstructs the picture
+// exactly; then the slats rush the viewer with true perspective (pos and
+// scale both 1/z), desynced so the frame visibly splits, and settle
+// NEATLY afterwards: z pulls home, scatter is proportional to (1-z) so it
+// collapses to zero, and the intact video fades up beneath the landing.
+// No spin, no radial rotation — slats stay upright and just zoom.
 function buildTiles(vw,vh){
-  let cols=Math.max(18,Math.round(sw/70)),rows=Math.max(12,Math.round(sh/70));
-  while(cols*rows>1150){cols=Math.round(cols*.92);rows=Math.round(rows*.92);}
+  const cols=Math.max(14,Math.round(sw/56)),rows=3;
   const cover=Math.max(sw/vw,sh/vh);
   const srcW=sw/cover,srcH=sh/cover;
   const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
@@ -3950,10 +4068,9 @@ function buildTiles(vw,vh){
     tiles.push({ax:(c+.5)*tw,ay:(r+.5)*th,
                 sx:srcX+c*stw,sy:srcY+r*sth,
                 z:1,
-                zj:.82+Math.random()*.5,          // wide desync = fracture
-                jx:(Math.random()-.5)*2,          // lateral scatter dir
-                jy:(Math.random()-.5)*2,
-                rot:0,rv:(Math.random()-.5)*3.4});// individual spin
+                zj:.82+Math.random()*.5,          // depth desync = the split
+                jx:(Math.random()-.5)*2,          // slight lateral drift
+                jy:(Math.random()-.5)*2});
   }
   tileMeta={tw:tw,th:th,stw:stw,sth:sth};
 }
@@ -3991,35 +4108,30 @@ function starTick(ts){
   for(const t of tiles){
     const zPrev=t.z;
     if(generating){
-      // SHATTER: every tile at its own speed, drifting sideways off the
-      // radial and spinning — the plane fractures instead of gliding
+      // SPLIT + ZOOM: every slat at its own depth speed — the frame
+      // visibly separates into vertical lines as they rush the viewer
       t.z*=1-rate*t.zj;
-      t.rot+=t.rv*rate*3;
-      if(t.z<.18){t.z=1+Math.random()*.5;t.rot=0;continue;}
+      if(t.z<.18){t.z=1+Math.random()*.5;continue;}
     }else{
-      // REASSEMBLE: fly home. z pulls to 1, spin unwinds, scatter (which is
-      // proportional to 1-z) collapses with it — pieces visibly land back
-      // in the grid as the intact video fades up beneath them
+      // SETTLE: z pulls home; scatter is proportional to (1-z) so it
+      // collapses to exactly zero — every slat lands back in its grid
+      // slot as the intact video fades up beneath it
       t.z+=(1-t.z)*Math.min(1,dt*5);
-      t.rot*=Math.max(0,1-dt*6);
     }
     const inv=1/t.z;
     const scat=(1-Math.min(t.z,1));       // 0 at rest, grows toward viewer
-    const px=cx+(t.ax-cx)*inv+t.jx*scat*sw*.10;
-    const py=cy+(t.ay-cy)*inv+t.jy*scat*sh*.10;
+    const px=cx+(t.ax-cx)*inv+t.jx*scat*sw*.035;
+    const py=cy+(t.ay-cy)*inv+t.jy*scat*sh*.035;
     const w=m.tw*inv, h=m.th*inv;
     if(px<-w*2||px>sw+w*2||py<-h*2||py>sh+h*2){
-      if(generating){t.z=1+Math.random()*.5;t.rot=0;}
+      if(generating)t.z=1+Math.random()*.5;
       continue;
     }
-    const dxv=px-cx,dyv=py-cy,dd=Math.hypot(dxv,dyv);
-    const stretch=1+Math.max(0,(zPrev-t.z)/t.z)*9;
-    let co=1,si=0;
-    if(dd>1){co=dxv/dd;si=dyv/dd;}
-    // fold the tile's own spin into the radial alignment
-    const cr=Math.cos(t.rot),sr=Math.sin(t.rot);
-    sctx.setTransform(co*cr-si*sr,si*cr+co*sr,-(si*cr+co*sr),co*cr-si*sr,px,py);
-    sctx.drawImage(vid,t.sx,t.sy,m.stw,m.sth,-w*stretch/2,-h/2,w*stretch,h);
+    // upright always; motion-stretch runs along the slat's LENGTH so a
+    // fast slat draws as a longer line, never a sideways smear
+    const vstr=1+Math.max(0,(zPrev-t.z)/t.z)*5;
+    sctx.setTransform(1,0,0,1,px,py);
+    sctx.drawImage(vid,t.sx,t.sy,m.stw,m.sth,-w/2,-h*vstr/2,w,h*vstr);
   }
   sctx.setTransform(1,0,0,1,0,0);
   sctx.globalAlpha=1;
@@ -4290,8 +4402,31 @@ $("#open-setup").addEventListener("click",openSetup);
 // rAF for the fast path, a timeout as the guarantee: an occluded window gets
 // NO animation frames, and a wipe that never runs would leave the wordmark
 // grey forever — `painted` is only ever set by the wipe.
-let wipeKicked=false;
-function kickWipe(){if(wipeKicked)return;wipeKicked=true;rainbowWipe();}
+let wipeKicked=false,wwDone=false;
+function winWipeFinish(){
+  if(wwDone)return;wwDone=true;
+  // dropping the classes restores body's normal background and clip in one
+  // move; the native window is re-opaqued by a timer on the Python side
+  document.documentElement.classList.remove("winwipe","winwipe-run");
+  rainbowWipe();
+}
+function winWipeRun(){
+  const root=document.documentElement;
+  // double rAF: the clipped-to-nothing state must be committed before the
+  // animation class lands, or WebKit coalesces them and nothing wipes
+  requestAnimationFrame(()=>requestAnimationFrame(()=>root.classList.add("winwipe-run")));
+  document.body.addEventListener("animationend",e=>{
+    if(e.animationName==="winWipe")winWipeFinish();
+  });
+  setTimeout(winWipeFinish,1600);   // occluded-window guarantee
+}
+function kickWipe(){
+  if(wipeKicked)return;wipeKicked=true;
+  // native Mac boot: the window wipes in from the right first, and the
+  // rainbow answers from the left inside winWipeFinish
+  if(document.documentElement.classList.contains("winwipe"))winWipeRun();
+  else rainbowWipe();
+}
 requestAnimationFrame(kickWipe);
 setTimeout(kickWipe,450);
 (async()=>{
@@ -4564,12 +4699,62 @@ if __name__ == "__main__":
                             pass
                 except Exception:
                     pass
+                # Window-wipe boot: the NSWindow starts fully transparent so
+                # the page (clipped to nothing, see html.winwipe) can wipe in
+                # over the desktop. Everything is restored by a timer rather
+                # than a JS bridge — if the page-side wipe dies, the window
+                # still becomes a normal opaque window 2s in. Shadow is off
+                # during the wipe because macOS computes it from the opaque
+                # content outline and does not track a moving clip edge.
+                try:
+                    from AppKit import NSColor, NSTimer
+
+                    self.window.setOpaque_(False)
+                    self.window.setBackgroundColor_(NSColor.clearColor())
+                    self.window.setHasShadow_(False)
+                    try:
+                        self.webview.setValue_forKey_(False, "drawsBackground")
+                    except Exception:
+                        pass
+                    try:
+                        self.webview.setUnderPageBackgroundColor_(
+                            NSColor.clearColor())
+                    except Exception:
+                        pass
+
+                    _win = self.window
+
+                    def _resolidify(_timer=None):
+                        try:
+                            _win.setBackgroundColor_(
+                                NSColor.colorWithSRGBRed_green_blue_alpha_(
+                                    0x21 / 255, 0x21 / 255, 0x21 / 255, 1.0))
+                            _win.setOpaque_(True)
+                            _win.setHasShadow_(True)
+                            _win.invalidateShadow()
+                        except Exception:
+                            pass
+
+                    NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
+                        2.0, False, _resolidify)
+                except Exception:
+                    pass
 
             _cocoa.BrowserView.__init__ = _bv_init_media
         except Exception:
             pass
 
-    if HAS_WEBVIEW:
+    if os.environ.get("MILLENAI_HEADLESS") == "1":
+        # go-live service mode: no window, no browser tab — just the server.
+        # A LaunchAgent must never call webbrowser.open (it lands in the
+        # user's face) or pywebview (it needs a WindowServer session).
+        print("  headless — serving, no window. ctrl-c to stop.\n")
+        try:
+            while True:
+                time.sleep(100)
+        except KeyboardInterrupt:
+            print("\n  shutting down. o7\n")
+    elif HAS_WEBVIEW:
         # Native macOS window (WKWebView). Blocks until the window closes.
         window = webview.create_window(
             f"MillenAI {APP_VERSION}",
