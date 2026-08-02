@@ -3627,9 +3627,13 @@ body.painted #sky-color{-webkit-mask-position:0 0;mask-position:0 0}
 body.gen #skyline,body.gen #stars{filter:brightness(.7)}
 
 /* macOS-style loading bar while the server warms the skyline cache —
-   big, high on the screen, and it just says Loading */
-#skyload{position:fixed;left:50%;top:44%;transform:translateX(-50%);
-  z-index:4;width:min(440px,70vw);text-align:center;pointer-events:none}
+   big, it just says Loading, and it sits BELOW the greeting, centred on
+   the MAIN PANEL like the hero text (50% of the viewport is the window's
+   centre, which the sidebar pushes visibly off-axis — the --sbw var is
+   kept current by setSidebar) */
+#skyload{position:fixed;left:calc(50% + var(--sbw,284px)/2);top:57%;
+  transform:translateX(-50%);
+  z-index:4;width:min(440px,50vw);text-align:center;pointer-events:none}
 #skyload[hidden]{display:none}
 #skyload .track{height:10px;border-radius:5px;overflow:hidden;
   background:rgba(255,255,255,.14)}
@@ -5536,6 +5540,8 @@ const sidebarEl=$("#sidebar"),SB_MIN=210,SB_MAX=560;
 function setSidebar(w){
   w=Math.max(SB_MIN,Math.min(SB_MAX,Math.round(w)));
   sidebarEl.style.width=w+"px";sidebarEl.style.minWidth=w+"px";
+  // anything centred on the MAIN panel (the Loading bar) reads this
+  document.documentElement.style.setProperty("--sbw",w+"px");
   localStorage.setItem("millen.sbw",w);
 }
 const savedW=parseInt(localStorage.getItem("millen.sbw")||"0",10);
