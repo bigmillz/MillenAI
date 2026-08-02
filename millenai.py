@@ -4057,12 +4057,16 @@ pollEngines();setInterval(pollEngines,8000);
 // network or a URL lets us down, the div stays hidden and the starfield is
 // simply what it was before this feature existed.
 const SKY_CLIPS=[
-  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b1-3.mov",
-  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b2-3.mov",
-  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b3-2.mov",
-  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b4-2.mov",
-  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b7-2.mov",
-  "http://a1.phobos.apple.com/us/r1000/000/Features/atv/AutumnResources/videos/b10-2.mov",
+  // sylvan (tvOS-13 CDN), not the old phobos host: phobos is http-only with
+  // a broken https cert, and browsers hard-block http media on the https
+  // tunnel — the web version showed NO skyline. These are valid-TLS H.264
+  // (AVC = every browser decodes it), so ONE list serves the app and the
+  // web. URLs come from Apple's own resources-13.tar entries.json.
+  "https://sylvan.apple.com/Videos/comp_N013_C004_PS_v01_SDR_PS_20180925_F1970F7193_SDR_2K_AVC.mov",
+  "https://sylvan.apple.com/Videos/comp_N008_C009_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+  "https://sylvan.apple.com/Videos/comp_N008_C003_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+  "https://sylvan.apple.com/Videos/comp_N003_C006_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+  "https://sylvan.apple.com/Videos/comp_GMT307_136NC_134K_8277_NY_NIGHT_01_v25_SDR_PS_20180907_SDR_2K_AVC.mov",
 ];
 const skyline=$("#skyline");
 function bootSkyline(){
