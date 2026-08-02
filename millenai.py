@@ -2070,6 +2070,49 @@ def offline_hint(kind: str, err: Exception) -> str:
     return f"⚠️ Backend error — {type(err).__name__}: {err}"
 
 
+# The DOOR: what the bare public URL shows a browser with no cookie. Kept
+# self-contained (inline styles, system fonts, no assets) so it renders
+# instantly from anywhere — its whole job is one input box.
+GATE_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>MillenAI</title>
+<style>
+html,body{height:100%;margin:0}
+body{background:#0f1117;color:#ececec;display:flex;align-items:center;
+  justify-content:center;font-family:'Helvetica Neue',system-ui,sans-serif}
+.door{text-align:center;padding:24px}
+h1{font-size:clamp(44px,9vw,76px);letter-spacing:.06em;margin:0 0 6px;
+  font-weight:700;
+  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff,#ff8fd8);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 22px rgba(140,150,255,.25))}
+p{color:#8e8e8e;margin:0 0 26px;font-size:15px}
+.err{color:#e26d5a;min-height:20px;margin:12px 0 0;font-size:14px}
+form{display:flex;gap:10px;justify-content:center}
+input{background:#171717;border:1px solid #3d3d3d;border-radius:12px;
+  color:#ececec;font-size:16px;padding:13px 16px;width:min(320px,60vw);
+  outline:none;text-align:center;letter-spacing:.08em}
+input:focus{border-color:#8f9dff}
+button{background:#ececec;color:#111;border:0;border-radius:12px;
+  font-size:15px;font-weight:600;padding:13px 22px;cursor:pointer}
+button:hover{background:#fff}
+</style></head><body>
+<div class="door">
+  <h1>MillenAI</h1>
+  <p>private &middot; enter your access key</p>
+  <form onsubmit="location.href='/?key='+encodeURIComponent(
+      document.getElementById('k').value.trim());return false">
+    <input id="k" type="password" autocomplete="off" autofocus
+           placeholder="access key">
+    <button>Enter</button>
+  </form>
+  <div class="err">__GATE_NOTE__</div>
+</div>
+</body></html>"""
+
+
 class StudioHandler(http.server.BaseHTTPRequestHandler):
     protocol_version = "HTTP/1.0"  # lets us stream then close, no chunking
 
@@ -2077,12 +2120,19 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         pass
 
     def _gate(self):
-        """True = let the request through; False = already answered it."""
+        """True = let the request through; False = already answered it.
+
+        Browsers hitting the root get the DOOR — a MillenAI-styled page
+        with a key box, so the URL handed to friends is just the bare
+        domain plus a key they type once (the cookie remembers them for
+        30 days). API paths keep the terse 403 so fetches never receive
+        HTML."""
         if not ACCESS_KEY:
             return True
         cookie = self.headers.get("Cookie", "") or ""
         if "millen_key=" + ACCESS_KEY in cookie:
             return True
+        wrong = False
         if self.path.startswith("/?key="):
             if self.path[len("/?key="):] == ACCESS_KEY:
                 self.send_response(302)
@@ -2092,12 +2142,26 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 self.send_header("Location", "/")
                 self.end_headers()
                 return False
+            wrong = True
+        if self.path == "/" or self.path.startswith("/?"):
+            body = (GATE_PAGE.replace(
+                "__GATE_NOTE__",
+                "that key isn’t right — try again" if wrong else "")
+                .encode("utf-8"))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except Exception:
+                pass
+            return False
         self.send_response(403)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
         try:
-            self.wfile.write(b"MillenAI: access key required. Open the link "
-                             b"exactly as it was shared with you.")
+            self.wfile.write(b"MillenAI: access key required.")
         except Exception:
             pass
         return False
