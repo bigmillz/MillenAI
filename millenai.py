@@ -4625,8 +4625,11 @@ let warpT=0,warpLast=0,warpSpeed=WARP_IDLE,skyCreep=0;
 // collapses to zero, and the intact video fades up beneath the landing.
 // No spin, no radial rotation — slats stay upright and just zoom.
 function buildTiles(vw,vh){
-  // narrower slats, four rows, wider desync — "much more split up"
-  const cols=Math.max(16,Math.round(sw/44)),rows=4;
+  // ~28px chips, TONS of them — the frame splits like pizza slices from
+  // the centre and every chip streaks radially, "like stars" (Patrick,
+  // after the slat era). Cap keeps the worst-case draw count sane.
+  let cols=Math.max(24,Math.round(sw/28)),rows=Math.max(16,Math.round(sh/28));
+  while(cols*rows>1400){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
   const cover=Math.max(sw/vw,sh/vh);
   const srcW=sw/cover,srcH=sh/cover;
   const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
@@ -4701,17 +4704,22 @@ function starTick(ts){
       if(generating)t.z=1+Math.random()*.5;
       continue;
     }
-    // motion-stretch runs along the slat's LENGTH so a fast slat draws as
-    // a longer line; the whole field also drifts DIAGONALLY (up-right,
-    // jittered per slat by zj) and leans ~7° into the motion as it
-    // accelerates — "vertical slices shooting like stars", per Patrick.
-    // Both the drift and the lean scale with scat=(1-z), so they collapse
-    // to exactly zero as the slats settle home.
-    const vstr=1+Math.max(0,(zPrev-t.z)/t.z)*5;
-    const dpx=px+.28*scat*sw*t.zj, dpy=py-.16*scat*sh*t.zj;
-    const tl=-.12*scat, ct=Math.cos(tl), st=Math.sin(tl);
-    sctx.setTransform(ct,st,-st,ct,dpx,dpy);
-    sctx.drawImage(snapCv,t.sx,t.sy,m.stw,m.sth,-w/2,-h*vstr/2,w,h*vstr);
+    // STARBURST: each chip rotates to point along its own radius and
+    // stretches with speed — a field of image-slivers racing outward.
+    // Chips stay SMALL (size capped at 1.8x) and spend closeness on
+    // streak LENGTH instead: a star gets longer as it nears you, never
+    // fatter — that cap is what separates "stars" from "flying blocks".
+    // At rest cap=1, len=1, rotation cancels against the intact frame —
+    // the settle still reconstructs the picture exactly.
+    const dxv=px-cx,dyv=py-cy,dd=Math.hypot(dxv,dyv);
+    let co=1,si=0;if(dd>1){co=dxv/dd;si=dyv/dd;}
+    sctx.setTransform(co,si,-si,co,px,py);
+    const stretch=1+Math.max(0,(zPrev-t.z)/t.z)*13;
+    const cap=Math.min(inv,1.8);
+    const ww=m.tw*cap,hh=m.th*cap;
+    const len=stretch*(1+(inv-1)*1.1);
+    sctx.drawImage(snapCv,t.sx,t.sy,m.stw,m.sth,
+      -ww*len*.35,-hh*.35,ww*len*.7,hh*.7);
   }
   sctx.setTransform(1,0,0,1,0,0);
   sctx.globalAlpha=1;
