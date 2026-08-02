@@ -312,6 +312,97 @@ TIERS = {
     },
 }
 
+# ------------------------------------------------------------- agents
+# Task specialists, named for what they're GOOD AT. An agent is a strong
+# system prompt married to the best installed model for that craft —
+# radio-selected in the sidebar against "Standard model".
+AGENTS = {
+    "Coding": {
+        "icon": "💻", "desc": "working code, tight explanations",
+        "picks": ["Qwen 2.5 Coder 14B", "Qwen 2.5 Coder 7B",
+                  "Qwen 3.6 35B MoE", "GPT-OSS 20B", "Gemma 4 12B",
+                  "Llama 3.1 8B"],
+        "system": (
+            "You are a senior software engineer. Give WORKING code first, "
+            "in fenced blocks with the language tag, then a tight "
+            "explanation of the non-obvious parts only. Prefer complete, "
+            "runnable examples over fragments. State assumptions, name "
+            "edge cases, and when something is a bad idea say so and give "
+            "the better way. No filler, no apologies."),
+    },
+    "Resumes": {
+        "icon": "📄", "desc": "bullets that get interviews",
+        "picks": ["Hermes 3 8B", "Qwen 3.6 35B MoE", "Gemma 4 12B",
+                  "Mistral Nemo 12B", "Llama 3.1 8B"],
+        "system": (
+            "You are an expert resume writer and hiring manager. Turn "
+            "experience into crisp, quantified bullet points: strong verb "
+            "first, concrete impact with numbers, no fluff words "
+            "('responsible for', 'various'). Keep ATS-friendly plain "
+            "formatting, tailor language to the target role when given, "
+            "and be honest — never invent accomplishments. Offer a "
+            "sharper alternative whenever a bullet is weak."),
+    },
+    "Writing": {
+        "icon": "✍️", "desc": "emails, essays, anything with a reader",
+        "picks": ["Qwen 3.6 35B MoE", "Gemma 4 26B", "Gemma 4 12B",
+                  "Mistral Nemo 12B", "Hermes 3 8B"],
+        "system": (
+            "You are a sharp professional writer and editor. Match the "
+            "asked-for tone exactly, lead with the point, cut every "
+            "word that earns nothing, and vary sentence rhythm so it "
+            "reads human. When editing, preserve the writer's voice and "
+            "explain only the changes that teach something. For emails: "
+            "subject line first, then the shortest body that gets the "
+            "yes."),
+    },
+    "Math & Logic": {
+        "icon": "🧮", "desc": "careful step-by-step reasoning",
+        "picks": ["Phi-4 14B", "DeepSeek R1 7B", "Gemma 4 26B",
+                  "Qwen 3.6 35B MoE", "Gemma 4 12B"],
+        "system": (
+            "You are a meticulous mathematician. Work step by step, "
+            "define variables before using them, and CHECK the result "
+            "(substitute back, sanity-check magnitudes) before answering. "
+            "If a problem is ambiguous, state the interpretation you "
+            "chose. Show the reasoning compactly, then box the final "
+            "answer on its own line."),
+    },
+    "Research": {
+        "icon": "🔎", "desc": "searches the web, writes a cited brief",
+        "picks": ["Hermes 3 8B", "Qwen 3.6 35B MoE", "Gemma 4 12B",
+                  "Mistral Nemo 12B", "Llama 3.1 8B"],
+        "research": True,
+        "system": "",
+    },
+}
+
+
+def resolve_agent(name):
+    """(model_label, agent_dict) — best installed pick, or (None, None)."""
+    a = AGENTS.get(name)
+    if not a:
+        return None, None
+    pulled = ollama_pulled_tags() or set()
+    for l in a["picks"]:
+        if l in MODEL_ROUTES and model_cached(l, pulled) \
+                and model_fits_memory(l):
+            return l, a
+    return None, a
+
+
+def build_agent_rows() -> str:
+    out = ['  <div class="agent" data-agent="">'
+           '<span class="radio"></span><span class="ico">🤖</span>'
+           'Standard model</div>']
+    for name, a in AGENTS.items():
+        out.append(
+            f'  <div class="agent" data-agent="{name}" title="{a["desc"]}">'
+            f'<span class="radio"></span><span class="ico">{a["icon"]}</span>'
+            f'{name}</div>')
+    return "\n".join(out)
+
+
 # Auto-blending skips these: a vision model answers text poorly, and 1B-class
 # models degrade into repetition (observed looping "address address address").
 BLEND_EXCLUDE = {"LLaVA Vision 7B"}
@@ -2869,6 +2960,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 return
             html = (HTML_CONTENT
                     .replace("__MODEL_ROWS__", build_model_rows())
+                    .replace("__AGENT_ROWS__", build_agent_rows())
                     .replace("__APP_VER_TAG__",
                              APP_VERSION.replace(" ", "&nbsp;"))
                     .replace("__APP_BETA__",
@@ -3333,6 +3425,20 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             council = [model_name]
         prompt = messages[-1]["content"] if messages else ""
 
+        # a selected AGENT owns the request: its best installed model, its
+        # specialist system prompt; Research routes to the research flow
+        agent_name = req_json.get("agent") or ""
+        ag_system, ag_research = "", False
+        if agent_name and not req_json.get("images"):
+            ag_label, ag = resolve_agent(agent_name)
+            if ag:
+                ag_research = bool(ag.get("research"))
+                ag_system = ag.get("system", "")
+                if ag_label:
+                    council = [ag_label]
+                    model_name = ag_label
+                    tier = "Research" if ag_research else ""
+
         if images:
             # vision answers come from the pixels: no web search, no tier
             # council — LLaVA takes the whole request
@@ -3393,6 +3499,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         # local models have no clock — without this "today" is meaningless
         today = time.strftime("%A, %B %-d, %Y")
         dated_system = dict(SYSTEM_PROMPT)
+        if ag_system:
+            dated_system["content"] = ag_system
         dated_system["content"] += f"\n\nToday's date is {today}."
         if tier == "Thinking" and messages:
             messages[-1] = dict(messages[-1])
@@ -3469,7 +3577,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 pass
             return
         try:
-            if TIERS.get(tier, {}).get("research"):
+            if TIERS.get(tier, {}).get("research") or ag_research:
                 run_research(council, full_messages, emit, status)
             elif len(council) > 1:
                 run_council(council, full_messages, emit, status,
@@ -3640,7 +3748,7 @@ body.resizing{cursor:col-resize;user-select:none}
   -webkit-background-clip:text;background-clip:text;
   color:transparent;-webkit-text-fill-color:transparent;
   animation:rainbow 26s linear infinite;
-  filter:drop-shadow(0 1px 7px rgba(150,160,255,.30));
+  filter:drop-shadow(0 1px 7px var(--bwglow,rgba(150,160,255,.30)));
   transition:filter 1.2s ease;
 }
 body.perf #brand .name{animation:none;filter:none}
@@ -3689,6 +3797,30 @@ body.perf #brand .name{animation:none;filter:none}
   border:1px solid transparent;transition:all .13s;user-select:none;
 }
 .tier:hover{color:var(--text);background:var(--panel2)}
+/* the library tabs + agent radio rows */
+#lib-tabs{display:flex;gap:6px;margin:12px 0 8px}
+#lib-tabs .ltab{
+  flex:1;text-align:center;font-family:var(--mono);font-size:11px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--faint);
+  padding:7px 0;border:1px solid var(--line-soft);border-radius:9px;
+  cursor:pointer;user-select:none;
+}
+#lib-tabs .ltab:hover{color:var(--dim)}
+#lib-tabs .ltab.on{color:var(--text);background:var(--panel2);
+  border-color:var(--line)}
+.agent{
+  display:flex;align-items:center;gap:9px;padding:8px 10px;
+  border-radius:9px;color:var(--dim);font-size:14px;cursor:pointer;
+}
+.agent:hover{color:var(--text);background:var(--panel2)}
+.agent .radio{
+  width:13px;height:13px;border-radius:50%;flex:none;
+  border:1.5px solid var(--faint);
+}
+.agent.on{color:var(--text)}
+.agent.on .radio{border-color:var(--accent-hot);
+  box-shadow:inset 0 0 0 3.5px var(--accent-hot)}
+
 /* model-group dropdowns: carets on the hardware-class headers */
 #adv-wrap .group-label{cursor:pointer;user-select:none}
 #adv-wrap .group-label::after{content:"▾";float:right;color:var(--faint);font-size:11px}
@@ -4430,9 +4562,15 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div class="model" id="open-setup" title="Download more models">
     <span class="ico">⬇</span>Add models…</div>
 
-  <div class="group-label adv" id="adv-toggle"><span id="adv-caret">▸</span> All models</div>
+  <div id="lib-tabs">
+    <span class="ltab" data-t="models">Models</span>
+    <span class="ltab" data-t="agents">Agents</span>
+  </div>
   <div id="adv-wrap" hidden>
 __MODEL_ROWS__
+  </div>
+  <div id="agents-wrap" hidden>
+__AGENT_ROWS__
   </div>
   </div>
 
@@ -4669,10 +4807,13 @@ setVoice(voiceChat);
 /* --------------------------------------------------------------- tiers */
 // Fast / Pro / Thinking replace hand-picking models. The backend resolves
 // each tier to whatever is downloaded and fits RAM, and Gemma blends.
+let agent="";           // declared early: setTier reads it (TDZ!)
 let tier=localStorage.getItem("millen.tier")||"Fast";
 function setTier(name){
   tier=name;localStorage.setItem("millen.tier",name);
   councilManual=false;
+  if(agent){agent="";localStorage.setItem("millen.agent","");
+    if(typeof paintAgents==="function")paintAgents();}
   paintModels();                 // paints both tier and model highlights
 }
 const tierPop=$("#tierpop");
@@ -4724,11 +4865,37 @@ document.addEventListener("click",e=>{
 });
 setTier(tier);
 
-// advanced list stays collapsed until asked for
-$("#adv-toggle").addEventListener("click",()=>{
-  const w=$("#adv-wrap");w.hidden=!w.hidden;
-  $("#adv-caret").textContent=w.hidden?"▸":"▾";
-});
+// the model/agent LIBRARY: two tabs over one drawer. Tap a tab to open
+// its list, tap the active tab again to fold everything away.
+function libShow(which){
+  const mv=which==="models",av=which==="agents";
+  $("#adv-wrap").hidden=!mv;
+  $("#agents-wrap").hidden=!av;
+  $$("#lib-tabs .ltab").forEach(t=>
+    t.classList.toggle("on",t.dataset.t===which));
+}
+$$("#lib-tabs .ltab").forEach(t=>t.addEventListener("click",()=>{
+  libShow(t.classList.contains("on")?"":t.dataset.t);
+}));
+
+/* ------------------------------------------------------------ agents */
+// radio choice: a task specialist (Coding, Resumes…) or the standard
+// model path. Picking a tier or model flips back to Standard.
+agent=localStorage.getItem("millen.agent")||"";
+function paintAgents(){
+  $$("#agents-wrap .agent").forEach(el=>
+    el.classList.toggle("on",(el.dataset.agent||"")===agent));
+  const chip=$("#chip-model");
+  if(agent&&chip)chip.textContent=agent+" agent";
+  else if(chip)paintModels();
+}
+function setAgent(name){
+  agent=name;localStorage.setItem("millen.agent",name);
+  paintAgents();
+}
+$$("#agents-wrap .agent").forEach(el=>
+  el.addEventListener("click",()=>setAgent(el.dataset.agent||"")));
+paintAgents();
 
 // each hardware-class group inside is its own dropdown, folded by default —
 // open one tier of the ladder at a time instead of a wall of models
@@ -5038,7 +5205,7 @@ async function send(){
       method:"POST",headers:{"Content-Type":"application/json"},
       signal:abortCtl.signal,
       body:JSON.stringify({model,models:council,tier,messages,
-        auto_web:autoWeb,images:sentImages}),
+        auto_web:autoWeb,images:sentImages,agent}),
     });
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
@@ -5516,18 +5683,27 @@ function paintBrandFromSky(ts){
     for(let i=0;i<d.length;i+=24)
       px.push([d[i],d[i+1],d[i+2],d[i]+d[i+1]+d[i+2]]);
     px.sort((a,b)=>a[3]-b[3]);
+    // BRIGHT bands only: feeding the shadow tone into text made letters
+    // read half-disabled grey (seen live). Boost saturation away from
+    // mud, lift to legible brightness, keep the hue.
     const band=q=>{
-      const s=Math.floor(px.length*q),e=Math.floor(px.length*(q+.3));
+      const s=Math.floor(px.length*q),e=Math.min(px.length,Math.floor(px.length*(q+.22)));
       let r=0,g=0,b=0,n=0;
       for(let k=s;k<e;k++){r+=px[k][0];g+=px[k][1];b+=px[k][2];n++;}
-      // lift toward text-legible brightness, keep the hue
-      const lift=v=>Math.round(90+(v/n)*.72);
-      return "rgb("+lift(r)+","+lift(g)+","+lift(b)+")";
+      r/=n;g/=n;b/=n;
+      const m=(r+g+b)/3;
+      const f=v=>Math.max(0,Math.min(255,
+        Math.round(112+(m+(v-m)*1.7)*.56)));
+      return [f(r),f(g),f(b)];
     };
+    const rgb=c=>"rgb("+c[0]+","+c[1]+","+c[2]+")";
+    const b1=band(.45),b2=band(.68),b3=band(.86);
     const root=document.documentElement.style;
-    root.setProperty("--bw1",band(.05));
-    root.setProperty("--bw2",band(.42));
-    root.setProperty("--bw3",band(.68));
+    root.setProperty("--bw1",rgb(b1));
+    root.setProperty("--bw2",rgb(b2));
+    root.setProperty("--bw3",rgb(b3));
+    root.setProperty("--bwglow",
+      "rgba("+b2[0]+","+b2[1]+","+b2[2]+",.35)");
   }catch(err){}
 }
 
@@ -5554,7 +5730,7 @@ function drawMotes(dt){
   sctx.globalCompositeOperation="source-over";
 }
 
-const WARP_UP=1.1, WARP_DOWN=1.6;   // fast attack: a 3s query must SHOW it
+const WARP_UP=1.35, WARP_DOWN=2.3;  // turbo: readable spool, long tail
 // Per-frame snapshot of the video at capped resolution: every slat then
 // blits canvas->canvas, which skips the per-drawImage video-frame
 // conversion that made ~150 tiles x 60fps expensive while a model is
@@ -5601,7 +5777,9 @@ function starTick(ts){
   const dt=Math.min(0.05,warpLast?(ts-warpLast)/1000:0.016);
   warpLast=ts||0;
   warpT=Math.max(0,Math.min(1,warpT+(generating?dt/WARP_UP:-dt/WARP_DOWN)));
-  const e=warpT*warpT*(3-2*warpT);  // smoothstep: eases in and settles
+  // TURBO LAG: attack is ^2.8 (a beat of nothing, then it GRABS);
+  // release is ^1.5 over a longer window (fat, gentle tail)
+  const e=generating?Math.pow(warpT,2.8):Math.pow(warpT,1.5);
   warpSpeed=WARP_IDLE+(WARP_FULL-WARP_IDLE)*e;
 
   const vid=(skyline&&!skyline.hidden)?$("#sky-color"):null;
@@ -5612,6 +5790,7 @@ function starTick(ts){
   if(!ready||e<=0.015){             // calm, or nothing to tear
     sctx.clearRect(0,0,sw,sh);
     if(skyline){skyline.style.opacity="";skyline.style.transform="";}
+    starCv.style.transform="";
     if(tiles.length){tiles=[];tileMeta=null;}
     lightMotes.length=0;
     return;
@@ -5619,9 +5798,13 @@ function starTick(ts){
 
   if(generating&&warpT>=1)skyCreep=Math.min(.6,skyCreep+dt*.028);
   else skyCreep=Math.max(0,skyCreep-dt*.3);
-  // the element fades fast — the canvas is reconstructing the same frame,
-  // so the handoff is invisible
-  skyline.style.transform="";
+  // LAUNCH RECOIL: during the turbo spool the whole backdrop pulls BACK
+  // a touch — "we're ready to launch" — then the streaks fire through it.
+  // recoil rises with the spool and collapses as the boost takes over
+  const recoil=Math.min(warpT/.35,1)*(1-e);
+  const rescale="scale("+(1-.055*recoil).toFixed(4)+")";
+  skyline.style.transform=rescale;
+  starCv.style.transform=rescale;
   skyline.style.opacity=Math.max(0,1-e*3).toFixed(3);
 
   const sw2=Math.min(1280,vid.videoWidth);
