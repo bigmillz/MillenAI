@@ -4198,9 +4198,42 @@ body.perf #main.quake,body.perf #hero h1.slam{animation:none}
   #sidebar{display:none}
   #chat-inner{padding:24px 14px 150px}
 }
+/* ------------------------------------------------------------- mobile */
+/* On a phone the 284px sidebar swallowed the screen — "doesn't work on
+   my iPhone" was a layout catastrophe, not a bug. Under 700px the
+   sidebar becomes a slide-in drawer behind a ☰ button, main owns the
+   full width, and the hero scales to fit. */
+#mburger{display:none}
+@media (max-width:700px){
+  #sidebar{
+    position:fixed;left:0;top:0;bottom:0;z-index:60;
+    width:300px!important;min-width:300px!important;
+    transform:translateX(-105%);transition:transform .28s ease;
+    box-shadow:8px 0 40px rgba(0,0,0,.45);
+  }
+  body.sbopen #sidebar{transform:none}
+  #mburger{
+    display:flex;align-items:center;justify-content:center;
+    position:fixed;left:12px;top:12px;z-index:61;width:40px;height:40px;
+    border-radius:12px;background:rgba(21,23,29,.55);color:var(--text);
+    font-size:19px;cursor:pointer;
+    -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+  }
+  #hero h1{font-size:10.5vw}
+  #hero .live-big{font-size:10.5vw;-webkit-text-stroke:1.2px #d4d6da}
+  #hero .greet{font-size:19px}
+  #skyload{left:50%;width:min(340px,78vw)}
+  #composer-wrap{padding:0 10px 12px}
+  #tierpop{left:12px!important;right:12px;max-width:none}
+  #hero{padding:0 12px}
+  #hero .greet{font-size:17px;margin-top:14px}
+}
+
 </style>
 </head>
 <body>
+
+<div id="mburger" title="Menu">☰</div>
 
 <aside id="sidebar">
   <div id="sb-resize" title="Drag to resize"></div>
@@ -5560,6 +5593,16 @@ setTimeout(kickWipe,450);
     if(st.needs_setup){openSetup();setupManual=false;}
   }catch(e){}
 })();
+
+/* ------------------------------------------------------ mobile drawer */
+$("#mburger").addEventListener("click",e=>{
+  e.stopPropagation();
+  document.body.classList.toggle("sbopen");
+});
+// tapping the chat area closes the drawer
+$("#main").addEventListener("click",()=>{
+  document.body.classList.remove("sbopen");
+});
 
 /* -------------------------------------------------- resizable sidebar */
 const sidebarEl=$("#sidebar"),SB_MIN=210,SB_MAX=560;
