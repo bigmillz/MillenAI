@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.7.3"   # bump here — UI, window, DMG all follow
-APP_BUILD = 43               # integer compared against the GitHub release tag
+APP_VERSION = "1.7.4"   # bump here — UI, window, DMG all follow
+APP_BUILD = 44               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2471,8 +2471,8 @@ body{
   position:relative;z-index:1;
   width:284px;min-width:284px;height:100%;
   background:rgba(21,23,29,.60);
-  -webkit-backdrop-filter:blur(34px) saturate(1.35);
-          backdrop-filter:blur(34px) saturate(1.35);
+  -webkit-backdrop-filter:blur(17px) saturate(1.35);
+          backdrop-filter:blur(17px) saturate(1.35);
   border-right:1px solid var(--line-soft);
   display:flex;flex-direction:column;padding:20px 16px 14px;gap:4px;
 }
@@ -2778,6 +2778,8 @@ body.perf #hero h1::before,body.perf #hero h1::after{
 #hero .live-big{
   font-size:92px;font-weight:700;letter-spacing:-.015em;line-height:1;
   color:#555;white-space:nowrap;overflow:hidden;
+  -webkit-text-stroke:2px #d4d6da;
+  text-shadow:0 2px 14px rgba(0,0,0,.5);
   max-width:0;opacity:0;margin-left:0;
   transition:max-width .55s cubic-bezier(.4,0,.2,1),
              opacity .45s ease,margin-left .55s cubic-bezier(.4,0,.2,1);
