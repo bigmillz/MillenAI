@@ -274,16 +274,20 @@ be a greyscale copy underneath that the wash "colourised"; it was cut on
 Patrick's call — revealing beats colourising — which also deleted the
 dual-video sync machinery and half the decode cost.
 
-Sending a query TEARS THE CITY INTO ITS OWN STARS. The classic white-dot
-starfield is gone entirely (Patrick's call: "no more stars") — instead ~380
-shards, each a small textured `drawImage` of the still-playing video, tear
-off their real cover-fit screen positions and streak radially outward,
-exponential-outward warp style, while the intact video zooms (to ~2.5× +
-creep) and dissolves under them. Answer lands → shards decelerate and clear,
-video fades back at scale 1. Offline there is no backdrop and therefore no
-warp — nothing animates, by design. The CORS taint is back and permanent
-(drawImage of the Apple stream): drawing is fine, `getImageData` on the
-stars canvas will throw forever. Physics verified headlessly, then live (620 shards, video opacity 0, full warp at 1.6s). Two fixes the first ship needed: the canvas must sit ABOVE the skyline in the DOM (below it, the still-opaque video hid the whole tear-off), and the attack must be FAST (WARP_UP 1.4s — at the original 3s, a Fast query finished before the effect existed). Shards are pixel-grade: 620 fragments, 16px source patches.
+Sending a query turns the image INTO the warp — not particles over it, the
+picture itself. `buildTiles` grids the visible frame into ~850–1150 tiles
+(each sampling the LIVE video every frame); at onset every tile sits at
+depth z=1, which reconstructs the picture exactly, then the whole plane
+accelerates through the viewer with true perspective (position and scale
+both 1/z), tiles recycling behind at staggered depths into an endless
+tunnel of the footage. Attack is fast (WARP_UP 1.4s) so a 3s query shows
+the full effect; teardown restores the intact video seamlessly because the
+canvas and the element are the same frame. Two hard-won rules: the canvas
+must sit AFTER #skyline in the DOM (below it, the opaque video hides
+everything), and every `let` this block touches at load time must be
+declared before `starResize()` runs — the TDZ gotcha killed the whole
+script once already. The CORS taint stands: never `getImageData` this
+canvas.
 
 **Failure is the old behaviour.** The div starts hidden and is shown only
 after BOTH videos fire `playing`; any error hides it again. Offline, blocked,

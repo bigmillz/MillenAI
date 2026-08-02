@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.7.5"   # bump here — UI, window, DMG all follow
-APP_BUILD = 45               # integer compared against the GitHub release tag
+APP_VERSION = "1.7.6"   # bump here — UI, window, DMG all follow
+APP_BUILD = 46               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -3906,42 +3906,46 @@ bootSkyline();
 
 /* --------------------------------------------- shard-warp (the only warp) */
 // The classic starfield is gone on Patrick's call — no white dots, ever.
-// Instead the CITY becomes the stars: while a query runs, the backdrop
-// video fades out as ~380 shards — each one a small textured drawImage of
-// the still-playing footage — tear off their own screen positions and
-// streak radially toward the viewer, exponential-outward like a warp field.
-// When the answer lands they decelerate, alpha out, and the intact video
-// fades back in at scale 1. Offline there is no backdrop and therefore no
-// warp: nothing animates, by design.
+// The warp is the image itself: see buildTiles/starTick below. Offline
+// there is no backdrop and therefore no warp: nothing animates, by design.
 // NB: drawImage(video) taints this canvas (CORS-less Apple stream) — that
 // is fine for DRAWING, but no code may ever getImageData from it.
 const starCv=$("#stars"),sctx=starCv.getContext("2d");
-let sw=0,sh=0,shards=[];
+let sw=0,sh=0,tiles=[],tileMeta=null;
 function starResize(){
   const dpr=Math.min(window.devicePixelRatio||1,2);
   sw=starCv.width=Math.max(1,starCv.offsetWidth*dpr);
   sh=starCv.height=Math.max(1,starCv.offsetHeight*dpr);
-  shards=[];                        // anchors depend on the viewport
+  tiles=[];tileMeta=null;           // anchors depend on the viewport
 }
 starResize();
 window.addEventListener("resize",starResize);
 
 const WARP_UP=1.4, WARP_DOWN=1.6;   // fast attack: a 3s query must SHOW it
 const WARP_IDLE=0.5, WARP_FULL=22;
-const SHARD_N=620, SHARD_SRC=16;    // dense, pixel-grade fragments
 let warpT=0,warpLast=0,warpSpeed=WARP_IDLE,skyCreep=0;
 
-function shardSpawn(vw,vh){
-  // each shard is anchored where its patch actually sits on screen under
-  // cover-fit, so the tear-off starts from the real image, not from noise
-  const u=Math.random(),v=Math.random();
+// The warp is the IMAGE ITSELF flying at you. The visible frame is tiled
+// into ~1000 pixel-tiles; at onset every tile sits at depth z=1, which
+// reconstructs the picture exactly — then the whole plane accelerates
+// through the viewer with true perspective (pos and scale both 1/z), tiles
+// blowing past the edges and recycling behind at staggered depths, so the
+// footage becomes an endless tunnel of its own pixels. Each tile samples
+// the LIVE video every frame, so the tunnel keeps playing the movie.
+function buildTiles(vw,vh){
+  let cols=Math.max(18,Math.round(sw/70)),rows=Math.max(12,Math.round(sh/70));
+  while(cols*rows>1150){cols=Math.round(cols*.92);rows=Math.round(rows*.92);}
   const cover=Math.max(sw/vw,sh/vh);
-  const dw=vw*cover,dh=vh*cover,ox=(sw-dw)/2,oy=(sh-dh)/2;
-  const ax=ox+u*dw,ay=oy+v*dh;
-  let dx=ax-sw/2,dy=ay-sh/2,d=Math.hypot(dx,dy);
-  if(d<28){const t=Math.random()*6.283;dx=Math.cos(t)*28;dy=Math.sin(t)*28;d=28;}
-  return {sx:u*(vw-SHARD_SRC),sy:v*(vh-SHARD_SRC),
-          nx:dx/d,ny:dy/d,d0:d,d:d,p:2+Math.random()*3.5};
+  const srcW=sw/cover,srcH=sh/cover;
+  const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
+  const tw=sw/cols,th=sh/rows,stw=srcW/cols,sth=srcH/rows;
+  tiles=[];
+  for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+    tiles.push({ax:(c+.5)*tw,ay:(r+.5)*th,
+                sx:srcX+c*stw,sy:srcY+r*sth,
+                z:1,zj:.97+Math.random()*.06});
+  }
+  tileMeta={tw:tw,th:th,stw:stw,sth:sth};
 }
 
 function starTick(ts){
@@ -3958,37 +3962,43 @@ function starTick(ts){
   if(!ready||e<=0.015){             // calm, or nothing to tear
     sctx.clearRect(0,0,sw,sh);
     if(skyline){skyline.style.opacity="";skyline.style.transform="";}
-    if(shards.length)shards=[];
+    if(tiles.length){tiles=[];tileMeta=null;}
     return;
   }
 
-  // the dive: the intact video zooms and dissolves while its shards fly
   if(generating&&warpT>=1)skyCreep=Math.min(.6,skyCreep+dt*.028);
   else skyCreep=Math.max(0,skyCreep-dt*.3);
-  const z=1+1.5*e+skyCreep*e;
-  skyline.style.transform="scale("+z.toFixed(4)+")";
-  skyline.style.opacity=Math.max(0,1-e*2.2).toFixed(3);
+  // the element fades fast — the canvas is reconstructing the same frame,
+  // so the handoff is invisible
+  skyline.style.transform="";
+  skyline.style.opacity=Math.max(0,1-e*3).toFixed(3);
 
-  if(!shards.length)
-    for(let i=0;i<SHARD_N;i++)shards.push(shardSpawn(vid.videoWidth,vid.videoHeight));
+  if(!tiles.length)buildTiles(vid.videoWidth,vid.videoHeight);
+  const m=tileMeta,cx=sw/2,cy=sh/2;
   sctx.clearRect(0,0,sw,sh);
-  const cx=sw/2,cy=sh/2,edge=Math.hypot(sw,sh)*.62;
-  sctx.globalAlpha=Math.min(1,e*2.5);
-  const sp=warpSpeed*dt;
-  for(const s of shards){
-    s.d=s.d*(1+sp*.09)+sp*8;        // exponential outward + linear floor
-    if(s.d>edge){                   // flew past — respawn at its home patch
-      Object.assign(s,shardSpawn(vid.videoWidth,vid.videoHeight));
-      continue;
+  sctx.globalAlpha=Math.min(1,e*3);
+  const rate=dt*(.35+2.1*e+skyCreep);
+  for(const t of tiles){
+    const zPrev=t.z;
+    t.z*=1-rate*t.zj;
+    if(t.z<.18){t.z=1+Math.random()*.5;continue;}
+    const inv=1/t.z;
+    const px=cx+(t.ax-cx)*inv, py=cy+(t.ay-cy)*inv;
+    const w=m.tw*inv, h=m.th*inv;
+    if(px<-w*2||px>sw+w*2||py<-h*2||py>sh+h*2){t.z=1+Math.random()*.5;continue;}
+    const dxv=px-cx,dyv=py-cy,dd=Math.hypot(dxv,dyv);
+    const stretch=1+((zPrev-t.z)/t.z)*9;
+    if(dd>1){
+      const co=dxv/dd,si=dyv/dd;
+      sctx.setTransform(co,si,-si,co,px,py);
+      sctx.drawImage(vid,t.sx,t.sy,m.stw,m.sth,
+                     -w*stretch/2,-h/2,w*stretch,h);
+    }else{
+      sctx.setTransform(1,0,0,1,px,py);
+      sctx.drawImage(vid,t.sx,t.sy,m.stw,m.sth,-w/2,-h/2,w,h);
     }
-    const x=cx+s.nx*s.d, y=cy+s.ny*s.d;
-    const g=1+(s.d-s.d0)/240;       // grows as it nears the viewer
-    const len=s.p*g*(1+warpSpeed*.09), th=s.p*g*.7;
-    sctx.save();
-    sctx.translate(x,y);sctx.rotate(Math.atan2(s.ny,s.nx));
-    sctx.drawImage(vid,s.sx,s.sy,SHARD_SRC,SHARD_SRC,-len/2,-th/2,len,th);
-    sctx.restore();
   }
+  sctx.setTransform(1,0,0,1,0,0);
   sctx.globalAlpha=1;
 }
 starTick();
