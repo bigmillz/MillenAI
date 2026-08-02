@@ -1901,6 +1901,10 @@ def run_council(labels: list, messages: list, emit, status) -> None:
             continue
         if text:
             took_part(label, text)
+        else:
+            # an engine that returns NOTHING is left out of the blend, but
+            # recorded — the contributor count must never lie
+            took_part(label, "(no answer — empty)")
 
     good = [d for d in drafts if not d[1].startswith("(no answer")]
     if not good:
@@ -1940,8 +1944,19 @@ def run_council(labels: list, messages: list, emit, status) -> None:
     # that melted down streamed its collapse straight to the reader with
     # nothing in the way. Watch it as it arrives, and if it goes, throw away
     # what was shown and fall back to the best draft we already trust.
-    _stream_guarded(merger, synth, emit, status, good[0][1],
-                    "showing the best single answer")
+    # And if the merge stage ITSELF raises (engine died between drafts and
+    # merge — seen in the wild as "engine returned nothing" after 3 good
+    # drafts), the best draft still ships: with good answers in hand there
+    # is no failure mode where the user gets nothing.
+    try:
+        _stream_guarded(merger, synth, emit, status, good[0][1],
+                        "showing the best single answer")
+    except Exception:
+        try:
+            emit(NUL + "RESET" + NUL)
+            emit(good[0][1])
+        except Exception:
+            pass
 
 
 RESEARCH_PLAN = (
@@ -3334,6 +3349,11 @@ body.perf #stars{display:none}
 }
 body.painted #sky-color{-webkit-mask-position:0 0;mask-position:0 0}
 
+/* while a query runs the whole backdrop dims 30% — the starburst becomes
+   ambience and the answer text owns the contrast */
+#skyline,#stars{transition:filter .6s ease}
+body.gen #skyline,body.gen #stars{filter:brightness(.7)}
+
 /* macOS-style loading bar while the server warms the skyline cache */
 #skyload{position:fixed;left:50%;bottom:92px;transform:translateX(-50%);
   z-index:4;width:230px;text-align:center;pointer-events:none}
@@ -3505,6 +3525,16 @@ body.perf .msg{animation:none}
 .contrib>summary:hover{color:var(--dim)}
 .contrib>summary .caretmark{transition:transform .16s}
 .contrib[open]>summary .caretmark{transform:rotate(90deg)}
+
+/* the blend progress bar — replaces live draft output entirely */
+.blendprog{margin:2px 0 12px;max-width:430px}
+.blendprog .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--dim);margin-bottom:7px}
+.blendprog .track{height:4px;border-radius:2px;overflow:hidden;
+  background:rgba(255,255,255,.12)}
+.blendprog .fill{height:100%;width:0;border-radius:2px;background:#d6d8de;
+  transition:width .5s ease}
+
 .draft{
   border-left:2px solid var(--line);margin:8px 0 0;padding:2px 0 2px 12px;
   animation:draftIn .32s ease-out both;
@@ -4151,24 +4181,41 @@ function renderMD(raw){
 
 /* ----------------------------------------------------------- chat ui */
 const inner=$("#chat-inner"), scroller=$("#chat-scroll");
-/* Renders "who contributed" above a blended answer. Open while the drafts
-   are still arriving so you can watch them land, collapsed once the merge
-   starts - by then the merged answer is the thing worth reading. */
-function paintDrafts(div,drafts,live){
-  if(!div||!drafts||!drafts.length)return;
-  let d=div.querySelector(".contrib");
+/* While a blend is RUNNING: a clean progress bar \u2014 model answers stay
+   hidden ("random junk", Patrick) until the merge writes the real answer.
+   Once merged: the familiar collapsed "N of M contributed" details, with
+   the drafts inside for whoever wants to peek. */
+function paintDrafts(div,drafts,live,statusText){
+  if(!div)return;
+  let d=div.querySelector(".contrib"),p=div.querySelector(".blendprog");
+  if(live){
+    if(d)d.remove();
+    if(!drafts.length&&!statusText)return;
+    if(!p){
+      p=document.createElement("div");p.className="blendprog";
+      p.innerHTML='<div class="lbl"></div>'
+        +'<div class="track"><div class="fill"></div></div>';
+      div.insertBefore(p,div.querySelector(".body"));
+    }
+    const mm=/(\d+)\s*of\s*(\d+)/.exec(statusText||"");
+    const total=mm?+mm[2]:Math.max(drafts.length+1,2);
+    const done=Math.min(drafts.length,total);
+    p.querySelector(".lbl").textContent=
+      statusText||("asking "+total+" models\u2026");
+    p.querySelector(".fill").style.width=
+      Math.min(96,Math.round(done/total*100))+"%";
+    return p;
+  }
+  if(p)p.remove();
+  if(!drafts||!drafts.length)return;
   if(!d){
     d=document.createElement("details");
     d.className="contrib";
     div.insertBefore(d,div.querySelector(".body"));
   }
-  // open while drafts are landing, collapse once on the switch to merged -
-  // keyed on the transition so a repaint never overrides a manual toggle
-  if(d.dataset.live!==String(!!live)){d.open=!!live;d.dataset.live=String(!!live);}
   const answered=drafts.filter(x=>!/^\(no answer/.test(x.t)).length;
   d.innerHTML='<summary><span class="caretmark">\u203a</span>'
-    +(live?"asking "+drafts.length+" model"+(drafts.length===1?"":"s")+"\u2026"
-          :answered+" of "+drafts.length+" models contributed")
+    +answered+" of "+drafts.length+" models contributed"
     +'</summary>'
     +drafts.map(x=>{
        const none=/^\(no answer/.test(x.t);
@@ -4266,7 +4313,8 @@ async function send(){
                      if(!drafts.some(x=>x.m===d.m))drafts.push(d);}catch(e){}
                  return "";})
               .replace(/\u0000DRAFT:[^\u0000]*$/,"");
-      if(drafts.length)paintDrafts(aiDiv,drafts,true);
+      if(drafts.length||(status&&/of \d+/.test(status)))
+        paintDrafts(aiDiv,drafts,true,status);
       // a merge that collapsed mid-stream sends RESET \u2014 discard
       // everything streamed before it, keep the replacement answer
       const cut=full.lastIndexOf("\u0000RESET\u0000");
@@ -4275,7 +4323,9 @@ async function send(){
       const secs=(performance.now()-t0)/1000;
       lastRate=secs>0.3?tokEst/secs:0;
       setToks(lastRate,"streaming");
-      body.innerHTML=(status&&!full?'<span class="statusline">◇ '+esc(status)+'…</span>':"")
+      const hasBar=!!aiDiv.querySelector(".blendprog");
+      body.innerHTML=(status&&!full&&!hasBar
+          ?'<span class="statusline">◇ '+esc(status)+'…</span>':"")
         +(searched?'<span class="websrc">🌐 searched the web</span>':"")
         +renderMD(full)+'<span class="caret"></span>';
       scroller.scrollTop=scroller.scrollHeight;
@@ -4285,7 +4335,13 @@ async function send(){
     else full+="\n\n⚠️ "+err.message;
   }
 
-  if(drafts.length)paintDrafts(aiDiv,drafts,false);   // merge done: collapse
+  paintDrafts(aiDiv,drafts,false);   // merge done: collapse (or clear bar)
+  // the stream died but good drafts exist — the best one IS the answer;
+  // never show "engine returned nothing" over a usable draft
+  if(!full&&!wasAborted){
+    const rescued=drafts.filter(x=>!/^\(no answer/.test(x.t));
+    if(rescued.length)full=rescued[0].t;
+  }
   body.innerHTML=(searched&&full?'<span class="websrc">🌐 searched the web</span>':"")
     +renderMD(full||(wasAborted?"*(stopped)*":
     "⚠️ The engine returned nothing. Is the model server for **"+model+"** actually running?"));
