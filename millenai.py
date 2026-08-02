@@ -483,6 +483,44 @@ def model_fits_memory(label: str) -> bool:
     # machine. Admission must survive the whole reply, not just the load.
     return need * 1.5 < avail
 
+def weather_snippets(q: str):
+    """Real numbers for weather questions. Generic web snippets for
+    'weather in 11221' returned Moscow forecasts and kids' videos (seen
+    live) — honest models reported garbage, confident ones invented a
+    forecast. wttr.in resolves a zip or place name to actual conditions,
+    no API key. None on any failure — the caller falls back to search."""
+    m = re.search(r"\b(\d{5})\b", q)
+    # a bare 5-digit zip is ambiguous worldwide — 11221 alone resolved to
+    # Vilnius, Lithuania; ',us' pins it to Brooklyn
+    loc = (m.group(1) + ",us") if m else re.sub(
+        r".*?\b(?:weather|forecast|temperature)\b\s*(?:in|for|at|like in|like)?\s*",
+        "", q, flags=re.I).strip(" ?.!") or ""
+    if not loc or len(loc) > 60:
+        return None
+    try:
+        with urllib.request.urlopen(
+                "https://wttr.in/%s?format=j1" % urllib.parse.quote(loc),
+                timeout=8) as r:
+            d = json.load(r)
+        cur = d["current_condition"][0]
+        area = d["nearest_area"][0]
+        name = "%s, %s" % (area["areaName"][0]["value"],
+                           area["region"][0]["value"])
+        out = ["LIVE WEATHER for %s (source: wttr.in, real data):" % name,
+               "Right now: %s°F (feels like %s°F), %s, wind %s mph, "
+               "humidity %s%%" % (
+                   cur["temp_F"], cur["FeelsLikeF"],
+                   cur["weatherDesc"][0]["value"],
+                   cur["windspeedMiles"], cur["humidity"])]
+        for day in d.get("weather", [])[:3]:
+            out.append("%s: high %s°F / low %s°F, %s" % (
+                day["date"], day["maxtempF"], day["mintempF"],
+                day["hourly"][4]["weatherDesc"][0]["value"]))
+        return "\n".join(out)
+    except Exception:
+        return None
+
+
 _search_cache = {"query": "", "data": "", "timestamp": 0.0}
 _search_lock = threading.Lock()
 
@@ -1072,6 +1110,13 @@ def _extract_memory(label: str, user_msg: str, base=None):
         msg_low = user_msg.lower()
 
         def grounded(f):
+            # a NAME claim needs the user to have actually introduced
+            # themselves — "whats that place in bk, seawolf?" produced
+            # "User's name: Seawolf" (seen live; models then greeted the
+            # user as a seafood restaurant)
+            if re.match(r"\s*(user'?s?\s+)?name\b", f, re.I) and not re.search(
+                    r"\b(my name is|i'?m called|call me|i am [A-Z])", user_msg):
+                return False
             for w in re.findall(r"\b[A-Z][a-z]{2,}\b", f)[0:]:
                 if f.strip().startswith(w) and f.strip().index(w) == 0:
                     continue          # sentence-initial capital is fine
@@ -3272,7 +3317,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             query = prompt.strip()
 
         if query:
-            snippets = run_search(query)
+            snippets = None
+            if re.search(r"\bweather\b|\bforecast\b|\btemperature\b",
+                         query, re.I):
+                snippets = weather_snippets(query)
+            if snippets is None:
+                snippets = run_search(query)
             messages[-1] = {
                 "role": "user",
                 "content": (
