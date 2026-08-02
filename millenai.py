@@ -3422,6 +3422,8 @@ body.perf #hero h1::before,body.perf #hero h1::after{
   animation:none;-webkit-mask-position:0 0;mask-position:0 0;
 }
 #hero p{color:var(--dim);font-size:15px}
+/* the greeting reads as a headline, not a caption */
+#hero .greet{font-size:24px;font-weight:700;margin-top:20px}
 /* the wordmark centres on its own; LIVE is pulled out of the flow so it
    sits further right without dragging the title off-centre */
 #hero .h1row{display:flex;align-items:center;justify-content:center;position:relative}
