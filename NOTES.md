@@ -752,3 +752,17 @@ active — idle cost is zero. Tiles rebuild if the snapshot dims change.
   824px standard) in BOTH repo and installed app — the "tiny icon" is
   macOS icon-cache staleness. lsregister -f + Dock restart applied; the
   system store (/Library/Caches/com.apple.iconservices.store) needs sudo.
+
+## 1.13.0 — vision: paste an image, MillenAI reads it
+Paste (⌘V) an image into the composer: client downscales to ≤1280px JPEG,
+shows removable chips, sends `images:[dataURL]` beside the text. Server:
+any request with images routes WHOLE to LLaVA Vision 7B on Ollama's
+NATIVE /api/chat (per-message `images:[raw-base64]` — strip the dataURL
+prefix), tier/council/web-search all bypassed ("vision answers come from
+the pixels"). Empty text gets a default "describe this" prompt. If LLaVA
+isn't pulled yet the request kicks its download and says so instead of
+erroring. Verified end-to-end: a 1x1 red PNG came back described as "a
+solid red background". Guarded stream path applies to vision too.
+Also in 1.12.7: _looks_degenerate now judges the TAIL (last 120 words
+< 0.25 unique) — a collapse behind a healthy preamble amortized the
+whole-text ratio to 0.33 and "party" x600 reached a phone.

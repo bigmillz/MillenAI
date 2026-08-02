@@ -3203,6 +3203,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             return
 
         messages = list(req_json.get("messages", []))
+        # pasted images ride beside the text; vision always routes to
+        # LLaVA on Ollama (native /api/chat takes raw base64 per message)
+        images = [i for i in (req_json.get("images") or [])
+                  if isinstance(i, str) and len(i) < 8_000_000][:3]
         model_name = req_json.get("model", "")
         auto_web = req_json.get("auto_web", True)
         # a tier resolves to its own line-up; otherwise honour explicit picks
@@ -3215,6 +3219,23 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if not council:
             council = [model_name]
         prompt = messages[-1]["content"] if messages else ""
+
+        if images:
+            # vision answers come from the pixels: no web search, no tier
+            # council — LLaVA takes the whole request
+            auto_web = False
+            tier = ""
+            b64s = [u.split(",", 1)[1] if u.startswith("data:") else u
+                    for u in images]
+            vm = dict(messages[-1]) if messages else {"role": "user",
+                                                      "content": ""}
+            if not str(vm.get("content", "")).strip():
+                vm["content"] = "Describe this image in useful detail."
+            vm["images"] = b64s
+            messages = messages[:-1] + [vm] if messages else [vm]
+            council = ["LLaVA Vision 7B"]
+            model_name = "LLaVA Vision 7B"
+            prompt = vm["content"]
 
         # "/search …" forces a lookup; otherwise auto-search decides.
         query, forced = None, prompt.lower().startswith("/search")
@@ -3296,6 +3317,19 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.flush()
 
         kind, target = route
+        # first image before the vision engine exists: kick the download
+        # and say so, instead of a cryptic connection error
+        if images and not model_cached("LLaVA Vision 7B",
+                                       ollama_pulled_tags() or set()):
+            try:
+                start_model_downloads(["LLaVA Vision 7B"])
+                emit("Getting the vision engine ready (LLaVA, ~4.7 GB) — "
+                     "the download just started. Progress is under "
+                     "**Add models…**; paste the image again once it "
+                     "shows the check mark.")
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            return
         try:
             if TIERS.get(tier, {}).get("research"):
                 run_research(council, full_messages, emit, status)
@@ -3848,6 +3882,22 @@ body.perf .msg{animation:none}
 .contrib>summary .caretmark{transition:transform .16s}
 .contrib[open]>summary .caretmark{transform:rotate(90deg)}
 
+/* pasted images: chips above the composer, thumbnails in the sent bubble */
+#imgchips{max-width:780px;margin:0 auto 8px;pointer-events:auto;
+  display:flex;gap:8px}
+#imgchips[hidden]{display:none}
+.imgchip{position:relative;display:inline-block}
+.imgchip img{height:56px;border-radius:10px;border:1px solid var(--line);
+  display:block}
+.imgchip b{position:absolute;top:-7px;right:-7px;width:20px;height:20px;
+  border-radius:50%;background:#2a2a2a;border:1px solid var(--line);
+  color:var(--dim);font-size:12px;line-height:18px;text-align:center;
+  cursor:pointer}
+.imgchip b:hover{color:#fff}
+.sentimgs{display:flex;gap:8px;margin-top:8px}
+.sentimgs img{max-height:140px;max-width:46%;border-radius:12px;
+  border:1px solid var(--line)}
+
 /* the blend progress bar — replaces live draft output entirely */
 .blendprog{margin:4px 0 16px;max-width:640px}
 .blendprog .lbl{font-family:var(--mono);font-size:13px;letter-spacing:.12em;
@@ -4324,6 +4374,7 @@ __MODEL_ROWS__
 
   <div id="composer-wrap">
     <div id="model-chip">engine <b id="chip-model">Llama 3.2 3B</b></div>
+    <div id="imgchips" hidden></div>
     <div id="composer">
       <button class="cbtn" id="mic" title="Voice input">🎙️</button>
       <textarea id="input" rows="1" placeholder="Message MillenAI…"></textarea>
@@ -4696,9 +4747,45 @@ input.addEventListener("keydown",e=>{
 });
 sendBtn.addEventListener("click",()=>{ generating?abortCtl.abort():send(); });
 
+/* ------------------------------------------------------ image paste */
+// paste a screenshot/photo straight into the composer: it becomes a chip,
+// and the request routes to the vision engine. Downscaled client-side so
+// a 12 MP photo doesn't ride the wire.
+let pendingImages=[];
+function paintChips(){
+  const w=$("#imgchips");
+  w.hidden=!pendingImages.length;
+  w.innerHTML=pendingImages.map((d,i)=>
+    '<span class="imgchip"><img src="'+d+'">'+
+    '<b data-i="'+i+'" title="Remove">×</b></span>').join("");
+  w.querySelectorAll("b").forEach(b=>b.addEventListener("click",()=>{
+    pendingImages.splice(+b.dataset.i,1);paintChips();
+  }));
+}
+input.addEventListener("paste",e=>{
+  const items=[...(e.clipboardData||{}).items||[]]
+    .filter(it=>it.type&&it.type.startsWith("image/"));
+  if(!items.length)return;
+  e.preventDefault();
+  items.slice(0,3-pendingImages.length).forEach(it=>{
+    const f=it.getAsFile();if(!f)return;
+    const img=new Image();
+    img.onload=()=>{
+      const s=Math.min(1,1280/Math.max(img.width,img.height));
+      const c=document.createElement("canvas");
+      c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+      pendingImages.push(c.toDataURL("image/jpeg",.85));
+      URL.revokeObjectURL(img.src);
+      paintChips();
+    };
+    img.src=URL.createObjectURL(f);
+  });
+});
+
 async function send(){
   const text=input.value.trim();
-  if(!text||generating)return;
+  if((!text&&!pendingImages.length)||generating)return;
 
   // engine down? give launch instructions instead of a doomed request.
   // in combine mode, drop unavailable models rather than failing outright
@@ -4721,8 +4808,16 @@ async function send(){
   fetch("/api/speak",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({stop:true})});
   input.value="";input.style.height="auto";
-  messages.push({role:"user",content:text});
-  addMsg("user",text);
+  const sentImages=pendingImages.slice();
+  pendingImages=[];paintChips();
+  const shown=text||(sentImages.length?"🖼️ (image)":"");
+  messages.push({role:"user",content:shown});
+  const uDiv=addMsg("user",shown);
+  if(sentImages.length){
+    const row=document.createElement("div");row.className="sentimgs";
+    sentImages.forEach(d=>{const im=new Image();im.src=d;row.appendChild(im);});
+    uDiv.querySelector(".body").appendChild(row);
+  }
 
   generating=true; document.body.classList.add("gen");
   sendBtn.textContent="■"; sendBtn.classList.add("stop"); sendBtn.title="Stop";
@@ -4737,7 +4832,8 @@ async function send(){
     const resp=await fetch("/api/chat",{
       method:"POST",headers:{"Content-Type":"application/json"},
       signal:abortCtl.signal,
-      body:JSON.stringify({model,models:council,tier,messages,auto_web:autoWeb}),
+      body:JSON.stringify({model,models:council,tier,messages,
+        auto_web:autoWeb,images:sentImages}),
     });
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
