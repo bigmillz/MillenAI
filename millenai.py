@@ -2509,6 +2509,24 @@ def _user_id(kind: str, ident: str) -> str:
                           .encode("utf-8")).hexdigest()[:20]
 
 
+# OWNER ACCESS: the machine's owner can reach their REAL chats/memory
+# remotely — sign in with the PIN stored in app_dir()/owner_pin (any
+# name), and the identity maps to the legacy files instead of a walled
+# web profile. The file is 0600 and never committed; delete it to turn
+# owner access off. Admin endpoints stay owner-only-at-the-machine.
+OWNER_PIN_FILE = os.path.join(app_dir(), "owner_pin")
+
+
+def owner_uid():
+    try:
+        pin = open(OWNER_PIN_FILE).read().strip()
+        if re.fullmatch(r"\d{8,12}", pin):
+            return _user_id("owner", pin)
+    except Exception:
+        pass
+    return None
+
+
 WELCOME_PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
@@ -2720,6 +2738,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         the owner's data is unreachable through the tunnel, full stop."""
         uid = self._uid()
         if uid:
+            if uid == owner_uid():
+                return None          # the owner's cookie opens the legacy files
             d = os.path.join(app_dir(), "users", uid)
             os.makedirs(d, exist_ok=True)
             return d
@@ -3052,7 +3072,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"ok": False,
                                  "err": "name (2+) and an 8-12 digit PIN"})
                 return
-            uid = _user_id("pin", name.lower() + ":" + pin)
+            # the owner PIN (any name) opens the owner's real data; every
+            # other combination gets its own private profile as before
+            own = owner_uid()
+            if own and _user_id("owner", pin) == own:
+                uid = own
+            else:
+                uid = _user_id("pin", name.lower() + ":" + pin)
             body = json.dumps({"ok": True}).encode()
             self.send_response(200)
             self.send_header("Set-Cookie",
