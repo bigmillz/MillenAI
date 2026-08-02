@@ -2865,6 +2865,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                       % str(exc)[:80]))
                 return
             self._set_user_cookie(_user_id("google", email))
+        elif self.path == "/api/sky/cached":
+            self._send_json({"cached": [
+                i for i in range(len(SKY_SOURCES))
+                if os.path.exists(_sky_path(i))]})
         elif self.path.startswith("/api/sky/status"):
             m = re.search(r"[?&]i=(\d+)", self.path)
             self._send_json(sky_status(int(m.group(1)) if m else 0))
@@ -5139,11 +5143,30 @@ pollEngines();setInterval(pollEngines,8000);
 // tracks the download; a different clip still plays every launch.
 const SKY_N=parseInt("__SKY_N__",10)||5;   // injected: len(SKY_SOURCES)
 const skyline=$("#skyline");
-function bootSkyline(){
+async function bootSkyline(){
   if(perf||!skyline)return;
-  let i=Math.floor(Math.random()*SKY_N);
+  // PLAY FROM THE CACHE: picking blind across 89 clips meant nearly every
+  // launch hit an undownloaded one and sat behind the Loading bar. Now the
+  // pick comes from what's already on disk (instant), and ONE new clip
+  // warms silently in the background so variety keeps growing anyway.
   const last=parseInt(localStorage.getItem("millen.sky")||"-1",10);
-  if(i===last)i=(i+1)%SKY_N;              // never the same clip twice running
+  let cached=[];
+  try{cached=(await(await fetch("/api/sky/cached")).json()).cached||[];}
+  catch(e){}
+  let i;
+  if(cached.length){
+    const pool=cached.filter(x=>x!==last);
+    const pick=pool.length?pool:cached;
+    i=pick[Math.floor(Math.random()*pick.length)];
+    if(cached.length<SKY_N){
+      let n=Math.floor(Math.random()*SKY_N);
+      while(cached.includes(n))n=(n+1)%SKY_N;
+      fetch("/api/sky/status?i="+n).catch(()=>{});   // silent prewarm
+    }
+  }else{
+    i=Math.floor(Math.random()*SKY_N);
+    if(i===last)i=(i+1)%SKY_N;
+  }
   localStorage.setItem("millen.sky",i);
   const c=$("#sky-color");
   const bar=$("#skyload"),fill=$("#skyload .fill"),lbl=$("#skyload .lbl");
