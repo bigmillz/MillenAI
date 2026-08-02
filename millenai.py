@@ -5789,7 +5789,8 @@ function starTick(ts){
   if(ready){try{vid.playbackRate=1+e*5;}catch(err){}}
   if(!ready||e<=0.015){             // calm, or nothing to tear
     sctx.clearRect(0,0,sw,sh);
-    if(skyline){skyline.style.opacity="";skyline.style.transform="";}
+    if(skyline){skyline.style.opacity="";skyline.style.transform="";
+      skyline.style.filter="";}
     starCv.style.transform="";
     if(tiles.length){tiles=[];tileMeta=null;}
     lightMotes.length=0;
@@ -5805,6 +5806,11 @@ function starTick(ts){
   const rescale="scale("+(1-.055*recoil).toFixed(4)+")";
   skyline.style.transform=rescale;
   starCv.style.transform=rescale;
+  // ...and the colour DRAINS as it's sucked away: the visible world goes
+  // black & white while the streaks (sampling the colourful frame) fire
+  // through it in full colour — grey city, colour rocket
+  skyline.style.filter="grayscale("+recoil.toFixed(3)+") brightness("
+    +((1-.12*recoil)*.82).toFixed(3)+")";
   skyline.style.opacity=Math.max(0,1-e*3).toFixed(3);
 
   const sw2=Math.min(1280,vid.videoWidth);
