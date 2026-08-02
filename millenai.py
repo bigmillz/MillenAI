@@ -3810,15 +3810,15 @@ body.perf #brand .name{animation:none;filter:none}
 }
 .tier:hover{color:var(--text);background:var(--panel2)}
 /* the library tabs + agent radio rows */
-#lib-tabs{display:flex;gap:6px;margin:12px 0 8px}
-#lib-tabs .ltab{
+#mode-tabs{display:flex;gap:6px;margin:12px 0 8px}
+#mode-tabs .ltab{
   flex:1;text-align:center;font-family:var(--mono);font-size:11px;
   letter-spacing:.12em;text-transform:uppercase;color:var(--faint);
   padding:7px 0;border:1px solid var(--line-soft);border-radius:9px;
   cursor:pointer;user-select:none;
 }
-#lib-tabs .ltab:hover{color:var(--dim)}
-#lib-tabs .ltab.on{color:var(--text);background:var(--panel2);
+#mode-tabs .ltab:hover{color:var(--dim)}
+#mode-tabs .ltab.on{color:var(--text);background:var(--panel2);
   border-color:var(--line)}
 .agent{
   display:flex;align-items:center;gap:9px;padding:8px 10px;
@@ -4565,21 +4565,22 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   </div>
 
 
+  <div id="mode-tabs">
+    <span class="ltab" data-m="ai">AI</span>
+    <span class="ltab" data-m="agents">Agents</span>
+  </div>
   <div id="tier-rows">__TIER_ROWS__</div>
+  <div id="agents-wrap" hidden>
+__AGENT_ROWS__
+  </div>
 
   <div id="model-list">
   <div class="group-label chats">Chats</div>
   <div id="chat-list"></div>
 
-  <div id="lib-tabs">
-    <span class="ltab" data-t="models">Models</span>
-    <span class="ltab" data-t="agents">Agents</span>
-  </div>
+  <div class="group-label adv" id="adv-toggle"><span id="adv-caret">▸</span> All models</div>
   <div id="adv-wrap" hidden>
 __MODEL_ROWS__
-  </div>
-  <div id="agents-wrap" hidden>
-__AGENT_ROWS__
   </div>
   </div>
 
@@ -4600,7 +4601,7 @@ __AGENT_ROWS__
     <div class="toggle-row" id="sound-toggle" style="margin-top:9px"
          title="The warp makes its own engine sound">
       <div class="switch"></div>
-      Warp audio
+      Audio Effects
     </div>
     <div class="model" id="open-setup" title="Download more models"
          style="margin-top:10px">
@@ -4839,6 +4840,7 @@ function setTier(name){
   councilManual=false;
   if(agent){agent="";localStorage.setItem("millen.agent","");
     if(typeof paintAgents==="function")paintAgents();}
+  if(typeof modeShow==="function")modeShow("ai");
   paintModels();                 // paints both tier and model highlights
 }
 const tierPop=$("#tierpop");
@@ -4890,18 +4892,20 @@ document.addEventListener("click",e=>{
 });
 setTier(tier);
 
-// the model/agent LIBRARY: two tabs over one drawer. Tap a tab to open
-// its list, tap the active tab again to fold everything away.
-function libShow(which){
-  const mv=which==="models",av=which==="agents";
-  $("#adv-wrap").hidden=!mv;
-  $("#agents-wrap").hidden=!av;
-  $$("#lib-tabs .ltab").forEach(t=>
-    t.classList.toggle("on",t.dataset.t===which));
+// AI | Agents: the primary selector is tabbed — AI shows the tier
+// dropdown, Agents shows the specialist radio list
+function modeShow(which){
+  $("#tier-rows").hidden=which!=="ai";
+  $("#agents-wrap").hidden=which!=="agents";
+  $$("#mode-tabs .ltab").forEach(t=>
+    t.classList.toggle("on",t.dataset.m===which));
 }
-$$("#lib-tabs .ltab").forEach(t=>t.addEventListener("click",()=>{
-  libShow(t.classList.contains("on")?"":t.dataset.t);
-}));
+$$("#mode-tabs .ltab").forEach(t=>
+  t.addEventListener("click",()=>modeShow(t.dataset.m)));
+$("#adv-toggle").addEventListener("click",()=>{
+  const w=$("#adv-wrap");w.hidden=!w.hidden;
+  $("#adv-caret").textContent=w.hidden?"▸":"▾";
+});
 
 /* ------------------------------------------------------------ agents */
 // radio choice: a task specialist (Coding, Resumes…) or the standard
@@ -4921,6 +4925,7 @@ function setAgent(name){
 $$("#agents-wrap .agent").forEach(el=>
   el.addEventListener("click",()=>setAgent(el.dataset.agent||"")));
 paintAgents();
+modeShow(agent?"agents":"ai");
 
 // each hardware-class group inside is its own dropdown, folded by default —
 // open one tier of the ladder at a time instead of a wall of models
@@ -5783,15 +5788,10 @@ function ensureWarpAudio(){
     audioCtx=new (window.AudioContext||window.webkitAudioContext)();
     const master=audioCtx.createGain();
     master.gain.value=0;master.connect(audioCtx.destination);
-    // EV MOTOR WHINE: a clean tone whose PITCH climbs with speed (plus a
-    // quiet second harmonic) — inverter glide, not combustion rumble
-    const o1=audioCtx.createOscillator();o1.type="triangle";o1.frequency.value=90;
-    const o2=audioCtx.createOscillator();o2.type="sine";o2.frequency.value=181;
-    const lp=audioCtx.createBiquadFilter();
-    lp.type="lowpass";lp.frequency.value=2400;lp.Q.value=1.2;
-    const og=audioCtx.createGain();og.gain.value=.5;
-    const hg=audioCtx.createGain();hg.gain.value=.18;
-    o1.connect(og);o2.connect(hg);hg.connect(og);og.connect(lp);lp.connect(master);
+    // no whine (retired as annoying): a whisper of wind on the master,
+    // and a dedicated bus for the sub-heartbeat thumps
+    const thump=audioCtx.createGain();
+    thump.gain.value=.9;thump.connect(audioCtx.destination);
     const buf=audioCtx.createBuffer(1,audioCtx.sampleRate*2,audioCtx.sampleRate);
     const ch=buf.getChannelData(0);
     for(let i=0;i<ch.length;i++)ch[i]=Math.random()*2-1;
@@ -5801,22 +5801,36 @@ function ensureWarpAudio(){
     bp.type="bandpass";bp.frequency.value=500;bp.Q.value=.8;
     const ng=audioCtx.createGain();ng.gain.value=.55;
     noise.connect(bp);bp.connect(ng);ng.connect(master);
-    o1.start();o2.start();noise.start();
-    sndNodes={master,lp,bp,o1,o2};
+    noise.start();
+    sndNodes={master,bp,thump};
   }catch(err){audioCtx=null;sndNodes=null;}
 }
+let nextThump=0;
 function driveWarpAudio(e,recoil){
   if(!sndNodes||!audioCtx)return;
   const t=audioCtx.currentTime;
   sndNodes.master.gain.setTargetAtTime(
-    sndOn?(e*.14+recoil*.045):0,t,.12);
-  // the whine CLIMBS: ~90Hz at rest to ~850Hz at full boost, harmonic
-  // tracking at 2.01x for that glassy inverter sheen
-  const f=90+e*760+recoil*40;
-  sndNodes.o1.frequency.setTargetAtTime(f,t,.18);
-  sndNodes.o2.frequency.setTargetAtTime(f*2.01,t,.18);
-  sndNodes.lp.frequency.setTargetAtTime(1200+e*4200,t,.15);
-  sndNodes.bp.frequency.setTargetAtTime(420+e*3200,t,.15);
+    sndOn?(e*.05+recoil*.02):0,t,.12);
+  sndNodes.bp.frequency.setTargetAtTime(420+e*2600,t,.15);
+  // SUB HEARTBEAT: ~120bpm, a 48Hz sine hit that pitches down and dies
+  // in ~0.2s — felt in the chest more than heard
+  if(sndOn&&e>.12){
+    if(nextThump<t)nextThump=t+.05;
+    while(nextThump<t+.35){
+      const o=audioCtx.createOscillator(),g=audioCtx.createGain();
+      o.type="sine";
+      o.frequency.setValueAtTime(48,nextThump);
+      o.frequency.exponentialRampToValueAtTime(34,nextThump+.16);
+      g.gain.setValueAtTime(.0001,nextThump);
+      g.gain.exponentialRampToValueAtTime(.22*e,nextThump+.018);
+      g.gain.exponentialRampToValueAtTime(.001,nextThump+.2);
+      o.connect(g);g.connect(sndNodes.thump);
+      o.start(nextThump);o.stop(nextThump+.25);
+      nextThump+=.5;                     // 120 bpm
+    }
+  }else{
+    nextThump=0;
+  }
 }
 
 const WARP_UP=1.35, WARP_DOWN=2.3;  // turbo: readable spool, long tail
