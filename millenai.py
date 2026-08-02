@@ -80,8 +80,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.16.2"   # bump here — UI, window, DMG all follow
-APP_BUILD = 82               # integer compared against the GitHub release tag
+APP_VERSION = "1.16.3"   # bump here — UI, window, DMG all follow
+APP_BUILD = 83               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
