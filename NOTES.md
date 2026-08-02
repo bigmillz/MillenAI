@@ -196,42 +196,24 @@ crosses the middle, with a bloom flaring behind it. The version tag and
 greeting rise in on a 0.34s delay so the screen assembles rather than appears.
 Then the existing converge-and-absorb finish plays.
 
-**The wordmark is a neon sign** (since the neon-strike redesign). Unpowered
-it is a grey glass tube; the launch sweep is the power arriving — it paints
-the letters, the tube catches with a two-dip strike flicker, then hums. Two
-pseudo-copies of the text do all of it: `::before` is the halo (same
-travelling gradient, `blur(16px) saturate(1.4)`, z-index −1), `::after` is
-the lit tube. Both are revealed by the same paint mask, so glow and colour
-arrive together under the band. The flicker (`neonCatch`) is scoped to
-`body.painting`, so a later new-chat repaint never re-flickers. `hueshift`
-was removed entirely — it animated `filter`, exactly where the halo's blur
-lives (the property-collision gotcha above). The colour motion is the 16s
-`rainbow` background-position slide.
+**The wordmark is DRAWN, not typed** (stroke-wordmark redesign): three
+stacked SVG `<text>` copies, stroke-only, no fill. The grey base runs
+marching dashes cycling endlessly around the letter contours; the colour
+copy + a blurred glow twin stroke the same dashes with a travelling SVG
+rainbow gradient (`#wm-rain`, SMIL gradientTransform, 16s) and sit behind
+the same diagonal paint mask — the wash literally turns the lines rainbow
+where it crosses. The `<h1>` ships empty; `injectWordmark()` builds the
+cluster and `fitWordmark()` sizes viewBox/width from `getBBox()` (called
+again on `document.fonts.ready` — metrics move when the real font lands,
+and a stale box clips descenders). `resetHero()` must re-inject. The neon
+strike flicker still fires at 2.75s via `body.painting`.
 
-**The wipe must not depend on an animation frame to start or finish.** An
-occluded window gets no rAF callbacks at all — measured in the embedded pane:
-the boot `requestAnimationFrame(rainbowWipe)` simply never fired, and since
-`painted` is only ever set by the wipe, the wordmark stayed grey forever.
-Boot now races rAF against a 450ms timeout (first one wins), and the 3.2s
-teardown re-asserts `painted` in case the mid-flight frame died.
-
-The launch effect is a **wash, not a pass** (since the slow-wash redesign):
-the colour field is stationary and window-sized; only a hugely feathered
-reveal front (a 44%-wide soft edge in a sliding mask) crosses, over 4.2s,
-and the colour then dissolves in place. Nothing ever slides off-screen —
-sliding off is precisely what read as "a moving image passing by". The old
-band's spark and hot leading edge were removed for the same reason: a bright
-moving object is a pass cue. Timeline: front crosses 0.3–4.5s, wordmark
-paints 2.15–2.7s, bloom 2.3s, neon strike 2.75s, dissolve 4.7–6.2s,
-teardown 6.4s. The backdrop's own mask runs 4.2s linear .3s so city colour
-arrives edge-for-edge under the wash.
-
-The wordmark is **painted by the band**, not simply coloured. It sits in flat
-light grey (`#9a9a9a`); a second copy of the text rides on top via
-`h1::after { content: attr(data-word) }` carrying the rainbow, revealed
-through a diagonal mask that slides across in step with the sweep. The colour
-stays where the band left it (`body.painted`), so after the first launch
-animation the wordmark simply is rainbow.
+The skyline arrives on `loadeddata` (first decodable frame), not
+`playing` — a cold cache left ~10s of black — fades in over .8s, and a
+dead clip URL rotates to the next clip rather than blacking out the
+session. **The warp is made OF the video**: no backdrop → no warp, by
+design, which is what "the effect didn't apply" looks like when a query
+runs during the buffering window.
 
 Three things to preserve if this is ever retouched:
 
