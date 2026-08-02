@@ -267,36 +267,20 @@ streams; all six URLs verified live, 87–230 MB each, streamed progressively
 and never stored). A different clip every launch, never the same one twice
 running (`millen.sky` in localStorage).
 
-The greyscale→colour reveal reuses the wordmark's paint mechanism exactly:
-two `<video>` elements playing the same clip, the grey one beneath
-(`grayscale(1)`), a colour copy above behind the same travelling diagonal
-mask, keyed to the same `painting`/`painted` body classes — just with a wider
-transition window (1.5s from 0.5s) because the band crosses the whole
-viewport, not the wordmark's slice. Measured sync drift between the copies:
-13ms. Once painted, the grey copy is paused — condition-driven, not on a
-timer: a cold cache was still buffering at 10s, so any fixed deadline is
-wrong.
+The launch wash REVEALS the city out of darkness — one `<video>`, hidden
+behind the same travelling diagonal mask that paints the wordmark
+(4.2s linear, .3s delay), and the colour stays once painted. There used to
+be a greyscale copy underneath that the wash "colourised"; it was cut on
+Patrick's call — revealing beats colourising — which also deleted the
+dual-video sync machinery and half the decode cost.
 
-Sending a query TEARS the city apart while diving in. A `<video>` element
-cannot slice itself, so during the warp its frames are redrawn on the stars
-canvas as ~16 offset horizontal bands (the element hides but keeps playing
-as the source); at rest the element shows and the canvas is empty, so the
-handoff is two copies of the same frame. The rip pattern re-randomizes every
-90–150ms — per-frame jitter strobes, a frozen pattern reads as a broken
-pane. Tear amplitude rides the same eased ramp as the zoom, so it knits
-itself back together as the answer lands. NB: drawing the (CORS-less) Apple
-video taints the canvas — drawing is fine, but `getImageData` throws
-SecurityError forever after, so no code may ever read pixels from the stars
-canvas. Base dive: `starTick` drives the
-skyline's transform every frame on the same eased 3s ramp the stars used
-(1 → 2.3), then a slow creep keeps a long generation drifting deeper
-(capped ~2.8) instead of freezing, and it eases home when the answer lands.
-The starfield draws **only when the skyline isn't up** (offline, stream
-error, perf mode) — it is the fallback, not a layer underneath. Two traps
-encoded here: the skyline must have NO CSS transition on transform (a
-per-frame JS write smeared over a 1.5s transition is mush), and don't try
-this with a CSS animation — removing an animation snaps to the base value
-without transitioning, so the ease-home would jump.
+Sending a query dives INTO the city, space-flight style: `starTick` writes
+the transform every frame — 3s eased ramp to ~2.5×, then a slow creep keeps
+a long generation advancing (cap ~3.1×), easing home when the answer lands.
+An earlier version tore the frame into canvas slices here; it read as
+"matrix scrambling" rather than motion and permanently tainted the canvas
+(CORS-less video + drawImage), so it was removed — the stars canvas is
+readable again and no code draws video into it. Keep it that way.
 
 **Failure is the old behaviour.** The div starts hidden and is shown only
 after BOTH videos fire `playing`; any error hides it again. Offline, blocked,

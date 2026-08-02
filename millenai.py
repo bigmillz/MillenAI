@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.7.1"   # bump here — UI, window, DMG all follow
-APP_BUILD = 41               # integer compared against the GitHub release tag
+APP_VERSION = "1.7.2"   # bump here — UI, window, DMG all follow
+APP_BUILD = 42               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2660,12 +2660,11 @@ body.perf #telemetry{opacity:.13;filter:grayscale(1);pointer-events:none}
 #main{flex:1;height:100%;display:flex;flex-direction:column;position:relative}
 #stars{position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;pointer-events:none}
 body.perf #stars{display:none}
-/* The skyline: one of Apple's ATV aerial clips of New York, greyscale until
-   the launch wipe colours it, exactly the way the wordmark is painted — a
-   colour copy of the SAME video sits on top behind the same travelling
-   diagonal mask. Sending a query zooms INTO the city and dissolves it; the
-   starfield beneath is already ramping, so the skyline appears to shatter
-   into the starstream, and reassembles when the answer lands. */
+/* The skyline: one of Apple's ATV aerial clips of New York, hidden behind
+   the same travelling diagonal mask that paints the wordmark — the launch
+   wash REVEALS the city out of darkness as its front crosses, and the
+   colour stays. One video, no grey understudy: revealing beats colourising,
+   and it halves the decode. */
 #skyline{
   position:fixed;top:0;left:0;width:100%;height:100%;z-index:0;
   overflow:hidden;pointer-events:none;
@@ -2676,7 +2675,6 @@ body.perf #stars{display:none}
 #skyline video{
   position:absolute;top:0;left:0;width:100%;height:100%;object-fit:cover;
 }
-#sky-grey{filter:grayscale(1) brightness(.42)}
 #sky-color{
   filter:brightness(.5) saturate(1.15);
   -webkit-mask-image:linear-gradient(114deg,#000 0 42%,transparent 58% 100%);
@@ -3218,7 +3216,6 @@ __MODEL_ROWS__
 <main id="main">
   <canvas id="stars"></canvas>
   <div id="skyline" hidden>
-    <video id="sky-grey" muted loop playsinline></video>
     <video id="sky-color" muted loop playsinline></video>
   </div>
   <div id="chat-scroll"><div id="chat-inner">
@@ -3897,27 +3894,13 @@ function bootSkyline(){
   const last=parseInt(localStorage.getItem("millen.sky")||"-1",10);
   if(i===last)i=(i+1)%SKY_CLIPS.length;   // never the same city twice running
   localStorage.setItem("millen.sky",i);
-  const g=$("#sky-grey"),c=$("#sky-color");
-  let playing=0;
-  [g,c].forEach(v=>{
-    v.addEventListener("error",()=>{skyline.hidden=true;},{once:true});
-    v.addEventListener("playing",()=>{
-      if(++playing===2)skyline.hidden=false;
-    },{once:true});
-    v.src=SKY_CLIPS[i];
-    const pr=v.play(); if(pr&&pr.catch)pr.catch(()=>{skyline.hidden=true;});
-  });
+  const c=$("#sky-color");
+  c.addEventListener("error",()=>{skyline.hidden=true;},{once:true});
+  c.addEventListener("playing",()=>{skyline.hidden=false;},{once:true});
+  c.src=SKY_CLIPS[i];
+  const pr=c.play(); if(pr&&pr.catch)pr.catch(()=>{skyline.hidden=true;});
 }
 bootSkyline();
-// once the wipe has fully coloured the backdrop the grey copy underneath is
-// invisible — stop paying to decode it (also kills any slow sync drift).
-// Condition-driven, not clock-driven: a slow network can still be buffering
-// at any fixed deadline (seen at 10s on a cold cache).
-const skyTrim=setInterval(()=>{
-  if(document.body.classList.contains("painted")&&!skyline.hidden){
-    $("#sky-grey").pause();clearInterval(skyTrim);
-  }
-},1500);
 
 /* ------------------------------------------------------- warp starfield */
 // Idle: colored stars drift gently toward the viewer.
@@ -3952,8 +3935,6 @@ function starResize(){
 starResize();
 window.addEventListener("resize",starResize);
 let skyCreep=0;
-const TEAR_N=16;
-let tearJit=[],tearLast=0;
 function starTick(ts){
   requestAnimationFrame(starTick);
   if(perf){warpLast=0;return;}
@@ -3964,54 +3945,20 @@ function starTick(ts){
   const e=warpT*warpT*(3-2*warpT);      // smoothstep: eases in and settles
   warpSpeed=WARP_IDLE+(WARP_FULL-WARP_IDLE)*e;
 
-  // when the skyline is up, the city IS the warp: it tears into slices and
-  // dives forward while the model thinks, then knits itself back together.
-  // A <video> element can't slice itself, so during the warp its frames are
-  // redrawn on this canvas as offset horizontal bands (the element itself is
-  // hidden but keeps playing as the source); at rest the element shows and
-  // the canvas is empty, so the handoff is between two copies of the same
-  // frame and reads as seamless.
+  // when the skyline is up, the city IS the warp: a straight dive toward
+  // the viewer, space-flight style — 3s eased ramp, then a slow creep so a
+  // long generation keeps advancing instead of freezing, easing home after.
+  // (An earlier version tore the frame into slices here; it read as matrix
+  // scrambling rather than motion, and drawing the CORS-less video into the
+  // canvas permanently tainted it. Plain transform zoom does neither.)
   if(skyline&&!skyline.hidden){
-    if(generating&&warpT>=1)skyCreep=Math.min(.5,skyCreep+dt*.022);
+    if(generating&&warpT>=1)skyCreep=Math.min(.6,skyCreep+dt*.028);
     else skyCreep=Math.max(0,skyCreep-dt*.3);
-    const z=1+1.3*e+skyCreep*e;
-    const vid=$("#sky-color");
-    const canTear=e>0.02&&vid&&vid.videoWidth
-                  &&document.body.classList.contains("painted");
-    if(canTear){
-      skyline.style.visibility="hidden";
-      // re-randomize the rip pattern every ~90-150ms — per-frame jitter
-      // strobes, a frozen pattern reads as a broken pane instead of a tear
-      if(!tearJit.length||ts-tearLast>90+Math.random()*60){
-        tearLast=ts;
-        tearJit=Array.from({length:TEAR_N},()=>
-          (Math.random()-.5)*2*(Math.random()<.18?2.6:1));
-      }
-      // cover-fit the frame at zoom z, sliced into bands
-      const vw=vid.videoWidth,vh=vid.videoHeight;
-      const cover=Math.max(sw/vw,sh/vh)*z;
-      const srcW=sw/cover,srcH=sh/cover;
-      const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
-      const bandH=sh/TEAR_N,srcBandH=srcH/TEAR_N;
-      const amp=e*(sw*0.02)*(1+skyCreep*2);
-      sctx.clearRect(0,0,sw,sh);
-      for(let i=0;i<TEAR_N;i++){
-        const dx=tearJit[i]*amp;
-        sctx.drawImage(vid,srcX,srcY+i*srcBandH,srcW,srcBandH,
-                       dx,i*bandH,sw,bandH+1);
-      }
-      // a faint double-exposure ghost sells the violence of the rip
-      sctx.globalAlpha=.10*e;sctx.globalCompositeOperation="lighter";
-      sctx.drawImage(vid,srcX,srcY,srcW,srcH,amp*1.6,0,sw,sh);
-      sctx.globalAlpha=1;sctx.globalCompositeOperation="source-over";
-    }else{
-      skyline.style.visibility="";
-      skyline.style.transform=z>1.0005?"scale("+z.toFixed(4)+")":"";
-      sctx.clearRect(0,0,sw,sh);        // no stars over the city
-    }
+    const z=1+1.5*e+skyCreep*e;
+    skyline.style.transform=z>1.0005?"scale("+z.toFixed(4)+")":"";
+    sctx.clearRect(0,0,sw,sh);          // no stars over the city
     return;
   }
-  if(skyline)skyline.style.visibility="";
   if(skyline)skyline.style.transform="";
   sctx.clearRect(0,0,sw,sh);
   const cx=sw/2,cy=sh/2,fov=sw*0.45,move=warpSpeed*(sw/1400);
