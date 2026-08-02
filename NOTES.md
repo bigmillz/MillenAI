@@ -780,3 +780,11 @@ getImageData LEGAL for the first time. Three effects ride it:
 * HYPERLAPSE THINKING: vid.playbackRate = 1 + e*5 — the city races to ~6x
   while a model works and eases home with the settle. The tiles sample
   the live frame, so the streaks carry the accelerated footage.
+
+### The TDZ rule (three strikes tonight)
+`tiles`, then `agent`, then `sndOn`: a `let` used by ANY code that runs
+earlier in the script kills the WHOLE page silently (typeof does NOT
+save you — TDZ throws on typeof too). Every shared mutable `let` now
+belongs at the TOP of the script next to `messages`. Diagnosis trick
+that found all three: re-execute the page's own script text via
+`new Function(src)()` in the console and read the thrown line.

@@ -4724,6 +4724,7 @@ const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
 
 /* ------------------------------------------------------------- state */
 let messages=[], generating=false, abortCtl=null;
+let sndOn=localStorage.getItem("millen.sound")!=="0"; // TOP of script: the toggle block runs before everything else that touches it
 let model=localStorage.getItem("millen.model")||"Llama 3.2 3B";
 let perf=localStorage.getItem("millen.perf")==="1";
 let autoWeb=localStorage.getItem("millen.web")!=="0";  // on unless turned off
@@ -5769,7 +5770,6 @@ function drawMotes(dt){
 // spool, suck, ignition and tail all sound like they look. Created
 // lazily on send() because browsers demand a user gesture for audio.
 let audioCtx=null,sndNodes=null;
-let sndOn=localStorage.getItem("millen.sound")!=="0";
 function ensureWarpAudio(){
   if(!sndOn||audioCtx)return;
   try{
