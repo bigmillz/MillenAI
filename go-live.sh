@@ -124,9 +124,19 @@ cat > "$AGENTS/$LABEL-update.plist" <<EOF
 EOF
 
 UID_N=$(id -u)
+# bootout is asynchronous — an immediate bootstrap of the same label races
+# it and fails with EIO(5). Retry briefly, and fall back to kickstart when
+# the agent turns out to be alive already (re-run case).
+load_agent(){
+  launchctl bootout "gui/$UID_N/$1" 2>/dev/null || true
+  for _ in 1 2 3 4 5; do
+    launchctl bootstrap "gui/$UID_N" "$AGENTS/$1.plist" 2>/dev/null && return 0
+    sleep 1
+  done
+  launchctl kickstart "gui/$UID_N/$1" 2>/dev/null || true
+}
 for L in "$LABEL" "$LABEL-update"; do
-  launchctl bootout "gui/$UID_N/$L" 2>/dev/null || true
-  launchctl bootstrap "gui/$UID_N" "$AGENTS/$L.plist"
+  load_agent "$L"
 done
 
 # --------------------------------------------------------------- tunnel
@@ -178,8 +188,7 @@ EOF
   <key>StandardErrorPath</key><string>$LIVE/tunnel.log</string>
 </dict></plist>
 EOF
-  launchctl bootout "gui/$UID_N/$LABEL-tunnel" 2>/dev/null || true
-  launchctl bootstrap "gui/$UID_N" "$AGENTS/$LABEL-tunnel.plist"
+  load_agent "$LABEL-tunnel"
 
   say "LIVE: https://$HOST/?key=$KEY"
   echo "  (first visit sets a 30-day cookie; after that just https://$HOST)"
