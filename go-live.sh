@@ -85,7 +85,7 @@ EOF
 chmod +x "$LIVE/update.sh"
 
 # -------------------------------------------------------- LaunchAgents
-say "installing the always-on server + 6-hourly auto-update"
+say "installing the always-on server + hourly auto-update"
 AGENTS="$HOME/Library/LaunchAgents"; mkdir -p "$AGENTS"
 
 cat > "$AGENTS/$LABEL.plist" <<EOF
