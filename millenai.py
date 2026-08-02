@@ -31,6 +31,10 @@ import re
 import shutil
 import signal
 import socket
+import base64
+import hashlib
+import secrets
+import struct
 import subprocess
 import sys
 import tarfile
@@ -42,6 +46,7 @@ import http.server
 import socketserver
 import urllib.request
 import urllib.error
+import urllib.parse
 import webbrowser
 
 # xet-backed HF downloads materialise files only on completion, which blinds
@@ -933,50 +938,57 @@ def _do_update():
 # model can reference them across conversations. Extraction runs in the
 # background after each message, using the model that just answered
 # (it's already loaded — no engine thrash).
-MEMORY_FILE = os.path.join(app_dir(), "memory.json")
 # Chats live on disk, not in localStorage: WebKit keys its storage to the
 # bundle identity, which differs between running from source and from the
-# .app, and isn't guaranteed to survive a bundle swap. This file does.
-CHATS_FILE = os.path.join(app_dir(), "chats.json")
-# which model labels the user has already been offered, so a release that
-# adds models can announce them exactly once
-PREFS_FILE = os.path.join(app_dir(), "prefs.json")
+# .app, and isn't guaranteed to survive a bundle swap. These files do.
+#
+# MULTI-USER: every function below takes a `base` directory. None means the
+# legacy files in app_dir() — the machine owner's data, what the desktop
+# app uses. Web visitors sign in at the WELCOME page and get their own
+# base under app_dir()/users/<id>/, so nobody ever reads Patrick's chats
+# through the tunnel.
 
 
-def load_prefs() -> dict:
+def _pfile(name: str, base=None) -> str:
+    return os.path.join(base or app_dir(), name)
+
+
+def load_prefs(base=None) -> dict:
     try:
-        with open(PREFS_FILE, "r", encoding="utf-8") as f:
+        with open(_pfile("prefs.json", base), "r", encoding="utf-8") as f:
             d = json.load(f)
         return d if isinstance(d, dict) else {}
     except Exception:
         return {}
 
 
-def store_prefs(d: dict):
-    os.makedirs(os.path.dirname(PREFS_FILE), exist_ok=True)
-    tmp = PREFS_FILE + ".tmp"
+def store_prefs(d: dict, base=None):
+    p = _pfile("prefs.json", base)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(d, f)
-    os.replace(tmp, PREFS_FILE)
+    os.replace(tmp, p)
 _chats_lock = threading.Lock()
 
 
-def load_chats() -> list:
+def load_chats(base=None) -> list:
     try:
-        with open(CHATS_FILE, "r", encoding="utf-8") as f:
+        with open(_pfile("chats.json", base), "r", encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, list) else []
     except Exception:
         return []
 
 
-def store_chats(items: list):
+def store_chats(items: list, base=None):
     """Atomic write — a crash mid-save must not corrupt the history."""
-    os.makedirs(os.path.dirname(CHATS_FILE), exist_ok=True)
-    tmp = CHATS_FILE + ".tmp"
+    p = _pfile("chats.json", base)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    tmp = p + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(items[:60], f)
-    os.replace(tmp, CHATS_FILE)
+    os.replace(tmp, p)
 _memory_lock = threading.Lock()
 
 MEMORY_PROMPT = (
@@ -991,25 +1003,26 @@ MEMORY_PROMPT = (
 )
 
 
-def _load_memory() -> list:
+def _load_memory(base=None) -> list:
     try:
-        with open(MEMORY_FILE, "r", encoding="utf-8") as f:
+        with open(_pfile("memory.json", base), "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return []
 
 
-def _save_memory(items: list):
-    os.makedirs(os.path.dirname(MEMORY_FILE), exist_ok=True)
-    with open(MEMORY_FILE, "w", encoding="utf-8") as f:
+def _save_memory(items: list, base=None):
+    p = _pfile("memory.json", base)
+    os.makedirs(os.path.dirname(p), exist_ok=True)
+    with open(p, "w", encoding="utf-8") as f:
         json.dump(items[-60:], f, indent=1)
 
 
-def memory_text() -> str:
-    return "\n".join("- " + i["fact"] for i in _load_memory()[-40:])
+def memory_text(base=None) -> str:
+    return "\n".join("- " + i["fact"] for i in _load_memory(base)[-40:])
 
 
-def _extract_memory(label: str, user_msg: str):
+def _extract_memory(label: str, user_msg: str, base=None):
     try:
         parts = []
         run_model(label, [{"role": "user",
@@ -1023,12 +1036,12 @@ def _extract_memory(label: str, user_msg: str):
         if not facts:
             return
         with _memory_lock:
-            items = _load_memory()
+            items = _load_memory(base)
             known = {i["fact"].lower() for i in items}
             for f in facts:
                 if f.lower() not in known:
                     items.append({"fact": f, "ts": time.time()})
-            _save_memory(items)
+            _save_memory(items, base)
     except Exception:
         pass  # memory is best-effort — never break chat over it
 
@@ -2070,6 +2083,269 @@ def offline_hint(kind: str, err: Exception) -> str:
     return f"⚠️ Backend error — {type(err).__name__}: {err}"
 
 
+# ------------------------------------------------------------ skyline cache
+# The Apple aerials CANNOT be streamed straight to a browser: the phobos
+# host is http-only (mixed-content-blocked on the https tunnel, broken TLS
+# cert) and the sylvan AVC files put their moov atom AFTER 370 MB of mdat,
+# so a browser has nothing to play until the entire file arrives — that is
+# exactly the "background never loads" bug. So MillenAI serves the skyline
+# itself: download once, remux fast-start IN PURE PYTHON (move moov ahead
+# of mdat, shift every stco/co64 chunk offset by the moov size), cache in
+# app_dir()/sky, and stream same-origin with Range support. One path that
+# works in the app, on the tunnel, and in every browser.
+SKY_SOURCES = [
+    "https://sylvan.apple.com/Videos/comp_N013_C004_PS_v01_SDR_PS_20180925_F1970F7193_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_N008_C009_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_N008_C003_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_N003_C006_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
+    "https://sylvan.apple.com/Videos/comp_GMT307_136NC_134K_8277_NY_NIGHT_01_v25_SDR_PS_20180907_SDR_2K_AVC.mov",
+]
+
+_sky_lock = threading.Lock()
+_sky_jobs = {}          # idx -> {"status": ..., "pct": int}
+
+
+def _sky_dir() -> str:
+    return os.path.join(app_dir(), "sky")
+
+
+def _sky_path(i: int) -> str:
+    return os.path.join(_sky_dir(), "sky%d.mov" % i)
+
+
+def _atoms(fh, end):
+    """Top-level QuickTime atoms as (type, offset, size)."""
+    off = fh.tell()
+    while off + 8 <= end:
+        fh.seek(off)
+        hdr = fh.read(8)
+        if len(hdr) < 8:
+            return
+        size, typ = struct.unpack(">I4s", hdr)
+        if size == 1:
+            size = struct.unpack(">Q", fh.read(8))[0]
+        elif size == 0:
+            size = end - off
+        if size < 8:
+            return
+        yield typ, off, size
+        off += size
+
+
+def _patch_moov(buf: bytearray, shift: int):
+    """Shift every stco/co64 chunk offset inside a moov blob by `shift`.
+    Recursive descent over the real container atoms — a naive byte scan
+    for b'stco' can hit sample data and corrupt the file."""
+    containers = {b"moov", b"trak", b"mdia", b"minf", b"stbl",
+                  b"edts", b"udta"}
+
+    def walk(start, end):
+        off = start
+        while off + 8 <= end:
+            size, typ = struct.unpack(">I4s", buf[off:off + 8])
+            hs = 8
+            if size == 1:
+                size = struct.unpack(">Q", buf[off + 8:off + 16])[0]
+                hs = 16
+            if size < hs or off + size > end:
+                return
+            if typ in containers:
+                walk(off + hs, off + size)
+            elif typ in (b"stco", b"co64"):
+                n = struct.unpack(">I", buf[off + hs + 4:off + hs + 8])[0]
+                base = off + hs + 8
+                w = 4 if typ == b"stco" else 8
+                fmt = ">I" if typ == b"stco" else ">Q"
+                for k in range(n):
+                    p = base + w * k
+                    v = struct.unpack(fmt, buf[p:p + w])[0] + shift
+                    buf[p:p + w] = struct.pack(fmt, v)
+            off += size
+
+    walk(8, len(buf))
+
+
+def _faststart(src: str, dst: str):
+    """qt-faststart: rewrite `src` so moov precedes mdat, into `dst`."""
+    total = os.path.getsize(src)
+    with open(src, "rb") as fh:
+        atoms = list(_atoms(fh, total))
+        moov = next(((o, s) for t, o, s in atoms if t == b"moov"), None)
+        mdat = next(((o, s) for t, o, s in atoms if t == b"mdat"), None)
+        if not moov or not mdat:
+            raise ValueError("no moov/mdat atom")
+        if moov[0] < mdat[0]:                     # already fast-start
+            os.replace(src, dst)
+            return
+        fh.seek(moov[0])
+        blob = bytearray(fh.read(moov[1]))
+        if b"cmov" in blob[:256]:
+            raise ValueError("compressed moov unsupported")
+        # every atom after ftyp moves back by exactly len(moov)
+        _patch_moov(blob, moov[1])
+        with open(dst + ".part", "wb") as out:
+            for typ, off, size in atoms:          # ftyp keeps pole position
+                if typ == b"ftyp":
+                    fh.seek(off)
+                    out.write(fh.read(size))
+            out.write(blob)
+            for typ, off, size in atoms:
+                if typ in (b"ftyp", b"moov"):
+                    continue
+                fh.seek(off)
+                left = size
+                while left:
+                    chunk = fh.read(min(1 << 20, left))
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    left -= len(chunk)
+    os.replace(dst + ".part", dst)
+    os.remove(src)
+
+
+def _sky_fetch(i: int):
+    tmp = _sky_path(i) + ".dl"
+    try:
+        os.makedirs(_sky_dir(), exist_ok=True)
+        req = urllib.request.Request(SKY_SOURCES[i],
+                                     headers={"User-Agent": "MillenAI"})
+        with urllib.request.urlopen(req, timeout=60) as r, \
+                open(tmp, "wb") as out:
+            total = int(r.headers.get("Content-Length") or 0)
+            got = 0
+            while True:
+                chunk = r.read(1 << 20)
+                if not chunk:
+                    break
+                out.write(chunk)
+                got += len(chunk)
+                with _sky_lock:
+                    _sky_jobs[i] = {
+                        "status": "downloading",
+                        "pct": int(got * 92 / total) if total else 0}
+        with _sky_lock:
+            _sky_jobs[i] = {"status": "remuxing", "pct": 96}
+        _faststart(tmp, _sky_path(i))
+        with _sky_lock:
+            _sky_jobs[i] = {"status": "ready", "pct": 100}
+    except Exception as exc:
+        with _sky_lock:
+            _sky_jobs[i] = {"status": "error", "pct": 0,
+                            "note": str(exc)[:120]}
+        try:
+            os.remove(tmp)
+        except Exception:
+            pass
+
+
+def sky_status(i: int) -> dict:
+    if not 0 <= i < len(SKY_SOURCES):
+        return {"status": "error", "pct": 0, "note": "no such clip"}
+    if os.path.exists(_sky_path(i)):
+        return {"status": "ready", "pct": 100}
+    with _sky_lock:
+        job = _sky_jobs.get(i)
+        if job and job.get("status") != "error":
+            return dict(job)
+        _sky_jobs[i] = {"status": "downloading", "pct": 0}
+    threading.Thread(target=_sky_fetch, args=(i,), daemon=True).start()
+    return {"status": "downloading", "pct": 0}
+
+
+# ---------------------------------------------------------------- sign-in
+# Remote visitors (identified by the tunnel's Cf-Connecting-Ip /
+# X-Forwarded-For headers — local requests never carry them) must pick an
+# identity after the key gate: name+PIN, or Google when configured. The
+# identity is a salted hash, the cookie carries it, and all chats, memory
+# and prefs live under app_dir()/users/<id>/. A wrong PIN is simply a
+# different (empty) profile — nobody can open someone else's.
+GOOGLE_OAUTH_FILE = os.path.join(app_dir(), "google_oauth.json")
+_oauth_states = {}         # state -> issued-at, for CSRF protection
+
+
+def google_conf():
+    try:
+        with open(GOOGLE_OAUTH_FILE, "r", encoding="utf-8") as f:
+            d = json.load(f)
+        if d.get("client_id") and d.get("client_secret"):
+            return d
+    except Exception:
+        pass
+    return None
+
+
+def _user_id(kind: str, ident: str) -> str:
+    return hashlib.sha256(("millen:" + kind + ":" + ident)
+                          .encode("utf-8")).hexdigest()[:20]
+
+
+WELCOME_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>MillenAI — sign in</title>
+<style>
+html,body{height:100%;margin:0}
+body{background:#0f1117;color:#ececec;display:flex;align-items:center;
+  justify-content:center;font-family:'Helvetica Neue',system-ui,sans-serif}
+.door{text-align:center;padding:24px;max-width:420px}
+h1{font-size:clamp(38px,8vw,60px);letter-spacing:.06em;margin:0 0 6px;
+  font-weight:700;
+  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff,#ff8fd8);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 22px rgba(140,150,255,.25))}
+p{color:#8e8e8e;margin:0 0 24px;font-size:14.5px;line-height:1.5}
+.err{color:#e26d5a;min-height:20px;margin:10px 0 0;font-size:14px}
+input{background:#171717;border:1px solid #3d3d3d;border-radius:12px;
+  color:#ececec;font-size:16px;padding:13px 16px;width:100%;
+  box-sizing:border-box;outline:none;text-align:center;margin-bottom:10px;
+  letter-spacing:.04em}
+input:focus{border-color:#8f9dff}
+button{background:#ececec;color:#111;border:0;border-radius:12px;
+  font-size:15px;font-weight:600;padding:13px 22px;cursor:pointer;
+  width:100%}
+button:hover{background:#fff}
+.gbtn{display:__GOOGLE_DISPLAY__;margin-top:14px;background:#171717;
+  color:#ececec;border:1px solid #3d3d3d;text-decoration:none;
+  border-radius:12px;font-size:15px;font-weight:600;padding:13px 22px}
+.gbtn:hover{border-color:#8f9dff}
+.small{margin-top:18px;font-size:12px;color:#6e6e6e}
+</style></head><body>
+<div class="door">
+  <h1>MillenAI</h1>
+  <p>pick a name and a PIN — your chats stay yours,<br>
+     invisible to everyone else on this server</p>
+  <form onsubmit="go();return false">
+    <input id="n" autocomplete="off" maxlength="24" placeholder="your name"
+           autofocus>
+    <input id="p" type="password" autocomplete="off" maxlength="12"
+           inputmode="numeric" placeholder="PIN (4+ digits)">
+    <button>Continue</button>
+  </form>
+  <a class="gbtn" href="/auth/google">Continue with Google</a>
+  <div class="err" id="e"></div>
+  <div class="small">same name + PIN = same chats, on any device.<br>
+       a different PIN opens a different, empty profile.</div>
+</div>
+<script>
+function go(){
+  const n=document.getElementById("n").value.trim();
+  const p=document.getElementById("p").value.trim();
+  const e=document.getElementById("e");
+  if(n.length<2){e.textContent="pick a name (2+ characters)";return;}
+  if(!/^[0-9]{4,12}$/.test(p)){e.textContent="PIN must be 4-12 digits";return;}
+  fetch("/api/welcome",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({name:n,pin:p})})
+    .then(r=>r.json())
+    .then(d=>{if(d.ok)location.href="/";else e.textContent=d.err||"try again";})
+    .catch(()=>{e.textContent="connection hiccup — try again";});
+}
+</script>
+</body></html>"""
+
+
 # The DOOR: what the bare public URL shows a browser with no cookie. Kept
 # self-contained (inline styles, system fonts, no assets) so it renders
 # instantly from anywhere — its whole job is one input box.
@@ -2166,11 +2442,63 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             pass
         return False
 
+    # ------------------------------------------------------------ identity
+    def _remote(self) -> bool:
+        """True for requests arriving through the tunnel/proxy. The native
+        app and local browsers talk straight to this server and never
+        carry these headers."""
+        return bool(self.headers.get("Cf-Connecting-Ip")
+                    or self.headers.get("X-Forwarded-For"))
+
+    def _uid(self):
+        m = re.search(r"millen_user=([0-9a-f]{20})",
+                      self.headers.get("Cookie", "") or "")
+        return m.group(1) if m else None
+
+    def _data_base(self):
+        """Directory whose chats/memory/prefs this request may touch.
+        None = the legacy files (the machine owner's, desktop app only).
+        A remote request NEVER gets None: signed-in visitors get their own
+        dir, and a cookieless remote fetch gets a throwaway shared pen —
+        the owner's data is unreachable through the tunnel, full stop."""
+        uid = self._uid()
+        if uid:
+            d = os.path.join(app_dir(), "users", uid)
+            os.makedirs(d, exist_ok=True)
+            return d
+        if self._remote():
+            d = os.path.join(app_dir(), "users", "_anon")
+            os.makedirs(d, exist_ok=True)
+            return d
+        return None
+
+    def _set_user_cookie(self, uid: str, location="/"):
+        self.send_response(302)
+        self.send_header("Set-Cookie",
+                         "millen_user=%s; Path=/; Max-Age=15552000; "
+                         "HttpOnly; SameSite=Lax" % uid)
+        self.send_header("Location", location)
+        self.end_headers()
+
     # ------------------------------------------------------------------ GET
     def do_GET(self):
         if not self._gate():
             return
         if self.path == "/":
+            # tunnel visitors must have an identity before the app loads —
+            # this is what keeps the owner's chats out of everyone's hands
+            if self._remote() and not self._uid():
+                body = (WELCOME_PAGE.replace(
+                    "__GOOGLE_DISPLAY__",
+                    "inline-block" if google_conf() else "none")
+                    .encode("utf-8"))
+                self.send_response(200)
+                self.send_header("Content-Type",
+                                 "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
             html = (HTML_CONTENT
                     .replace("__MODEL_ROWS__", build_model_rows())
                     .replace("__APP_VER_TAG__",
@@ -2188,6 +2516,72 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+        elif self.path == "/auth/google":
+            conf = google_conf()
+            if not conf:
+                self.send_error(404, "Google sign-in not configured")
+                return
+            state = secrets.token_hex(16)
+            now = time.time()
+            for k in [k for k, t in _oauth_states.items() if now - t > 600]:
+                _oauth_states.pop(k, None)
+            _oauth_states[state] = now
+            host = self.headers.get("Host", "")
+            params = urllib.parse.urlencode({
+                "client_id": conf["client_id"],
+                "redirect_uri": "https://%s/auth/google/callback" % host,
+                "response_type": "code",
+                "scope": "openid email",
+                "state": state,
+                "prompt": "select_account",
+            })
+            self.send_response(302)
+            self.send_header(
+                "Location",
+                "https://accounts.google.com/o/oauth2/v2/auth?" + params)
+            self.end_headers()
+        elif self.path.startswith("/auth/google/callback"):
+            conf = google_conf()
+            q = urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query)
+            state = (q.get("state") or [""])[0]
+            code = (q.get("code") or [""])[0]
+            if not (conf and code and _oauth_states.pop(state, None)):
+                self.send_error(403, "sign-in state mismatch — try again")
+                return
+            host = self.headers.get("Host", "")
+            try:
+                # the id_token comes straight from Google over TLS in this
+                # server-to-server exchange, so decoding its payload
+                # without signature verification is sound here
+                body = urllib.parse.urlencode({
+                    "code": code,
+                    "client_id": conf["client_id"],
+                    "client_secret": conf["client_secret"],
+                    "redirect_uri":
+                        "https://%s/auth/google/callback" % host,
+                    "grant_type": "authorization_code",
+                }).encode()
+                with urllib.request.urlopen(urllib.request.Request(
+                        "https://oauth2.googleapis.com/token", data=body),
+                        timeout=15) as r:
+                    tok = json.load(r)
+                payload = tok["id_token"].split(".")[1]
+                payload += "=" * (-len(payload) % 4)
+                claims = json.loads(base64.urlsafe_b64decode(payload))
+                email = (claims.get("email") or "").lower()
+                if not email:
+                    raise ValueError("no email in token")
+            except Exception as exc:
+                self.send_error(502, ("Google sign-in failed: %s"
+                                      % str(exc)[:80]))
+                return
+            self._set_user_cookie(_user_id("google", email))
+        elif self.path.startswith("/api/sky/status"):
+            m = re.search(r"[?&]i=(\d+)", self.path)
+            self._send_json(sky_status(int(m.group(1)) if m else 0))
+        elif self.path.startswith("/sky/"):
+            self._send_sky()
         elif self.path == "/api/stats":
             self._send_stats()
         elif self.path == "/api/engines":
@@ -2211,12 +2605,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                              "skipped": skipped}
             self._send_json(out)
         elif self.path == "/api/prefs":
-            self._send_json(load_prefs())
+            self._send_json(load_prefs(self._data_base()))
         elif self.path == "/api/chats":
             with _chats_lock:
-                self._send_json({"chats": load_chats()})
+                self._send_json({"chats": load_chats(self._data_base())})
         elif self.path == "/api/memory":
-            self._send_json({"facts": _load_memory()})
+            self._send_json({"facts": _load_memory(self._data_base())})
         elif self.path == "/api/voice/status":
             with _setup_lock:
                 job = dict(_setup_jobs.get(VOICE_ROW, {}))
@@ -2232,6 +2626,53 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                              "note": job.get("note", "")})
         else:
             self.send_error(404)
+
+    def _send_sky(self):
+        """Stream a cached skyline clip with Range support — Safari asks
+        for dozens of byte ranges while scrubbing a video into playback,
+        and a plain 200 would make it re-pull the whole file each time."""
+        m = re.match(r"/sky/(\d+)\.mov$", self.path)
+        p = _sky_path(int(m.group(1))) if m else None
+        if not (p and os.path.exists(p)):
+            self.send_error(404)
+            return
+        size = os.path.getsize(p)
+        start, end = 0, size - 1
+        rng = self.headers.get("Range", "")
+        partial = rng.startswith("bytes=")
+        if partial:
+            try:
+                a, b = rng[6:].split(",")[0].split("-")[:2]
+                start = int(a) if a else max(0, size - int(b))
+                if a:
+                    end = min(int(b), size - 1) if b else size - 1
+            except ValueError:
+                partial = False
+                start, end = 0, size - 1
+        if start > end or start >= size:
+            self.send_error(416)
+            return
+        self.send_response(206 if partial else 200)
+        self.send_header("Content-Type", "video/quicktime")
+        self.send_header("Accept-Ranges", "bytes")
+        self.send_header("Content-Length", str(end - start + 1))
+        if partial:
+            self.send_header("Content-Range",
+                             "bytes %d-%d/%d" % (start, end, size))
+        self.send_header("Cache-Control", "public, max-age=604800")
+        self.end_headers()
+        try:
+            with open(p, "rb") as fh:
+                fh.seek(start)
+                left = end - start + 1
+                while left:
+                    chunk = fh.read(min(1 << 20, left))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    left -= len(chunk)
+        except Exception:
+            pass          # client hung up mid-stream — normal for video
 
     def _send_json(self, obj):
         body = json.dumps(obj).encode("utf-8")
@@ -2339,6 +2780,29 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._gate():
             return
+        if self.path == "/api/welcome":
+            n = int(self.headers.get("Content-Length", 0))
+            try:
+                d = json.loads(self.rfile.read(n))
+                name = str(d.get("name", "")).strip()
+                pin = str(d.get("pin", "")).strip()
+            except (ValueError, json.JSONDecodeError):
+                name = pin = ""
+            if len(name) < 2 or not re.fullmatch(r"\d{4,12}", pin):
+                self._send_json({"ok": False,
+                                 "err": "name (2+) and a 4-12 digit PIN"})
+                return
+            uid = _user_id("pin", name.lower() + ":" + pin)
+            body = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Set-Cookie",
+                             "millen_user=%s; Path=/; Max-Age=15552000; "
+                             "HttpOnly; SameSite=Lax" % uid)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if self.path == "/api/setup/install":
             self._send_json({"started": start_model_downloads()})
             return
@@ -2354,9 +2818,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError):
                 d = None
             if isinstance(d, dict):
-                cur = load_prefs()
+                base = self._data_base()
+                cur = load_prefs(base)
                 cur.update(d)
-                store_prefs(cur)
+                store_prefs(cur, base)
             self._send_json({"ok": isinstance(d, dict)})
             return
         if self.path == "/api/chats":
@@ -2367,7 +2832,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 items = None
             if isinstance(items, list):
                 with _chats_lock:
-                    store_chats(items)
+                    store_chats(items, self._data_base())
             self._send_json({"ok": isinstance(items, list)})
             return
         if self.path == "/api/title":
@@ -2385,7 +2850,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             return
         if self.path == "/api/memory/clear":
             with _memory_lock:
-                _save_memory([])
+                _save_memory([], self._data_base())
             self._send_json({"ok": True})
             return
         if self.path == "/api/voice/prepare":
@@ -2475,7 +2940,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if tier == "Thinking" and messages:
             messages[-1] = dict(messages[-1])
             messages[-1]["content"] += "\n\n" + THINK_HINT
-        mem = memory_text()
+        user_base = self._data_base()      # whose memory/persona this is
+        mem = memory_text(user_base)
         if mem:
             dated_system["content"] += (
                 "\n\nFrom earlier conversations you remember these facts "
@@ -2483,7 +2949,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "\nUse them naturally when relevant — don't recite them.")
         # standing preferences the user wrote themselves (About panel) — they
         # outrank remembered facts, which are extracted guesses
-        persona = (load_prefs().get("persona") or "").strip()[:2000]
+        persona = (load_prefs(user_base).get("persona") or "").strip()[:2000]
         if persona:
             dated_system["content"] += (
                 "\n\nThe user has set standing instructions for how you "
@@ -2548,7 +3014,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             if plain and len(plain) > 12:
                 threading.Thread(
                     target=_extract_memory,
-                    args=(route_label or council[0], plain),
+                    args=(route_label or council[0], plain, user_base),
                     daemon=True).start()
 
 
@@ -2867,6 +3333,17 @@ body.perf #stars{display:none}
   -webkit-mask-position:100% 0;mask-position:100% 0;
 }
 body.painted #sky-color{-webkit-mask-position:0 0;mask-position:0 0}
+
+/* macOS-style loading bar while the server warms the skyline cache */
+#skyload{position:fixed;left:50%;bottom:92px;transform:translateX(-50%);
+  z-index:4;width:230px;text-align:center;pointer-events:none}
+#skyload[hidden]{display:none}
+#skyload .track{height:4px;border-radius:2px;overflow:hidden;
+  background:rgba(255,255,255,.14)}
+#skyload .fill{height:100%;width:0;border-radius:2px;background:#d6d8de;
+  transition:width .5s ease}
+#skyload .lbl{margin-top:7px;font-size:10.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:#8e8e8e;font-family:var(--mono)}
 /* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
    follows it edge-for-edge, unlike the wordmark's tighter window */
 body.painting #sky-color{
@@ -3393,6 +3870,10 @@ __MODEL_ROWS__
 <main id="main">
   <div id="skyline" hidden>
     <video id="sky-color" muted loop playsinline></video>
+  </div>
+  <div id="skyload" hidden>
+    <div class="track"><div class="fill"></div></div>
+    <div class="lbl">loading the backdrop</div>
   </div>
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
@@ -4052,46 +4533,54 @@ async function pollEngines(){
 pollEngines();setInterval(pollEngines,8000);
 
 /* ------------------------------------------------- NYC skyline backdrop */
-// Apple's ATV aerial loops of New York (the classic H.264 set — streams
-// progressively, nothing is stored). A different one every launch. If the
-// network or a URL lets us down, the div stays hidden and the starfield is
-// simply what it was before this feature existed.
-const SKY_CLIPS=[
-  // sylvan (tvOS-13 CDN), not the old phobos host: phobos is http-only with
-  // a broken https cert, and browsers hard-block http media on the https
-  // tunnel — the web version showed NO skyline. These are valid-TLS H.264
-  // (AVC = every browser decodes it), so ONE list serves the app and the
-  // web. URLs come from Apple's own resources-13.tar entries.json.
-  "https://sylvan.apple.com/Videos/comp_N013_C004_PS_v01_SDR_PS_20180925_F1970F7193_SDR_2K_AVC.mov",
-  "https://sylvan.apple.com/Videos/comp_N008_C009_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
-  "https://sylvan.apple.com/Videos/comp_N008_C003_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
-  "https://sylvan.apple.com/Videos/comp_N003_C006_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
-  "https://sylvan.apple.com/Videos/comp_GMT307_136NC_134K_8277_NY_NIGHT_01_v25_SDR_PS_20180907_SDR_2K_AVC.mov",
-];
+// Apple's ATV aerial loops of New York, served by OUR OWN server from
+// /sky/<i>.mov — the raw CDNs are unusable in a browser (phobos: http-only;
+// sylvan: moov atom after 370 MB of mdat, nothing plays until the whole
+// file lands). The server downloads once, remuxes fast-start, caches, and
+// streams with Range support. While it warms, the macOS-style #skyload bar
+// tracks the download; a different clip still plays every launch.
+const SKY_N=5;             // keep in step with SKY_SOURCES in the Python
 const skyline=$("#skyline");
 function bootSkyline(){
   if(perf||!skyline)return;
-  let i=Math.floor(Math.random()*SKY_CLIPS.length);
+  let i=Math.floor(Math.random()*SKY_N);
   const last=parseInt(localStorage.getItem("millen.sky")||"-1",10);
-  if(i===last)i=(i+1)%SKY_CLIPS.length;   // never the same city twice running
+  if(i===last)i=(i+1)%SKY_N;              // never the same clip twice running
   localStorage.setItem("millen.sky",i);
   const c=$("#sky-color");
+  const bar=$("#skyload"),fill=$("#skyload .fill"),lbl=$("#skyload .lbl");
   c.preload="auto";
-  // first decodable frame, not full playback readiness — on a cold cache
-  // "playing" lagged ~10s of black; a briefly-still frame beats no city
-  c.addEventListener("loadeddata",()=>{skyline.hidden=false;},{once:true});
-  // a dead URL rotates to the next clip instead of blacking out the whole
-  // session; only after every clip fails does the backdrop give up
-  let tries=0;
-  c.addEventListener("error",function next(){
-    if(++tries>=SKY_CLIPS.length){skyline.hidden=true;return;}
-    i=(i+1)%SKY_CLIPS.length;
-    localStorage.setItem("millen.sky",i);
-    c.src=SKY_CLIPS[i];
+  function hideBar(){if(bar)bar.hidden=true;}
+  function attach(){
+    hideBar();
+    // first decodable frame, not full playback readiness — on a cold cache
+    // "playing" lagged ~10s of black; a briefly-still frame beats no city
+    c.addEventListener("loadeddata",()=>{skyline.hidden=false;},{once:true});
+    c.addEventListener("error",()=>{skyline.hidden=true;},{once:true});
+    c.src="/sky/"+i+".mov";
     const pr=c.play(); if(pr&&pr.catch)pr.catch(()=>{});
-  });
-  c.src=SKY_CLIPS[i];
-  const pr=c.play(); if(pr&&pr.catch)pr.catch(()=>{skyline.hidden=true;});
+  }
+  let rotations=0;
+  function poll(){
+    fetch("/api/sky/status?i="+i).then(r=>r.json()).then(st=>{
+      if(st.status==="ready"){attach();return;}
+      if(st.status==="error"){
+        // a dead clip rotates to the next; after all fail the backdrop
+        // gives up quietly, exactly as it always has offline
+        if(++rotations>=SKY_N){hideBar();skyline.hidden=true;return;}
+        i=(i+1)%SKY_N;localStorage.setItem("millen.sky",i);
+        poll();return;
+      }
+      if(bar){
+        bar.hidden=false;
+        fill.style.width=(st.pct||0)+"%";
+        lbl.textContent=(st.status==="remuxing"?"preparing the backdrop":
+          "loading the backdrop · "+(st.pct||0)+"%");
+      }
+      setTimeout(poll,900);
+    }).catch(hideBar);
+  }
+  poll();
 }
 bootSkyline();
 
@@ -4195,10 +4684,16 @@ function starTick(ts){
       if(generating)t.z=1+Math.random()*.5;
       continue;
     }
-    // upright always; motion-stretch runs along the slat's LENGTH so a
-    // fast slat draws as a longer line, never a sideways smear
+    // motion-stretch runs along the slat's LENGTH so a fast slat draws as
+    // a longer line; the whole field also drifts DIAGONALLY (up-right,
+    // jittered per slat by zj) and leans ~7° into the motion as it
+    // accelerates — "vertical slices shooting like stars", per Patrick.
+    // Both the drift and the lean scale with scat=(1-z), so they collapse
+    // to exactly zero as the slats settle home.
     const vstr=1+Math.max(0,(zPrev-t.z)/t.z)*5;
-    sctx.setTransform(1,0,0,1,px,py);
+    const dpx=px+.28*scat*sw*t.zj, dpy=py-.16*scat*sh*t.zj;
+    const tl=-.12*scat, ct=Math.cos(tl), st=Math.sin(tl);
+    sctx.setTransform(ct,st,-st,ct,dpx,dpy);
     sctx.drawImage(vid,t.sx,t.sy,m.stw,m.sth,-w/2,-h*vstr/2,w,h*vstr);
   }
   sctx.setTransform(1,0,0,1,0,0);

@@ -667,3 +667,37 @@ come from sylvan.apple.com (tvOS-13 CDN, valid TLS, H.264/AVC so every
 browser decodes them — the 2x/entries.json variants are HEVC-only, which
 Firefox can't play). NYC URLs live in Apple's resources-13.tar
 entries.json; guessing `NY_*_2K_SDR_HEVC.mov` names 404s.
+
+## 1.10.0 — the server owns the skyline; the web got people
+
+### Skyline: cache + remux, never stream the CDN to a browser
+The sylvan AVC files are `ftyp/wide/mdat/moov` — the moov INDEX sits after
+370 MB of data, so a browser has nothing to play until the entire file
+arrives ("background not loading", again). The server now downloads each
+clip once, remuxes it fast-start in PURE PYTHON (recursive moov walk,
+stco/co64 offsets shifted by exactly len(moov) — a naive byte-scan for
+'stco' can hit sample data), caches under app_dir()/sky, and serves
+/sky/<i>.mov same-origin with real Range support (Safari scrubs with
+dozens of byte-range requests, including suffix ranges `bytes=-N`).
+`/api/sky/status?i=` drives the macOS-style #skyload bar while a clip
+warms. Verified in-browser: remuxed file plays in ~6s and the reveal
+unhides; atom order ftyp/moov/wide/mdat; both range forms 206.
+
+### Multi-user: nobody sees Patrick's chats through the tunnel
+Remote requests are the ones carrying Cf-Connecting-Ip/X-Forwarded-For
+(cloudflared adds them; local/native requests never have them). Remote
+visitors with no identity get the WELCOME page (name + 4-12 digit PIN;
+"Continue with Google" appears once app_dir()/google_oauth.json holds a
+client_id/client_secret). Identity = sha256 hash → cookie `millen_user`
+(HttpOnly) → all chats/memory/prefs live under app_dir()/users/<id>/.
+Every storage function takes `base=None`; None = legacy owner files,
+which a remote request can NEVER reach (cookieless remotes get a shared
+`_anon` pen). A wrong PIN is just a different empty profile — that is the
+security model, not a bug. Verified: owner/buddy/anon fully isolated in
+both directions, desktop app untouched.
+
+### Warp: slats now shoot DIAGONALLY
+Per Patrick ("more diagonal like stars shooting"): the slat field drifts
+up-right (.28/-.16, jittered by zj) and leans ~7° into the motion, both
+scaled by scat=(1-z) so the settle still lands pixel-exact. Vertical
+motion-stretch unchanged.
