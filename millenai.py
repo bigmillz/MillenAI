@@ -3600,12 +3600,12 @@ body.perf .msg{animation:none}
 .contrib[open]>summary .caretmark{transform:rotate(90deg)}
 
 /* the blend progress bar — replaces live draft output entirely */
-.blendprog{margin:2px 0 12px;max-width:430px}
-.blendprog .lbl{font-family:var(--mono);font-size:11px;letter-spacing:.12em;
-  text-transform:uppercase;color:var(--dim);margin-bottom:7px}
-.blendprog .track{height:4px;border-radius:2px;overflow:hidden;
+.blendprog{margin:4px 0 16px;max-width:640px}
+.blendprog .lbl{font-family:var(--mono);font-size:13px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--dim);margin-bottom:9px}
+.blendprog .track{height:9px;border-radius:5px;overflow:hidden;
   background:rgba(255,255,255,.12)}
-.blendprog .fill{height:100%;width:0;border-radius:2px;background:#d6d8de;
+.blendprog .fill{height:100%;width:0;border-radius:5px;background:#d6d8de;
   transition:width .5s ease}
 
 .draft{
@@ -4757,8 +4757,8 @@ function buildTiles(vw,vh){
   // ~28px chips, TONS of them — the frame splits like pizza slices from
   // the centre and every chip streaks radially, "like stars" (Patrick,
   // after the slat era). Cap keeps the worst-case draw count sane.
-  let cols=Math.max(30,Math.round(sw/22)),rows=Math.max(20,Math.round(sh/22));
-  while(cols*rows>1800){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
+  let cols=Math.max(38,Math.round(sw/17)),rows=Math.max(26,Math.round(sh/17));
+  while(cols*rows>2400){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
   const cover=Math.max(sw/vw,sh/vh);
   const srcW=sw/cover,srcH=sh/cover;
   const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
@@ -4850,7 +4850,7 @@ function starTick(ts){
     const cap=Math.min(inv,1.6);
     const ww=m.tw*cap,hh=m.th*cap;
     const len=stretch*(1+(inv-1)*1.4);
-    const thin=.32/Math.sqrt(Math.max(1,len*.5));
+    const thin=.26/Math.sqrt(Math.max(1,len*.5));
     sctx.drawImage(snapCv,t.sx,t.sy,m.stw,m.sth,
       -ww*len*.35,-hh*thin/2,ww*len*.7,hh*thin);
   }
