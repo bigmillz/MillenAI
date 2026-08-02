@@ -4590,6 +4590,11 @@ __AGENT_ROWS__
       <div class="switch"></div>
       Arena mode
     </div>
+    <div class="toggle-row" id="sound-toggle" style="margin-top:9px"
+         title="The warp makes its own engine sound">
+      <div class="switch"></div>
+      Warp audio
+    </div>
     <div class="model" id="open-setup" title="Download more models"
          style="margin-top:10px">
       <span class="ico">⬇</span>Add models…</div>
@@ -4785,6 +4790,13 @@ function setArena(on){
 }
 $("#arena-toggle").addEventListener("click",()=>setArena(!arenaMode));
 setArena(arenaMode);
+
+function setSound(on){
+  sndOn=on;$("#sound-toggle").classList.toggle("on",on);
+  localStorage.setItem("millen.sound",on?"1":"0");
+}
+$("#sound-toggle").addEventListener("click",()=>setSound(!sndOn));
+setSound(sndOn);
 
 /* --------------------------------------------------- live web search */
 function paintLive(){
@@ -5194,6 +5206,8 @@ async function send(){
 
   fetch("/api/speak",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({stop:true})});
+  ensureWarpAudio();
+  if(audioCtx&&audioCtx.state==="suspended")audioCtx.resume();
   input.value="";input.style.height="auto";
   const sentImages=pendingImages.slice();
   pendingImages=[];paintChips();
@@ -5748,6 +5762,56 @@ function drawMotes(dt){
   sctx.globalCompositeOperation="source-over";
 }
 
+/* --------------------------------------------------------- warp audio */
+// A synthesized engine, no audio files: two detuned saws through a
+// resonant lowpass (the drone) + looped noise through a bandpass (the
+// wind), both enveloped by the SAME e/recoil that drive the visuals —
+// spool, suck, ignition and tail all sound like they look. Created
+// lazily on send() because browsers demand a user gesture for audio.
+let audioCtx=null,sndNodes=null;
+let sndOn=localStorage.getItem("millen.sound")!=="0";
+function ensureWarpAudio(){
+  if(!sndOn||audioCtx)return;
+  try{
+    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+    const master=audioCtx.createGain();
+    master.gain.value=0;master.connect(audioCtx.destination);
+    // EV MOTOR WHINE: a clean tone whose PITCH climbs with speed (plus a
+    // quiet second harmonic) — inverter glide, not combustion rumble
+    const o1=audioCtx.createOscillator();o1.type="triangle";o1.frequency.value=90;
+    const o2=audioCtx.createOscillator();o2.type="sine";o2.frequency.value=181;
+    const lp=audioCtx.createBiquadFilter();
+    lp.type="lowpass";lp.frequency.value=2400;lp.Q.value=1.2;
+    const og=audioCtx.createGain();og.gain.value=.5;
+    const hg=audioCtx.createGain();hg.gain.value=.18;
+    o1.connect(og);o2.connect(hg);hg.connect(og);og.connect(lp);lp.connect(master);
+    const buf=audioCtx.createBuffer(1,audioCtx.sampleRate*2,audioCtx.sampleRate);
+    const ch=buf.getChannelData(0);
+    for(let i=0;i<ch.length;i++)ch[i]=Math.random()*2-1;
+    const noise=audioCtx.createBufferSource();
+    noise.buffer=buf;noise.loop=true;
+    const bp=audioCtx.createBiquadFilter();
+    bp.type="bandpass";bp.frequency.value=500;bp.Q.value=.8;
+    const ng=audioCtx.createGain();ng.gain.value=.55;
+    noise.connect(bp);bp.connect(ng);ng.connect(master);
+    o1.start();o2.start();noise.start();
+    sndNodes={master,lp,bp,o1,o2};
+  }catch(err){audioCtx=null;sndNodes=null;}
+}
+function driveWarpAudio(e,recoil){
+  if(!sndNodes||!audioCtx)return;
+  const t=audioCtx.currentTime;
+  sndNodes.master.gain.setTargetAtTime(
+    sndOn?(e*.14+recoil*.045):0,t,.12);
+  // the whine CLIMBS: ~90Hz at rest to ~850Hz at full boost, harmonic
+  // tracking at 2.01x for that glassy inverter sheen
+  const f=90+e*760+recoil*40;
+  sndNodes.o1.frequency.setTargetAtTime(f,t,.18);
+  sndNodes.o2.frequency.setTargetAtTime(f*2.01,t,.18);
+  sndNodes.lp.frequency.setTargetAtTime(1200+e*4200,t,.15);
+  sndNodes.bp.frequency.setTargetAtTime(420+e*3200,t,.15);
+}
+
 const WARP_UP=1.35, WARP_DOWN=2.3;  // turbo: readable spool, long tail
 // Per-frame snapshot of the video at capped resolution: every slat then
 // blits canvas->canvas, which skips the per-drawImage video-frame
@@ -5810,6 +5874,7 @@ function starTick(ts){
     if(skyline){skyline.style.opacity="";skyline.style.transform="";
       skyline.style.filter="";}
     starCv.style.transform="";
+    driveWarpAudio(0,0);
     if(tiles.length){tiles=[];tileMeta=null;}
     lightMotes.length=0;
     return;
@@ -5905,6 +5970,7 @@ function starTick(ts){
   sctx.globalAlpha=1;
   harvestLights(ts);
   drawMotes(dt);
+  driveWarpAudio(e,recoil);
 }
 starTick();
 // the brand chameleon runs on its own gentle clock — the warp loop only
