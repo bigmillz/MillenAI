@@ -27,6 +27,7 @@ import json
 import os
 import platform
 import plistlib
+import random
 import re
 import shutil
 import signal
@@ -3005,6 +3006,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if self.path == "/api/setup/install":
+            # warm one backdrop alongside the models, so the very first
+            # launch already opens onto a moving city
+            try:
+                sky_status(random.randrange(len(SKY_SOURCES)))
+            except Exception:
+                pass
             self._send_json({"started": start_model_downloads()})
             return
         if self.path == "/api/update/install":
@@ -4885,8 +4892,8 @@ function buildTiles(vw,vh){
   // ~28px chips, TONS of them — the frame splits like pizza slices from
   // the centre and every chip streaks radially, "like stars" (Patrick,
   // after the slat era). Cap keeps the worst-case draw count sane.
-  let cols=Math.max(46,Math.round(sw/13)),rows=Math.max(32,Math.round(sh/13));
-  while(cols*rows>2800){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
+  let cols=Math.max(56,Math.round(sw/10)),rows=Math.max(38,Math.round(sh/10));
+  while(cols*rows>3200){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
   const cover=Math.max(sw/vw,sh/vh);
   const srcW=sw/cover,srcH=sh/cover;
   const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
@@ -4935,7 +4942,13 @@ function starTick(ts){
   }
   snapCtx.drawImage(vid,0,0,sw2,sh2);   // the one video read per frame
   if(!tiles.length)buildTiles(sw2,sh2);
-  const m=tileMeta,cx=sw/2,cy=sh/2;
+  // the vanishing point is the MAIN PANEL's centre, not the window's —
+  // with a sidebar on the left the two differ, and a burst centred on
+  // the window reads visibly off-axis in the chat area
+  const mainEl=document.getElementById("main");
+  const scale=sw/Math.max(1,starCv.offsetWidth);
+  const cx=mainEl?(mainEl.offsetLeft+mainEl.offsetWidth/2)*scale:sw/2;
+  const m=tileMeta,cy=sh/2;
   sctx.clearRect(0,0,sw,sh);
   sctx.globalAlpha=Math.min(1,e*3);
   const rate=dt*(.45+2.8*e+skyCreep);
@@ -4982,7 +4995,7 @@ function starTick(ts){
     // still reads as the picture) and erodes into a needle as it
     // accelerates — the image visibly crumbles into shooting stars, and
     // the settle reverses it: needles fatten back into the frame
-    const needle=.16/Math.sqrt(Math.max(1,len*.5));
+    const needle=.12/Math.sqrt(Math.max(1,len*.5));
     const thin=1-(1-needle)*Math.min(1,scat*2.5);
     sctx.drawImage(snapCv,t.sx,t.sy,m.stw,m.sth,
       -ww*len*.35,-hh*thin/2,ww*len*.7,hh*thin);
@@ -5104,6 +5117,19 @@ function renderSetup(st){
       (st.speed_mbs>0?st.speed_mbs+' MB/s':'starting\u2026')+
       (st.eta_min?' \u00b7 about '+st.eta_min+' min left':'')+'</div>':'');
 
+  // FIRST RUN stays simple: the machine already picked its best brains —
+  // show what it chose and one number, never the catalog. The full list
+  // only exists behind "Add models…" for people who go looking.
+  if(!setupManual){
+    html+='<div class="setup-head">picked for this machine</div>'
+      +'<div class="sub" style="margin:4px 0 0">'
+      +stars.map(m=>esc(m.label)).join(" · ")
+      +'</div>';
+    setupList.innerHTML=html;
+    finishSetupChrome(st,stars,anyDl);
+    return;
+  }
+
   // …then every model individually, so anything can be added on its own
   const state=m=>{
     if(m.status==="ready")   return TICK;
@@ -5147,6 +5173,26 @@ function renderSetup(st){
     setupNote.textContent="free disk: "+st.disk_free_gb+" GB";
   }
 
+  if(anyDl){
+    setupGo.disabled=true;setupGo.textContent="Downloading\u2026";
+  }else if(setupAllReady){
+    setupGo.disabled=false;setupGo.textContent="Let\u2019s go";
+  }else{
+    setupGo.disabled=!st.mlx_ok;
+    setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Let\u2019s go")+
+      " \u00b7 "+Math.max(0,Math.round(st.want_gb-st.have_gb))+" GB";
+  }
+}
+
+function finishSetupChrome(st,stars,anyDl){
+  if(!st.mlx_ok){
+    setupNote.textContent="engine not installed \u2014 reopen the app to finish setup";
+    setupGo.disabled=true;
+  }else if(stars.some(m=>m.status==="error")){
+    setupNote.textContent="a download failed \u2014 check your connection, then retry";
+  }else{
+    setupNote.textContent="free disk: "+st.disk_free_gb+" GB";
+  }
   if(anyDl){
     setupGo.disabled=true;setupGo.textContent="Downloading\u2026";
   }else if(setupAllReady){
