@@ -1036,6 +1036,23 @@ def _extract_memory(label: str, user_msg: str, base=None):
                  if ln.strip().startswith("- ")]
         facts = [f for f in facts
                  if 5 < len(f) < 160 and "NONE" not in f.upper()]
+
+        # GROUNDING: small models INVENT people wholesale — a real memory
+        # file was found holding "Name: Emily Wilson", "Location: Munich",
+        # "Job: Park Ranger", none of it ever said. A fact may only be
+        # stored if every proper noun in it (past the first word) actually
+        # appears in the user's message.
+        msg_low = user_msg.lower()
+
+        def grounded(f):
+            for w in re.findall(r"\b[A-Z][a-z]{2,}\b", f)[0:]:
+                if f.strip().startswith(w) and f.strip().index(w) == 0:
+                    continue          # sentence-initial capital is fine
+                if w.lower() not in msg_low:
+                    return False
+            return True
+
+        facts = [f for f in facts if grounded(f)]
         if not facts:
             return
         with _memory_lock:
@@ -3306,9 +3323,11 @@ html.winwipe.winwipe-run body{
 #sidebar{
   position:relative;z-index:1;
   width:284px;min-width:284px;height:100%;
-  background:rgba(21,23,29,.60);
-  -webkit-backdrop-filter:blur(17px) saturate(1.35);
-          backdrop-filter:blur(17px) saturate(1.35);
+  /* real frosted glass, per Patrick: ~30% panel, heavy blur carrying the
+     legibility instead of the tint */
+  background:rgba(21,23,29,.30);
+  -webkit-backdrop-filter:blur(26px) saturate(1.4);
+          backdrop-filter:blur(26px) saturate(1.4);
   border-right:1px solid var(--line-soft);
   display:flex;flex-direction:column;padding:20px 16px 14px;gap:4px;
 }
