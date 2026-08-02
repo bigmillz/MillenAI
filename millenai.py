@@ -1860,6 +1860,16 @@ def _looks_degenerate(text: str) -> bool:
     # runaway repetition: "to make up to make up to…"
     if len(words) >= 120 and len(set(words)) / len(words) < 0.15:
         return True
+    # a collapse AFTER a healthy start hides inside the whole-text
+    # average: a real three-paragraph answer followed by "party" x600
+    # still scored 0.33 and streamed to a phone (seen live). The TAIL
+    # tells the truth — the last 120 words of genuine prose never drop
+    # below ~0.4 unique; a loop, single-word or whole-phrase, sits at
+    # nearly zero.
+    if len(words) >= 120:
+        tail = words[-120:]
+        if len(set(tail)) / len(tail) < 0.25:
+            return True
     # token salad: fragments welded together with hyphens. Real prose has
     # the odd "state-of-the-art"; it does not have 25% of every word.
     if sum(1 for w in words if w.count("-") >= 2) / len(words) > 0.25:
