@@ -109,7 +109,10 @@ SYSTEM_PROMPT = {
         "Avoid sounding like a rigid textbook, robot, or bullet-point generator. "
         "Speak naturally in clear, engaging prose as if talking to a smart peer. "
         "Be direct, concise, and grounded—use brief analogies and natural human "
-        "warmth instead of formal fluff."
+        "warmth instead of formal fluff. Lead with the answer itself: never "
+        "open by restating the question or with filler like 'Great question'. "
+        "Use a list only for truly enumerable things, keep short questions to "
+        "short answers, and when you don't know something, say so plainly."
     ),
 }
 
@@ -1767,14 +1770,31 @@ def run_model(label: str, messages: list, emit, thinking: bool = False) -> None:
             time.sleep(1.2)
 
 
+# The merge is where the final answer's VOICE gets written, so the style
+# spec lives here: the qualities of a top-tier assistant reply — lead with
+# the answer, confident flowing prose, no filler, no bullet-spam — without
+# ever claiming any identity.
 SYNTH_INSTRUCTION = (
     "Below are several draft answers to the same question. Write ONE "
-    "thorough, well-organised final answer that keeps every correct and "
-    "useful detail and drops repetition. If the drafts disagree on a fact, "
-    "state the correct information plainly. STRICT RULE: your reply must "
-    "read as a direct answer to the question and nothing else — never use "
-    "the words 'draft', 'version', 'model', or 'answer 1/2/3', never "
-    "compare or evaluate the drafts, never explain what you merged."
+    "final answer that keeps every correct and useful detail and drops "
+    "repetition. If the drafts disagree on a fact, state the correct "
+    "information plainly.\n"
+    "VOICE — follow all of these:\n"
+    "- Open with the answer itself. Never restate the question, never "
+    "start with filler like 'Great question' or 'Certainly'.\n"
+    "- Write in confident, flowing prose, as one smart person talking to "
+    "another. Use a list ONLY when the content is truly enumerable; never "
+    "turn an explanation into bullet points.\n"
+    "- Match length to the question: simple question, short answer. No "
+    "headers on short answers. No summary paragraph that repeats what you "
+    "just said.\n"
+    "- Be concrete and specific; prefer an example over an abstraction.\n"
+    "- If something is uncertain or the drafts leave a gap, say so "
+    "plainly instead of papering over it.\n"
+    "STRICT RULE: your reply must read as a direct answer to the question "
+    "and nothing else — never use the words 'draft', 'version', 'model', "
+    "or 'answer 1/2/3', never compare or evaluate the drafts, never "
+    "explain what you merged."
 )
 
 
@@ -1843,8 +1863,26 @@ def _stream_guarded(label: str, msgs: list, emit, status,
     except _Degenerate:
         emit(f"{NUL}RESET{NUL}")      # tells the UI to discard the garbage
         status(f"{label} lost the thread — {note}")
+        if fallback is None:
+            # single-model runs have no other draft to fall back on: keep
+            # the part BEFORE the collapse (seen in the wild: a fine answer
+            # that decayed into "a walking path, a walking path, …" x300)
+            fallback = _detruncate("".join(seen)) or (
+                "The model lost the thread on this one — ask again, or "
+                "switch tiers for a second opinion.")
         emit(fallback)
         return False
+
+
+def _detruncate(text: str) -> str:
+    """Trim a collapsed output back to its still-coherent prefix."""
+    t = strip_think(text)
+    while t and _looks_degenerate(t):
+        t = t[:int(len(t) * 0.7)].rsplit(" ", 1)[0]
+    cut = max(t.rfind(". "), t.rfind(".\n"), t.rfind("!"), t.rfind("?"))
+    if cut > len(t) * 0.4:
+        t = t[:cut + 1]
+    return t.strip()
 
 
 def run_council(labels: list, messages: list, emit, status) -> None:
@@ -2335,7 +2373,7 @@ button:hover{background:#fff}
     <input id="n" autocomplete="off" maxlength="24" placeholder="your name"
            autofocus>
     <input id="p" type="password" autocomplete="off" maxlength="12"
-           inputmode="numeric" placeholder="PIN (4+ digits)">
+           inputmode="numeric" placeholder="PIN (8+ digits)">
     <button>Continue</button>
   </form>
   <a class="gbtn" href="/auth/google">Continue with Google</a>
@@ -2349,7 +2387,7 @@ function go(){
   const p=document.getElementById("p").value.trim();
   const e=document.getElementById("e");
   if(n.length<2){e.textContent="pick a name (2+ characters)";return;}
-  if(!/^[0-9]{4,12}$/.test(p)){e.textContent="PIN must be 4-12 digits";return;}
+  if(!/^[0-9]{8,12}$/.test(p)){e.textContent="PIN must be 8-12 digits";return;}
   fetch("/api/welcome",{method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({name:n,pin:p})})
@@ -2421,11 +2459,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if not ACCESS_KEY:
             return True
         cookie = self.headers.get("Cookie", "") or ""
-        if "millen_key=" + ACCESS_KEY in cookie:
+        m = re.search(r"millen_key=([^;\s]+)", cookie)
+        # compare_digest: a plain == leaks how many leading characters
+        # matched through response timing — slow to exploit over a tunnel,
+        # free to prevent
+        if m and secrets.compare_digest(m.group(1), ACCESS_KEY):
             return True
         wrong = False
         if self.path.startswith("/?key="):
-            if self.path[len("/?key="):] == ACCESS_KEY:
+            if secrets.compare_digest(self.path[len("/?key="):],
+                                      ACCESS_KEY):
                 self.send_response(302)
                 self.send_header("Set-Cookie",
                                  "millen_key=%s; Path=/; Max-Age=2592000; "
@@ -2453,6 +2496,29 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.end_headers()
         try:
             self.wfile.write(b"MillenAI: access key required.")
+        except Exception:
+            pass
+        return False
+
+    # ADMIN endpoints act on the HOST MACHINE — trigger downloads, run the
+    # updater, open Finder, speak through the Mac's speakers. Remote
+    # visitors (even with the key) get a flat 403 on all of them; they are
+    # guests in the chat, not operators of the computer.
+    ADMIN_PATHS = ("/api/open-logs", "/api/setup/install",
+                   "/api/model/download", "/api/update/install",
+                   "/api/speak", "/api/voice/prepare")
+
+    def _admin_gate(self) -> bool:
+        """True = allowed. Answers the request itself when blocked."""
+        if not self._remote():
+            return True
+        if not any(self.path.startswith(p) for p in self.ADMIN_PATHS):
+            return True
+        self.send_response(403)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        try:
+            self.wfile.write(b'{"ok": false, "err": "owner only"}')
         except Exception:
             pass
         return False
@@ -2795,6 +2861,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._gate():
             return
+        if not self._admin_gate():
+            return
         if self.path == "/api/welcome":
             n = int(self.headers.get("Content-Length", 0))
             try:
@@ -2803,9 +2871,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 pin = str(d.get("pin", "")).strip()
             except (ValueError, json.JSONDecodeError):
                 name = pin = ""
-            if len(name) < 2 or not re.fullmatch(r"\d{4,12}", pin):
+            if len(name) < 2 or not re.fullmatch(r"\d{8,12}", pin):
                 self._send_json({"ok": False,
-                                 "err": "name (2+) and a 4-12 digit PIN"})
+                                 "err": "name (2+) and an 8-12 digit PIN"})
                 return
             uid = _user_id("pin", name.lower() + ":" + pin)
             body = json.dumps({"ok": True}).encode()
@@ -3015,7 +3083,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             elif len(council) > 1:
                 run_council(council, full_messages, emit, status)
             else:
-                run_model(route_label or model_name, full_messages, emit)
+                # guarded like every other path now: a lone model that
+                # collapses into repetition gets cut back to its coherent
+                # prefix instead of streaming the loop to the reader
+                _stream_guarded(route_label or model_name, full_messages,
+                                emit, status, None,
+                                "kept the part before it wandered")
         except (BrokenPipeError, ConnectionResetError):
             pass  # user hit Stop — browser closed the connection
         except Exception as exc:
@@ -4684,8 +4757,8 @@ function buildTiles(vw,vh){
   // ~28px chips, TONS of them — the frame splits like pizza slices from
   // the centre and every chip streaks radially, "like stars" (Patrick,
   // after the slat era). Cap keeps the worst-case draw count sane.
-  let cols=Math.max(24,Math.round(sw/28)),rows=Math.max(16,Math.round(sh/28));
-  while(cols*rows>1400){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
+  let cols=Math.max(30,Math.round(sw/22)),rows=Math.max(20,Math.round(sh/22));
+  while(cols*rows>1800){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
   const cover=Math.max(sw/vw,sh/vh);
   const srcW=sw/cover,srcH=sh/cover;
   const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
@@ -4770,12 +4843,16 @@ function starTick(ts){
     const dxv=px-cx,dyv=py-cy,dd=Math.hypot(dxv,dyv);
     let co=1,si=0;if(dd>1){co=dxv/dd;si=dyv/dd;}
     sctx.setTransform(co,si,-si,co,px,py);
+    // Tesla-launch fine: streaks are needle-thin (32% of the cell across)
+    // and longer, and they thin FURTHER with speed — length comes from
+    // velocity and closeness, thickness never does
     const stretch=1+Math.max(0,(zPrev-t.z)/t.z)*13;
-    const cap=Math.min(inv,1.8);
+    const cap=Math.min(inv,1.6);
     const ww=m.tw*cap,hh=m.th*cap;
-    const len=stretch*(1+(inv-1)*1.1);
+    const len=stretch*(1+(inv-1)*1.4);
+    const thin=.32/Math.sqrt(Math.max(1,len*.5));
     sctx.drawImage(snapCv,t.sx,t.sy,m.stw,m.sth,
-      -ww*len*.35,-hh*.35,ww*len*.7,hh*.7);
+      -ww*len*.35,-hh*thin/2,ww*len*.7,hh*thin);
   }
   sctx.setTransform(1,0,0,1,0,0);
   sctx.globalAlpha=1;

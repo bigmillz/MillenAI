@@ -710,3 +710,18 @@ canvas and every slat blits canvas->canvas (the per-tile video reads were
 the cost), and the warp canvas caps at 1.5x DPR (invisible on fast-moving
 slats, nearly halves fill). Snapshot only happens while the warp is
 active — idle cost is zero. Tiles rebuild if the snapshot dims change.
+
+## 1.11.0 — needle streaks, guarded singles, hardened web, Claude-grade voice
+* Warp: ~1800 needle-fine streaks (22px cells, thickness .32 of cell and
+  thinning further with speed via /sqrt(len)) — "tesla launch mode".
+* Single-model streams now run through _stream_guarded too; a collapse is
+  cut back to its coherent prefix by _detruncate (repetition loop like
+  "a walking path" x300 reached the reader unguarded before).
+* Security: constant-time key compares (secrets.compare_digest), ADMIN
+  endpoints (downloads, updater, open-logs, speak, voice/prepare) 403 for
+  remote visitors — guests chat, they don't operate the host. Server was
+  already localhost-bound; renderMD already escapes model HTML.
+* PIN minimum is 8 digits (client + server).
+* SYNTH_INSTRUCTION carries the voice spec (lead with the answer, prose
+  over bullets, no filler, length matched to the question) — the merge is
+  where the final answer's personality is written; SYSTEM_PROMPT aligned.
