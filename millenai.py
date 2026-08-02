@@ -1534,12 +1534,16 @@ def setup_status() -> dict:
 
 
 def stop_managed_engines():
-    for p in _managed_procs:
+    # THE ORPHAN FACTORY, finally closed: this used to clear() _mlx_procs
+    # without terminating them — every quit left engines pinning wired
+    # Metal memory (nine were found feral at once). Kill everything we
+    # spawned, MLX engines included.
+    for p in list(_managed_procs) + list(_mlx_procs.values()):
         try:
             p.terminate()
         except Exception:
             pass
-    for p in _managed_procs:
+    for p in list(_managed_procs) + list(_mlx_procs.values()):
         try:
             p.wait(timeout=5)
         except Exception:
@@ -1671,6 +1675,10 @@ def stream_ollama(tag: str, messages: list, emit) -> None:
         "model": tag,
         "messages": messages,
         "stream": True,
+        # unload fast after use: Ollama's default keep-alive left LLaVA
+        # resident at 8.6 GB GPU for 5 minutes after every glance at an
+        # image — the llama-server runner ate cores "even when closed"
+        "keep_alive": "45s",
         "options": {"temperature": 0.75},
     }).encode("utf-8")
     req = urllib.request.Request(
@@ -1826,8 +1834,21 @@ def fold_system(messages: list) -> list:
 
 def run_model(label: str, messages: list, emit, thinking: bool = False) -> None:
     """Stream one model's answer, handling engine startup and templates."""
-    kind, target = MODEL_ROUTES.get(label, ("ollama", "llama3.3:70b"))
+    # NO 70B fallback: an unknown label used to route to llama3.3:70b on
+    # Ollama — a 40 GB model on a 48 GB Mac. Its runner got OOM-killed,
+    # Ollama respawned it, repeat forever ("llama-server won't stop
+    # starting", seen live). Fall back to the SMALLEST cached model.
+    if label not in MODEL_ROUTES:
+        pulled = ollama_pulled_tags() or set()
+        label = next((l for l in reversed(MERGE_RANK)
+                      if model_cached(l, pulled)), label)
+    kind, target = MODEL_ROUTES.get(label, (None, None))
+    if kind is None:
+        raise RuntimeError("no downloaded model can take this request — "
+                           "grab one under Add models…")
     if kind == "mlx":
+        global _mlx_last_use
+        _mlx_last_use = time.time()
         with _engine_lock:
             ensure_mlx_engine(label)
     msgs, attempts, folded = messages, 0, False
@@ -3339,19 +3360,35 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
         if query:
             snippets = None
-            if re.search(r"\bweather\b|\bforecast\b|\btemperature\b",
-                         query, re.I):
+            is_weather = bool(re.search(
+                r"\bweather\b|\bforecast\b|\btemperature\b", query, re.I))
+            if is_weather:
                 snippets = weather_snippets(query)
-            if snippets is None:
+            if snippets is not None:
+                # data answers need the DATA: a 3B given real degrees once
+                # replied "warm the cockles" with no numbers at all
+                messages[-1] = {
+                    "role": "user",
+                    "content": (
+                        "Answer using ONLY the live data below. Begin "
+                        "your reply with the current temperature and "
+                        "conditions (e.g. \'It\'s 74\u00b0F and clear "
+                        "right now\'), then wind and the forecast days. "
+                        "Never omit the temperature.\n"
+                        f"{snippets}\n\nQUESTION: {query}"
+                    ),
+                }
+            else:
                 snippets = run_search(query)
-            messages[-1] = {
-                "role": "user",
-                "content": (
-                    "You have internet access. Using these live search "
-                    f"snippets, answer the prompt.\n"
-                    f"SNIPPETS FOR '{query}':\n{snippets}\n\nPROMPT: {query}"
-                ),
-            }
+                messages[-1] = {
+                    "role": "user",
+                    "content": (
+                        "You have internet access. Using these live search "
+                        f"snippets, answer the prompt.\n"
+                        f"SNIPPETS FOR '{query}':\n{snippets}\n\nPROMPT: "
+                        f"{query}"
+                    ),
+                }
 
         # local models have no clock — without this "today" is meaningless
         today = time.strftime("%A, %B %-d, %Y")
@@ -3384,7 +3421,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 route, route_label = target, label
                 break
         if route is None:
-            route = ("ollama", "llama3.3:70b")
+            # smallest cached model, never a 40 GB bomb (see run_model)
+            pulled = ollama_pulled_tags() or set()
+            route_label = next((l for l in reversed(MERGE_RANK)
+                                if model_cached(l, pulled)), None)
+            route = MODEL_ROUTES.get(route_label, (None, None))
 
         # MLX engines load on demand so only the model in use holds RAM
         if route[0] == "mlx" and route_label:
@@ -4212,13 +4253,17 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
    it read as a separate event rather than as something the sweep delivered.
    These stops put it at ~1.7x when the band is entering and landing at
    ~0.8s, exactly when the band crosses the middle. */
-#hero h1.flyin{animation:heroIn 1.05s linear both}
+/* THE ENTRANCE, serene cut: no shockwave, no quake, no chromatic snap —
+   the wordmark drifts in from a deep blur over 2.6s, decelerating, and
+   LANDS at the exact moment the wash (delay 2.15s + .55s sweep) paints
+   the colour through it. Slow zoom + unblur + get swiped into colour. */
+#hero h1.flyin{animation:heroIn 2.6s linear both}
 @keyframes heroIn{
-  0%  {opacity:0;transform:scale(2.3) translateY(12px);filter:blur(22px)}
-  22% {opacity:1}
-  40% {transform:scale(1.62) translateY(7px);filter:blur(9px)}
-  62% {transform:scale(1.2) translateY(3px);filter:blur(3px)}
-  78% {transform:scale(.972) translateY(0);filter:blur(0)}  /* slight overshoot */
+  0%  {opacity:0;transform:scale(1.6) translateY(10px);filter:blur(26px)}
+  14% {opacity:1}
+  35% {transform:scale(1.34) translateY(6px);filter:blur(15px)}
+  60% {transform:scale(1.15) translateY(3px);filter:blur(7px)}
+  82% {transform:scale(1.045) translateY(1px);filter:blur(2px)}
   100%{opacity:1;transform:scale(1) translateY(0);filter:blur(0)}
 }
 /* the small type follows a beat later, so the screen assembles rather than
@@ -4232,70 +4277,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 
 
-/* THE SLAM — what happens when the wash reaches the wordmark. The old
-   soft white bloom is dead ("that little white bubble sucks"). Four
-   layers, all timed to detonate together at 2.3s:
-   shockwave rings + full-screen flash + spark burst + (on the h1 itself)
-   a chromatic-aberration snap and a screen quake, defined below. */
-#celebrate .shock{
-  position:absolute;border-radius:50%;pointer-events:none;
-  transform:translate(-50%,-50%) scale(.1);opacity:0;
-  border:3px solid transparent;
-  background:conic-gradient(from 0deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff,#ff8f8f) border-box;
-  -webkit-mask:radial-gradient(closest-side,transparent 92%,#000 93%);
-          mask:radial-gradient(closest-side,transparent 92%,#000 93%);
-  mix-blend-mode:screen;filter:blur(1.5px) saturate(1.6);
-}
-#celebrate .shock.s1{animation:shockOut .9s cubic-bezier(.1,.7,.2,1) 2.3s forwards}
-#celebrate .shock.s2{animation:shockOut 1.15s cubic-bezier(.1,.7,.2,1) 2.42s forwards}
-@keyframes shockOut{
-  0%  {opacity:0;transform:translate(-50%,-50%) scale(.12)}
-  8%  {opacity:1}
-  100%{opacity:0;transform:translate(-50%,-50%) scale(3.6)}
-}
-#celebrate .flashx{
-  position:absolute;inset:0;pointer-events:none;opacity:0;
-  background:radial-gradient(circle at var(--fx) var(--fy),
-             rgba(255,255,255,.95),rgba(255,255,255,.25) 30%,transparent 62%);
-  mix-blend-mode:screen;
-  animation:flashPop .5s ease-out 2.3s forwards;
-}
-@keyframes flashPop{0%{opacity:0}14%{opacity:1}100%{opacity:0}}
-#celebrate .spark{
-  position:absolute;width:5px;height:5px;border-radius:50%;
-  left:var(--sx);top:var(--sy);opacity:0;pointer-events:none;
-  background:hsl(var(--hue) 100% 72%);
-  box-shadow:0 0 10px 2px hsl(var(--hue) 100% 62% / .9);
-  mix-blend-mode:screen;
-  animation:sparkFly .8s cubic-bezier(.08,.75,.2,1) 2.32s forwards;
-}
-@keyframes sparkFly{
-  0%  {opacity:0;transform:translate(0,0) scale(1)}
-  10% {opacity:1}
-  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.25)}
-}
-/* chromatic-aberration snap: the wordmark splits into red/cyan ghosts and
-   SNAPS back together with an overshoot as the wash detonates on it */
-#hero h1.slam{animation:chromaSnap .55s cubic-bezier(.2,.9,.25,1.2) both}
-@keyframes chromaSnap{
-  0%  {filter:drop-shadow(-14px 0 rgba(255,40,90,.85))
-              drop-shadow(14px 0 rgba(40,170,255,.85));
-       transform:scale(1.16)}
-  55% {filter:drop-shadow(-3px 0 rgba(255,40,90,.5))
-              drop-shadow(3px 0 rgba(40,170,255,.5));
-       transform:scale(.985)}
-  100%{filter:none;transform:scale(1)}
-}
-/* the room shakes — decaying jitter on the whole main panel */
-#main.quake{animation:quakeHit .46s linear both}
-@keyframes quakeHit{
-  0%{transform:translate(0,0)}12%{transform:translate(-7px,5px)}
-  24%{transform:translate(6px,-4px)}38%{transform:translate(-5px,-3px)}
-  52%{transform:translate(4px,3px)}68%{transform:translate(-2px,2px)}
-  84%{transform:translate(1px,-1px)}100%{transform:translate(0,0)}
-}
-body.perf #main.quake,body.perf #hero h1.slam{animation:none}
 
 /* ------------------------------------------------------- first-run setup */
 #setup-veil{
@@ -5822,43 +5803,6 @@ function rainbowWipe(){
   // the element is scaled and the rect no longer describes its resting place.
   const hero1=$("#hero h1");
   if(hero1){
-    const r0=hero1.getBoundingClientRect();
-    const cxp=r0.left+r0.width/2, cyp=r0.top+r0.height/2;
-    // THE SLAM: two rainbow shockwave rings + a flash centred on the
-    // wordmark + an 18-spark burst, all detonating as the wash arrives;
-    // the h1 chroma-snaps and the room quakes at the same instant
-    const D=Math.max(r0.width*1.6,460);
-    ["s1","s2"].forEach(k=>{
-      const s=document.createElement("div");
-      s.className="shock "+k;
-      s.style.width=D+"px";s.style.height=D+"px";
-      s.style.left=cxp+"px";s.style.top=cyp+"px";
-      cel.appendChild(s);
-    });
-    const fl=document.createElement("div");
-    fl.className="flashx";
-    fl.style.setProperty("--fx",Math.round(cxp)+"px");
-    fl.style.setProperty("--fy",Math.round(cyp)+"px");
-    cel.appendChild(fl);
-    for(let i=0;i<18;i++){
-      const p=document.createElement("div");
-      p.className="spark";
-      const a=Math.random()*Math.PI*2,d=90+Math.random()*240;
-      p.style.setProperty("--sx",Math.round(cxp)+"px");
-      p.style.setProperty("--sy",Math.round(cyp)+"px");
-      p.style.setProperty("--dx",Math.round(Math.cos(a)*d)+"px");
-      p.style.setProperty("--dy",Math.round(Math.sin(a)*d)+"px");
-      p.style.setProperty("--hue",Math.round(Math.random()*360));
-      cel.appendChild(p);
-    }
-    setTimeout(()=>{
-      hero1.classList.add("slam");
-      const mn=$("#main");if(mn)mn.classList.add("quake");
-      setTimeout(()=>{
-        hero1.classList.remove("slam");
-        if(mn)mn.classList.remove("quake");
-      },700);
-    },2300);
     hero1.classList.add("flyin");
     [$("#hero .beta-tag"),$("#hero .greet")].forEach(e=>{
       if(e)e.classList.add("flyin");
@@ -5874,7 +5818,7 @@ function rainbowWipe(){
     [$("#hero .beta-tag"),$("#hero .greet")].forEach(e=>{
       if(e)e.classList.remove("flyin");
     });
-  },1240);
+  },2700);
   setTimeout(()=>{
     cel.hidden=true;cel.innerHTML="";
     // leave `painted` on — the colour stays where the band left it. Set it
@@ -6192,6 +6136,26 @@ input.focus();
 """
 
 
+_mlx_last_use = 0.0
+
+
+def _mlx_janitor():
+    """An MLX engine held its full model in RAM FOREVER after last use —
+    the always-on instance pinned 17 GB around the clock and the music
+    skipped. Five idle minutes and the engine is released; the next
+    question just pays the reload."""
+    while True:
+        time.sleep(60)
+        try:
+            if _mlx_procs and _mlx_last_use and \
+                    time.time() - _mlx_last_use > 300:
+                with _engine_lock:
+                    if time.time() - _mlx_last_use > 300:
+                        _stop_other_mlx("")   # no keeper: stop them all
+        except Exception:
+            pass
+
+
 def reap_orphan_engines():
     """MLX engines whose parent died keep multi-GB of WIRED Metal memory
     pinned forever (their RSS reads ~0, which is how it hid). Seen live:
@@ -6227,6 +6191,7 @@ if __name__ == "__main__":
     print(f"\n  MillenAI {APP_VERSION}")
     print(f"  running on http://127.0.0.1:{PORT}")
     reap_orphan_engines()
+    threading.Thread(target=_mlx_janitor, daemon=True).start()
     start_managed_engines()
     if not HAS_SEARCH:
         print("  (web search disabled — pip install ddgs to enable)")
