@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.7.2"   # bump here — UI, window, DMG all follow
-APP_BUILD = 42               # integer compared against the GitHub release tag
+APP_VERSION = "1.7.3"   # bump here — UI, window, DMG all follow
+APP_BUILD = 43               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -3902,81 +3902,90 @@ function bootSkyline(){
 }
 bootSkyline();
 
-/* ------------------------------------------------------- warp starfield */
-// Idle: colored stars drift gently toward the viewer.
-// While a query streams, speed ramps up and stars stretch into light
-// streaks — Tesla-launch-control style. Perf mode disables it entirely.
+/* --------------------------------------------- shard-warp (the only warp) */
+// The classic starfield is gone on Patrick's call — no white dots, ever.
+// Instead the CITY becomes the stars: while a query runs, the backdrop
+// video fades out as ~380 shards — each one a small textured drawImage of
+// the still-playing footage — tear off their own screen positions and
+// streak radially toward the viewer, exponential-outward like a warp field.
+// When the answer lands they decelerate, alpha out, and the intact video
+// fades back in at scale 1. Offline there is no backdrop and therefore no
+// warp: nothing animates, by design.
+// NB: drawImage(video) taints this canvas (CORS-less Apple stream) — that
+// is fine for DRAWING, but no code may ever getImageData from it.
 const starCv=$("#stars"),sctx=starCv.getContext("2d");
-const STAR_COLORS=["#ececec","#ececec","#d4d4d4","#b4b4b4",
-                   "#8e8e8e","#f5f5f5","#c8c8c8","#a0a0a0"];
-let starList=[],sw=0,sh=0,warpSpeed=0.5;
-// The ramp is a 0..1 progress driven by real elapsed time, then eased —
-// not an exponential approach on the speed itself. Approaching the target
-// by a fixed fraction each frame spends most of its travel in the first
-// moments, which lands as a jump rather than a launch, and it also runs at
-// whatever rate the display happens to refresh at.
-const WARP_UP=3.0, WARP_DOWN=1.8;      // seconds to full speed / back to idle
-const WARP_IDLE=0.5, WARP_FULL=22;
-let warpT=0, warpLast=0;
-function starSpawn(far){
-  return {x:(Math.random()-0.5)*sw*1.6, y:(Math.random()-0.5)*sh*1.6,
-          z:far?sw:1+Math.random()*sw,
-          c:STAR_COLORS[Math.random()*STAR_COLORS.length|0]};
-}
-function starReset(s){const n=starSpawn(true);s.x=n.x;s.y=n.y;s.z=n.z;s.c=n.c;}
+let sw=0,sh=0,shards=[];
 function starResize(){
   const dpr=Math.min(window.devicePixelRatio||1,2);
   sw=starCv.width=Math.max(1,starCv.offsetWidth*dpr);
   sh=starCv.height=Math.max(1,starCv.offsetHeight*dpr);
-  starList=[];
-  const n=Math.min(640,Math.round(sw*sh/6000));   // ~50% denser
-  for(let i=0;i<n;i++)starList.push(starSpawn(false));
+  shards=[];                        // anchors depend on the viewport
 }
 starResize();
 window.addEventListener("resize",starResize);
-let skyCreep=0;
+
+const WARP_UP=3.0, WARP_DOWN=1.8;   // seconds to full warp / back to calm
+const WARP_IDLE=0.5, WARP_FULL=22;
+const SHARD_N=380, SHARD_SRC=30;    // shard count / source patch (video px)
+let warpT=0,warpLast=0,warpSpeed=WARP_IDLE,skyCreep=0;
+
+function shardSpawn(vw,vh){
+  // each shard is anchored where its patch actually sits on screen under
+  // cover-fit, so the tear-off starts from the real image, not from noise
+  const u=Math.random(),v=Math.random();
+  const cover=Math.max(sw/vw,sh/vh);
+  const dw=vw*cover,dh=vh*cover,ox=(sw-dw)/2,oy=(sh-dh)/2;
+  const ax=ox+u*dw,ay=oy+v*dh;
+  let dx=ax-sw/2,dy=ay-sh/2,d=Math.hypot(dx,dy);
+  if(d<28){const t=Math.random()*6.283;dx=Math.cos(t)*28;dy=Math.sin(t)*28;d=28;}
+  return {sx:u*(vw-SHARD_SRC),sy:v*(vh-SHARD_SRC),
+          nx:dx/d,ny:dy/d,d0:d,d:d,p:3+Math.random()*5};
+}
+
 function starTick(ts){
   requestAnimationFrame(starTick);
   if(perf){warpLast=0;return;}
-  // clamp dt so a backgrounded tab doesn't resume at full speed
   const dt=Math.min(0.05,warpLast?(ts-warpLast)/1000:0.016);
   warpLast=ts||0;
   warpT=Math.max(0,Math.min(1,warpT+(generating?dt/WARP_UP:-dt/WARP_DOWN)));
-  const e=warpT*warpT*(3-2*warpT);      // smoothstep: eases in and settles
+  const e=warpT*warpT*(3-2*warpT);  // smoothstep: eases in and settles
   warpSpeed=WARP_IDLE+(WARP_FULL-WARP_IDLE)*e;
 
-  // when the skyline is up, the city IS the warp: a straight dive toward
-  // the viewer, space-flight style — 3s eased ramp, then a slow creep so a
-  // long generation keeps advancing instead of freezing, easing home after.
-  // (An earlier version tore the frame into slices here; it read as matrix
-  // scrambling rather than motion, and drawing the CORS-less video into the
-  // canvas permanently tainted it. Plain transform zoom does neither.)
-  if(skyline&&!skyline.hidden){
-    if(generating&&warpT>=1)skyCreep=Math.min(.6,skyCreep+dt*.028);
-    else skyCreep=Math.max(0,skyCreep-dt*.3);
-    const z=1+1.5*e+skyCreep*e;
-    skyline.style.transform=z>1.0005?"scale("+z.toFixed(4)+")":"";
-    sctx.clearRect(0,0,sw,sh);          // no stars over the city
+  const vid=(skyline&&!skyline.hidden)?$("#sky-color"):null;
+  const ready=vid&&vid.videoWidth>0;
+  if(!ready||e<=0.015){             // calm, or nothing to tear
+    sctx.clearRect(0,0,sw,sh);
+    if(skyline){skyline.style.opacity="";skyline.style.transform="";}
+    if(shards.length)shards=[];
     return;
   }
-  if(skyline)skyline.style.transform="";
+
+  // the dive: the intact video zooms and dissolves while its shards fly
+  if(generating&&warpT>=1)skyCreep=Math.min(.6,skyCreep+dt*.028);
+  else skyCreep=Math.max(0,skyCreep-dt*.3);
+  const z=1+1.5*e+skyCreep*e;
+  skyline.style.transform="scale("+z.toFixed(4)+")";
+  skyline.style.opacity=Math.max(0,1-e*1.7).toFixed(3);
+
+  if(!shards.length)
+    for(let i=0;i<SHARD_N;i++)shards.push(shardSpawn(vid.videoWidth,vid.videoHeight));
   sctx.clearRect(0,0,sw,sh);
-  const cx=sw/2,cy=sh/2,fov=sw*0.45,move=warpSpeed*(sw/1400);
-  sctx.lineCap="round";
-  for(const s of starList){
-    s.z-=move;
-    if(s.z<1){starReset(s);continue;}
-    const k=fov/s.z, x=cx+s.x*k, y=cy+s.y*k;
-    if(x<-60||x>sw+60||y<-60||y>sh+60){starReset(s);continue;}
-    // streak tail = where the star was a few frames back (deeper in z)
-    const pk=fov/(s.z+move*3.5+0.5), px=cx+s.x*pk, py=cy+s.y*pk;
-    const t=1-s.z/sw;
-    // dim with the ramp rather than switching on `generating` — a hard step
-    // here was visible as a flicker the instant a query started
-    sctx.globalAlpha=(0.30-0.18*e)+0.62*t*t;
-    sctx.strokeStyle=s.c;
-    sctx.lineWidth=Math.max(0.7,t*2.6);
-    sctx.beginPath();sctx.moveTo(px,py);sctx.lineTo(x,y);sctx.stroke();
+  const cx=sw/2,cy=sh/2,edge=Math.hypot(sw,sh)*.62;
+  sctx.globalAlpha=Math.min(1,e*1.6);
+  const sp=warpSpeed*dt;
+  for(const s of shards){
+    s.d=s.d*(1+sp*.09)+sp*6;        // exponential outward + linear floor
+    if(s.d>edge){                   // flew past — respawn at its home patch
+      Object.assign(s,shardSpawn(vid.videoWidth,vid.videoHeight));
+      continue;
+    }
+    const x=cx+s.nx*s.d, y=cy+s.ny*s.d;
+    const g=1+(s.d-s.d0)/240;       // grows as it nears the viewer
+    const len=s.p*g*(1+warpSpeed*.09), th=s.p*g*.7;
+    sctx.save();
+    sctx.translate(x,y);sctx.rotate(Math.atan2(s.ny,s.nx));
+    sctx.drawImage(vid,s.sx,s.sy,SHARD_SRC,SHARD_SRC,-len/2,-th/2,len,th);
+    sctx.restore();
   }
   sctx.globalAlpha=1;
 }

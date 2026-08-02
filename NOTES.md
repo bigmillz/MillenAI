@@ -274,13 +274,18 @@ be a greyscale copy underneath that the wash "colourised"; it was cut on
 Patrick's call — revealing beats colourising — which also deleted the
 dual-video sync machinery and half the decode cost.
 
-Sending a query dives INTO the city, space-flight style: `starTick` writes
-the transform every frame — 3s eased ramp to ~2.5×, then a slow creep keeps
-a long generation advancing (cap ~3.1×), easing home when the answer lands.
-An earlier version tore the frame into canvas slices here; it read as
-"matrix scrambling" rather than motion and permanently tainted the canvas
-(CORS-less video + drawImage), so it was removed — the stars canvas is
-readable again and no code draws video into it. Keep it that way.
+Sending a query TEARS THE CITY INTO ITS OWN STARS. The classic white-dot
+starfield is gone entirely (Patrick's call: "no more stars") — instead ~380
+shards, each a small textured `drawImage` of the still-playing video, tear
+off their real cover-fit screen positions and streak radially outward,
+exponential-outward warp style, while the intact video zooms (to ~2.5× +
+creep) and dissolves under them. Answer lands → shards decelerate and clear,
+video fades back at scale 1. Offline there is no backdrop and therefore no
+warp — nothing animates, by design. The CORS taint is back and permanent
+(drawImage of the Apple stream): drawing is fine, `getImageData` on the
+stars canvas will throw forever. Physics verified headlessly (0 respawns at
+0.5s = tear-off from home positions; ~470 respawns/s at full warp; zero
+numeric errors; clean teardown).
 
 **Failure is the old behaviour.** The div starts hidden and is shown only
 after BOTH videos fire `playing`; any error hides it again. Offline, blocked,
