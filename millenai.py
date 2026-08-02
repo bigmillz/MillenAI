@@ -4981,10 +4981,20 @@ function paintDrafts(div,drafts,live,statusText){
     const mm=/(\d+)\s*of\s*(\d+)/.exec(statusText||"");
     const total=mm?+mm[2]:Math.max(drafts.length+1,2);
     const done=Math.min(drafts.length,total);
+    // PREDICTIVE creep: time the finished steps, estimate the pace, and
+    // glide toward the next step instead of jumping once a model lands
+    const now=performance.now();
+    if(!p.dataset.start)p.dataset.start=now;
+    if(p.dataset.done!==String(done)){
+      if(done>0)p.dataset.per=(now-(+p.dataset.start))/done;
+      p.dataset.done=done;p.dataset.t0=now;
+    }
+    const per=+p.dataset.per||28000;      // first model: assume ~28s
+    const frac=Math.min(.93,(now-(+p.dataset.t0||now))/per);
     p.querySelector(".lbl").textContent=
       statusText||("asking "+total+" models\u2026");
     p.querySelector(".fill").style.width=
-      Math.min(96,Math.round(done/total*100))+"%";
+      Math.min(97,((done+frac)/total*100)).toFixed(1)+"%";
     return p;
   }
   if(p)p.remove();
