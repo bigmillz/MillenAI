@@ -766,3 +766,17 @@ solid red background". Guarded stream path applies to vision too.
 Also in 1.12.7: _looks_degenerate now judges the TAIL (last 120 words
 < 0.25 unique) — a collapse behind a healthy preamble amortized the
 whole-text ratio to 0.33 and "party" x600 reached a phone.
+
+## 1.15.0 — the pixel-aware VFX trio
+Same-origin video (since the sky cache) un-tainted the canvas, making
+getImageData LEGAL for the first time. Three effects ride it:
+* CITY LIGHTS ANSWER YOU: a 160x90 probe of the live frame harvests the
+  brightest real pixels (windows/headlights/stars) every ~420ms during
+  generation; up to ~140 motes drift viewer-ward in their TRUE colours,
+  drawn with a cheap two-circle glow (no shadowBlur) under 'screen'.
+* LONG-EXPOSURE TRAILS: the warp canvas fades via destination-out
+  (alpha .28) instead of clearRect while active — streaks leave phosphor.
+  Calm path still hard-clears; motes purge on settle.
+* HYPERLAPSE THINKING: vid.playbackRate = 1 + e*5 — the city races to ~6x
+  while a model works and eases home with the settle. The tiles sample
+  the live frame, so the streaks carry the accelerated footage.

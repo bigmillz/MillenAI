@@ -5452,6 +5452,61 @@ function starResize(){
 starResize();
 window.addEventListener("resize",starResize);
 
+// THE CITY'S OWN LIGHTS answer you: while a model thinks, the brightest
+// real pixels of the footage (windows, headlights, stars) are harvested
+// from a tiny probe of the frame and released as glowing motes that drift
+// toward the viewer. Only possible since the videos went same-origin —
+// reading a CORS-tainted canvas was illegal all night long.
+const probeCv=document.createElement("canvas");
+probeCv.width=160;probeCv.height=90;
+const probeCtx=probeCv.getContext("2d",{willReadFrequently:true});
+let lightMotes=[],lastHarvest=0;
+function harvestLights(ts){
+  if(!generating||ts-lastHarvest<420||lightMotes.length>140)return;
+  lastHarvest=ts;
+  try{
+    probeCtx.drawImage(snapCv,0,0,160,90);
+    const d=probeCtx.getImageData(0,0,160,90).data;
+    const found=[];
+    for(let i=0;i<d.length;i+=16){          // stride: every 4th pixel
+      if(d[i]+d[i+1]+d[i+2]>560){
+        found.push([(i/4)%160,Math.floor(i/4/160),d[i],d[i+1],d[i+2]]);
+      }
+    }
+    for(let k=0;k<12&&found.length;k++){
+      const p=found[Math.floor(Math.random()*found.length)];
+      lightMotes.push({
+        x:p[0]/160*sw, y:p[1]/90*sh,
+        vx:(Math.random()-.5)*sw*.05,
+        vy:-sh*(.05+Math.random()*.09),
+        r:p[2],g:p[3],b:p[4],
+        life:1.6, max:1.6, size:2+Math.random()*2.5});
+    }
+  }catch(err){}
+}
+function drawMotes(dt){
+  if(!lightMotes.length)return;
+  sctx.globalCompositeOperation="screen";
+  for(let k=lightMotes.length-1;k>=0;k--){
+    const p=lightMotes[k];
+    p.life-=dt;
+    if(p.life<=0){lightMotes.splice(k,1);continue;}
+    p.x+=p.vx*dt;p.y+=p.vy*dt;
+    const a=p.life/p.max;
+    sctx.globalAlpha=a*.9;
+    sctx.fillStyle="rgb("+p.r+","+p.g+","+p.b+")";
+    sctx.beginPath();
+    sctx.arc(p.x,p.y,p.size,0,6.2832);
+    sctx.fill();
+    sctx.globalAlpha=a*.28;                 // soft halo, no shadowBlur cost
+    sctx.beginPath();
+    sctx.arc(p.x,p.y,p.size*3,0,6.2832);
+    sctx.fill();
+  }
+  sctx.globalAlpha=1;
+  sctx.globalCompositeOperation="source-over";
+}
+
 const WARP_UP=1.1, WARP_DOWN=1.6;   // fast attack: a 3s query must SHOW it
 // Per-frame snapshot of the video at capped resolution: every slat then
 // blits canvas->canvas, which skips the per-drawImage video-frame
@@ -5504,10 +5559,14 @@ function starTick(ts){
 
   const vid=(skyline&&!skyline.hidden)?$("#sky-color"):null;
   const ready=vid&&vid.videoWidth>0;
+  // HYPERLAPSE THINKING: while a model works, the city itself races —
+  // playback ramps to ~6x with the warp and eases home with the settle
+  if(ready){try{vid.playbackRate=1+e*5;}catch(err){}}
   if(!ready||e<=0.015){             // calm, or nothing to tear
     sctx.clearRect(0,0,sw,sh);
     if(skyline){skyline.style.opacity="";skyline.style.transform="";}
     if(tiles.length){tiles=[];tileMeta=null;}
+    lightMotes.length=0;
     return;
   }
 
@@ -5532,7 +5591,12 @@ function starTick(ts){
   const scale=sw/Math.max(1,starCv.offsetWidth);
   const cx=mainEl?(mainEl.offsetLeft+mainEl.offsetWidth/2)*scale:sw/2;
   const m=tileMeta,cy=sh/2;
-  sctx.clearRect(0,0,sw,sh);
+  // LONG-EXPOSURE TRAILS: instead of wiping the frame, fade it — every
+  // streak leaves phosphor behind, night-photography style
+  sctx.globalCompositeOperation="destination-out";
+  sctx.fillStyle="rgba(0,0,0,.28)";
+  sctx.fillRect(0,0,sw,sh);
+  sctx.globalCompositeOperation="source-over";
   sctx.globalAlpha=Math.min(1,e*3);
   const rate=dt*(.45+2.8*e+skyCreep);
   for(const t of tiles){
@@ -5585,6 +5649,8 @@ function starTick(ts){
   }
   sctx.setTransform(1,0,0,1,0,0);
   sctx.globalAlpha=1;
+  harvestLights(ts);
+  drawMotes(dt);
 }
 starTick();
 
