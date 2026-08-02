@@ -196,17 +196,18 @@ crosses the middle, with a bloom flaring behind it. The version tag and
 greeting rise in on a 0.34s delay so the screen assembles rather than appears.
 Then the existing converge-and-absorb finish plays.
 
-**The wordmark is DRAWN, not typed** (stroke-wordmark redesign): three
-stacked SVG `<text>` copies, stroke-only, no fill. The grey base runs
-marching dashes cycling endlessly around the letter contours; the colour
-copy + a blurred glow twin stroke the same dashes with a travelling SVG
-rainbow gradient (`#wm-rain`, SMIL gradientTransform, 16s) and sit behind
-the same diagonal paint mask — the wash literally turns the lines rainbow
-where it crosses. The `<h1>` ships empty; `injectWordmark()` builds the
-cluster and `fitWordmark()` sizes viewBox/width from `getBBox()` (called
-again on `document.fonts.ready` — metrics move when the real font lands,
-and a stale box clips descenders). `resetHero()` must re-inject. The neon
-strike flicker still fires at 2.75s via `body.painting`.
+**The wordmark is the solid neon sign again.** The stroke-drawn "cycling
+lines" variant lived one release (1.7.7) and was reverted on Patrick's call
+— the marching dashes read as ants crawling. Solid fill + halo + paint mask
++ strike, exactly as documented above this entry.
+
+**The warp SHATTERS, then reassembles.** Coherent tile motion read as
+"just zooming in" — the explicit anti-goal — so tiles now carry wide speed
+desync (zj .82–1.32), lateral scatter proportional to 1−z, and individual
+spin. On completion they do not crossfade: z pulls home to 1, spin unwinds,
+scatter collapses, and the pieces visibly land back in the grid as the
+intact video fades up (sim: depth spread 1.32 → 0.055 within 0.6s of the
+answer landing).
 
 The skyline arrives on `loadeddata` (first decodable frame), not
 `playing` — a cold cache left ~10s of black — fades in over .8s, and a

@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.7.7"   # bump here — UI, window, DMG all follow
-APP_BUILD = 47               # integer compared against the GitHub release tag
+APP_VERSION = "1.7.8"   # bump here — UI, window, DMG all follow
+APP_BUILD = 48               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -2705,30 +2705,28 @@ body.perf #chat-scroll{scroll-behavior:auto}
 }
 /* one typeface across the whole landing screen */
 #hero,#hero h1,#hero p{font-family:var(--helv)}
-/* The wordmark is DRAWN, not typed: three stacked SVG copies of the same
-   text, stroke-only. The grey base has marching dashes endlessly cycling
-   around the letter contours — unpowered pen-plotter energy. The colour
-   copy (plus a blurred glow twin) strokes the SAME cycling dashes with a
-   travelling rainbow gradient, hidden behind the diagonal paint mask: when
-   the wash crosses, the grey lines it touches turn rainbow, and stay lit.
-   The strike flicker still fires as the paint completes. */
+/* The wordmark is a neon sign. Unpowered it is a grey glass tube; the launch
+   sweep is the power arriving — it paints the letters, the tube catches with
+   a strike flicker, then hums. Two pseudo-copies of the same text do all of
+   it: ::before is the glow (same travelling gradient, heavily blurred, behind
+   the glyphs), ::after is the lit tube (crisp). Both are revealed through the
+   same diagonal mask that rides with the band, so glow and colour arrive
+   together under it. */
 #hero h1{
   font-size:92px;font-weight:700;letter-spacing:-.015em;
-  position:relative;z-index:0;display:inline-block;line-height:1;
+  position:relative;z-index:0;color:#9a9a9a;-webkit-text-fill-color:#9a9a9a;
 }
-#hero h1 svg{display:block;overflow:visible;pointer-events:none}
-#hero h1 svg text{
-  font:700 92px var(--helv);letter-spacing:-.015em;
-  fill:none;stroke-width:1.6;
-  stroke-dasharray:16 12;
-  animation:dashcyc 1.15s linear infinite;
-}
-@keyframes dashcyc{to{stroke-dashoffset:-28}}
-.wm-grey text{stroke:#787c86}
-.wm-glow,.wm-color{position:absolute;left:0;top:0}
-.wm-glow text,.wm-color text{stroke:url(#wm-rain)}
-.wm-glow{filter:blur(9px) saturate(1.35);opacity:.9}
-.wm-glow,.wm-color{
+#hero h1::before,#hero h1::after{
+  content:attr(data-word);
+  position:absolute;left:0;top:0;white-space:nowrap;pointer-events:none;
+  /* tile starts and ends on the same color; sliding one full tile
+     (background-size 200% -> position 200%) loops seamlessly */
+  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff,#ff8fd8,#ff8f8f);
+  background-size:200% 100%;
+  -webkit-background-clip:text;background-clip:text;
+  color:transparent;-webkit-text-fill-color:transparent;
+  animation:rainbow 16s linear infinite;
   /* the mask is far wider than the text and slides across it: the opaque
      half trails the band, the transparent half runs ahead of it */
   -webkit-mask-image:linear-gradient(114deg,#000 0 42%,transparent 58% 100%);
@@ -2736,27 +2734,33 @@ body.perf #chat-scroll{scroll-behavior:auto}
   -webkit-mask-size:300% 100%;mask-size:300% 100%;
   -webkit-mask-position:100% 0;mask-position:100% 0;
 }
+/* the tube's halo: the same travelling colours, thrown 16px */
+#hero h1::before{
+  z-index:-1;opacity:.85;
+  filter:blur(16px) saturate(1.4);
+}
 /* once painted it stays painted */
-body.painted .wm-glow,body.painted .wm-color{
+body.painted #hero h1::before,body.painted #hero h1::after{
   -webkit-mask-position:0 0;mask-position:0 0;
 }
-body.painting .wm-glow,body.painting .wm-color{
+body.painting #hero h1::before,body.painting #hero h1::after{
   transition:-webkit-mask-position .55s linear,mask-position .55s linear;
   transition-delay:2.15s;
-  animation:neonCatch 1s 2.75s both;
+  animation:rainbow 16s linear infinite,neonCatch 1s 2.75s both;
 }
 @keyframes neonCatch{
   0%{opacity:1}8%{opacity:.15}16%{opacity:1}28%{opacity:.45}
   36%{opacity:1}46%{opacity:.82}56%,100%{opacity:1}
 }
-body.painting .wm-glow{animation:neonCatchGlow 1s 2.75s both}
+body.painting #hero h1::before{animation:rainbow 16s linear infinite,neonCatchGlow 1s 2.75s both}
 @keyframes neonCatchGlow{
-  0%{opacity:.9}8%{opacity:.1}16%{opacity:.9}28%{opacity:.35}
-  36%{opacity:.9}46%{opacity:.7}56%,100%{opacity:.9}
+  0%{opacity:.85}8%{opacity:.1}16%{opacity:.85}28%{opacity:.35}
+  36%{opacity:.85}46%{opacity:.68}56%,100%{opacity:.85}
 }
-/* performance mode: no dash motion, lit immediately */
-body.perf #hero h1 svg text{animation:none}
-body.perf .wm-glow,body.perf .wm-color{
+@keyframes rainbow{from{background-position:0% 50%}to{background-position:200% 50%}}
+body.perf #hero h1{animation:none}
+/* performance mode skips the theatre — show it lit immediately */
+body.perf #hero h1::before,body.perf #hero h1::after{
   animation:none;-webkit-mask-position:0 0;mask-position:0 0;
 }
 #hero p{color:var(--dim);font-size:15px}
@@ -3212,7 +3216,7 @@ __MODEL_ROWS__
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
-      <div class="h1row"><h1></h1><span class="live-big">LIVE</span></div>
+      <div class="h1row"><h1 data-word="MillenAI">MillenAI</h1><span class="live-big">LIVE</span></div>
       <div class="beta-tag">__APP_BETA__</div>
       <p class="greet">What's going on today?</p>
     </div>
@@ -3237,19 +3241,6 @@ __MODEL_ROWS__
 
 <div id="tierpop" hidden></div>
 <div id="celebrate" hidden></div>
-<svg width="0" height="0" style="position:absolute" aria-hidden="true">
-  <defs>
-    <linearGradient id="wm-rain" x1="0" y1="0" x2="1" y2="0"
-                    gradientUnits="objectBoundingBox">
-      <stop offset="0" stop-color="#ff8f8f"/><stop offset=".14" stop-color="#ffc46e"/>
-      <stop offset=".28" stop-color="#f5e663"/><stop offset=".42" stop-color="#7ef0a6"/>
-      <stop offset=".57" stop-color="#6ec7ff"/><stop offset=".71" stop-color="#8f9dff"/>
-      <stop offset=".85" stop-color="#c98fff"/><stop offset="1" stop-color="#ff8fd8"/>
-      <animateTransform attributeName="gradientTransform" type="translate"
-                        values="0 0;1 0;0 0" dur="16s" repeatCount="indefinite"/>
-    </linearGradient>
-  </defs>
-</svg>
 
 <div id="new-veil" hidden>
   <div id="about-card">
@@ -3694,35 +3685,8 @@ async function pushChatsToDisk(){
   }catch(e){}
 }
 
-const WM_TEXT="MillenAI";
-function wmSvg(cls){
-  return '<svg class="'+cls+'" aria-hidden="true"><text x="0" y="0">'
-        +WM_TEXT+'</text></svg>';
-}
-function fitWordmark(){
-  const t=document.querySelector('#hero h1 .wm-grey text');
-  if(!t)return;
-  try{
-    const bb=t.getBBox();
-    document.querySelectorAll('#hero h1 svg').forEach(sv=>{
-      sv.setAttribute("viewBox",
-        (bb.x-6)+" "+(bb.y-6)+" "+(bb.width+12)+" "+(bb.height+12));
-      sv.style.width=(bb.width+12)+"px";
-      sv.style.height=(bb.height+12)+"px";
-    });
-  }catch(e){}
-}
-function injectWordmark(){
-  const h=document.querySelector('#hero h1');
-  if(!h)return;
-  h.innerHTML=wmSvg("wm-grey")+wmSvg("wm-glow")+wmSvg("wm-color");
-  fitWordmark();
-}
-if(document.fonts&&document.fonts.ready)document.fonts.ready.then(fitWordmark);
-
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1></h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
-  injectWordmark();
+  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI</h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
   paintLive();
 }
 function saveChats(){
@@ -3985,7 +3949,11 @@ function buildTiles(vw,vh){
   for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
     tiles.push({ax:(c+.5)*tw,ay:(r+.5)*th,
                 sx:srcX+c*stw,sy:srcY+r*sth,
-                z:1,zj:.97+Math.random()*.06});
+                z:1,
+                zj:.82+Math.random()*.5,          // wide desync = fracture
+                jx:(Math.random()-.5)*2,          // lateral scatter dir
+                jy:(Math.random()-.5)*2,
+                rot:0,rv:(Math.random()-.5)*3.4});// individual spin
   }
   tileMeta={tw:tw,th:th,stw:stw,sth:sth};
 }
@@ -4022,23 +3990,36 @@ function starTick(ts){
   const rate=dt*(.35+2.1*e+skyCreep);
   for(const t of tiles){
     const zPrev=t.z;
-    t.z*=1-rate*t.zj;
-    if(t.z<.18){t.z=1+Math.random()*.5;continue;}
-    const inv=1/t.z;
-    const px=cx+(t.ax-cx)*inv, py=cy+(t.ay-cy)*inv;
-    const w=m.tw*inv, h=m.th*inv;
-    if(px<-w*2||px>sw+w*2||py<-h*2||py>sh+h*2){t.z=1+Math.random()*.5;continue;}
-    const dxv=px-cx,dyv=py-cy,dd=Math.hypot(dxv,dyv);
-    const stretch=1+((zPrev-t.z)/t.z)*9;
-    if(dd>1){
-      const co=dxv/dd,si=dyv/dd;
-      sctx.setTransform(co,si,-si,co,px,py);
-      sctx.drawImage(vid,t.sx,t.sy,m.stw,m.sth,
-                     -w*stretch/2,-h/2,w*stretch,h);
+    if(generating){
+      // SHATTER: every tile at its own speed, drifting sideways off the
+      // radial and spinning — the plane fractures instead of gliding
+      t.z*=1-rate*t.zj;
+      t.rot+=t.rv*rate*3;
+      if(t.z<.18){t.z=1+Math.random()*.5;t.rot=0;continue;}
     }else{
-      sctx.setTransform(1,0,0,1,px,py);
-      sctx.drawImage(vid,t.sx,t.sy,m.stw,m.sth,-w/2,-h/2,w,h);
+      // REASSEMBLE: fly home. z pulls to 1, spin unwinds, scatter (which is
+      // proportional to 1-z) collapses with it — pieces visibly land back
+      // in the grid as the intact video fades up beneath them
+      t.z+=(1-t.z)*Math.min(1,dt*5);
+      t.rot*=Math.max(0,1-dt*6);
     }
+    const inv=1/t.z;
+    const scat=(1-Math.min(t.z,1));       // 0 at rest, grows toward viewer
+    const px=cx+(t.ax-cx)*inv+t.jx*scat*sw*.10;
+    const py=cy+(t.ay-cy)*inv+t.jy*scat*sh*.10;
+    const w=m.tw*inv, h=m.th*inv;
+    if(px<-w*2||px>sw+w*2||py<-h*2||py>sh+h*2){
+      if(generating){t.z=1+Math.random()*.5;t.rot=0;}
+      continue;
+    }
+    const dxv=px-cx,dyv=py-cy,dd=Math.hypot(dxv,dyv);
+    const stretch=1+Math.max(0,(zPrev-t.z)/t.z)*9;
+    let co=1,si=0;
+    if(dd>1){co=dxv/dd;si=dyv/dd;}
+    // fold the tile's own spin into the radial alignment
+    const cr=Math.cos(t.rot),sr=Math.sin(t.rot);
+    sctx.setTransform(co*cr-si*sr,si*cr+co*sr,-(si*cr+co*sr),co*cr-si*sr,px,py);
+    sctx.drawImage(vid,t.sx,t.sy,m.stw,m.sth,-w*stretch/2,-h/2,w*stretch,h);
   }
   sctx.setTransform(1,0,0,1,0,0);
   sctx.globalAlpha=1;
@@ -4309,7 +4290,6 @@ $("#open-setup").addEventListener("click",openSetup);
 // rAF for the fast path, a timeout as the guarantee: an occluded window gets
 // NO animation frames, and a wipe that never runs would leave the wordmark
 // grey forever — `painted` is only ever set by the wipe.
-injectWordmark();
 let wipeKicked=false;
 function kickWipe(){if(wipeKicked)return;wipeKicked=true;rainbowWipe();}
 requestAnimationFrame(kickWipe);
