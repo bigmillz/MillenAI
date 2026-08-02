@@ -254,6 +254,18 @@ OLLAMA_TAGS = {l: i["ollama"] for l, i in MODEL_INFO.items() if i["ollama"]}
 # candidates strongest-first; whatever is downloaded and fits RAM is used,
 # and Gemma blends the answers when a tier has more than one.
 TIERS = {
+    # THE DEFAULT: one answer from the strongest brain this machine holds.
+    # "Fast" (a 3B) used to be the default, and casual queries read like a
+    # 3B wrote them \u2014 Smart is what makes the everyday feel top-tier.
+    "Smart": {
+        "icon": "\U0001f3af", "desc": "the strongest model that fits",
+        "picks": ["Qwen 3 235B MoE", "GPT-OSS 120B", "Llama 4 Scout",
+                  "Llama 3.3 70B", "Qwen 3.6 35B MoE", "Qwen 3.6 27B",
+                  "GPT-OSS 20B", "Gemma 4 26B", "Gemma 4 12B",
+                  "Phi-4 14B", "Mistral Nemo 12B", "Llama 3.1 8B",
+                  "Llama 3.2 3B"],
+        "count": 1,
+    },
     "Fast": {
         "icon": "\u26a1\ufe0f", "desc": "one quick model",
         "picks": ["Llama 3.2 3B", "Gemma 2 2B", "Llama 3.2 1B"],
@@ -466,7 +478,10 @@ def model_fits_memory(label: str) -> bool:
     total = psutil.virtual_memory().total if HAS_PSUTIL else 0
     if total and need > total * 0.8:
         return False
-    return need * 1.25 < avail
+    # 1.5x, not 1.25x: the KV cache and activations grow DURING generation,
+    # and a 26B admitted at 1.25x OOM'd 97s into its answer on a busy
+    # machine. Admission must survive the whole reply, not just the load.
+    return need * 1.5 < avail
 
 _search_cache = {"query": "", "data": "", "timestamp": 0.0}
 _search_lock = threading.Lock()
@@ -681,16 +696,24 @@ def _spawn_mlx_engine(label: str) -> bool:
 
 def _stop_other_mlx(keep_label: str):
     """Keep one MLX model resident — each holds its full weights in RAM."""
+    stopped = False
     for label, proc in list(_mlx_procs.items()):
         if label == keep_label or proc.poll() is not None:
             continue
         try:
             proc.terminate()
-            proc.wait(timeout=5)
+            proc.wait(timeout=8)
         except Exception:
             pass
         _mlx_procs.pop(label, None)
+        stopped = True
         print(f"  stopped idle MLX engine for {label}")
+    if stopped:
+        # Metal releases wired memory AFTER the process exits; spawning the
+        # next engine immediately raced that teardown and died on startup
+        # ("no MLX server answering" 6s after a swap, seen live). Give the
+        # GPU allocator a beat to actually hand the memory back.
+        time.sleep(2.5)
 
 
 def ensure_mlx_engine(label: str, timeout: float = 180.0) -> bool:
@@ -1909,7 +1932,8 @@ def _detruncate(text: str) -> str:
     return t.strip()
 
 
-def run_council(labels: list, messages: list, emit, status) -> None:
+def run_council(labels: list, messages: list, emit, status,
+                reflect: bool = False) -> None:
     """Ask each selected model in turn, then stream a merged answer.
 
     Sequential on purpose: only one MLX engine can be resident at a time
@@ -1997,10 +2021,38 @@ def run_council(labels: list, messages: list, emit, status) -> None:
     question = messages[-1]["content"] if messages else ""
     body = "\n\n".join(f"[answer {n}]\n{t[:1500]}"
                        for n, (_l, t) in enumerate(good, 1))
+
+    # REFLECTION (Thinking tier): before writing the final answer, the
+    # merger reads the drafts as a critic and lists concrete problems —
+    # wrong facts, gaps, waffle — and the synthesis prompt then carries
+    # those notes. Critique-then-revise reliably beats a straight merge;
+    # blending alone regresses toward the average draft. Best-effort:
+    # any failure just means merging without notes.
+    notes = ""
+    if reflect and len(good) > 1:
+        status(f"{merger} is double-checking the drafts")
+        try:
+            parts = []
+            run_model(merger, [
+                messages[0],
+                {"role": "user", "content":
+                 "You are reviewing draft answers before a final version "
+                 "is written. List, tersely, the concrete problems to fix: "
+                 "factual claims that look wrong or contradict each other, "
+                 "missing angles a good answer needs, and filler to drop. "
+                 "At most 6 bullet points, no praise, no rewrite.\n\n"
+                 f"QUESTION: {question}\n\n{body}"}], parts.append)
+            notes = strip_think("".join(parts)).strip()[:1200]
+        except Exception:
+            notes = ""
+
     synth = [
         messages[0],  # keep the dated system prompt
         {"role": "user",
-         "content": f"{SYNTH_INSTRUCTION}\n\nQUESTION: {question}\n\n{body}"},
+         "content": f"{SYNTH_INSTRUCTION}\n\nQUESTION: {question}\n\n{body}"
+                    + (f"\n\nA careful reviewer flagged these issues — "
+                       f"your final answer must fix them without "
+                       f"mentioning the review:\n{notes}" if notes else "")},
     ]
     # The drafts were each checked, but the merge never was — so a merger
     # that melted down streamed its collapse straight to the reader with
@@ -3212,7 +3264,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             if TIERS.get(tier, {}).get("research"):
                 run_research(council, full_messages, emit, status)
             elif len(council) > 1:
-                run_council(council, full_messages, emit, status)
+                run_council(council, full_messages, emit, status,
+                            reflect=(tier == "Thinking"))
             else:
                 # guarded like every other path now: a lone model that
                 # collapses into repetition gets cut back to its coherent
@@ -3421,6 +3474,19 @@ body.perf #brand .name{animation:none;filter:none}
   border:1px solid transparent;transition:all .13s;user-select:none;
 }
 .tier:hover{color:var(--text);background:var(--panel2)}
+/* model-group dropdowns: carets on the hardware-class headers */
+#adv-wrap .group-label{cursor:pointer;user-select:none}
+#adv-wrap .group-label::after{content:"▾";float:right;color:var(--faint);font-size:11px}
+#adv-wrap .group-label.folded::after{content:"▸"}
+
+/* dropdown behaviour: collapsed shows only the active tier + caret */
+#tier-rows.closed .tier:not(.active){display:none}
+#tier-rows.closed .tier.active::after{
+  content:"▾";margin-left:auto;color:var(--faint);font-size:12px;
+}
+#tier-rows:not(.closed) .tier{animation:tierDrop .16s ease both}
+@keyframes tierDrop{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
+
 .tier.active{
   color:var(--text);background:var(--accent-dim);
   border-color:rgba(255,255,255,.26);
@@ -3560,16 +3626,17 @@ body.painted #sky-color{-webkit-mask-position:0 0;mask-position:0 0}
 #skyline,#stars{transition:filter .6s ease}
 body.gen #skyline,body.gen #stars{filter:brightness(.7)}
 
-/* macOS-style loading bar while the server warms the skyline cache */
-#skyload{position:fixed;left:50%;bottom:92px;transform:translateX(-50%);
-  z-index:4;width:230px;text-align:center;pointer-events:none}
+/* macOS-style loading bar while the server warms the skyline cache —
+   big, high on the screen, and it just says Loading */
+#skyload{position:fixed;left:50%;top:44%;transform:translateX(-50%);
+  z-index:4;width:min(440px,70vw);text-align:center;pointer-events:none}
 #skyload[hidden]{display:none}
-#skyload .track{height:4px;border-radius:2px;overflow:hidden;
+#skyload .track{height:10px;border-radius:5px;overflow:hidden;
   background:rgba(255,255,255,.14)}
-#skyload .fill{height:100%;width:0;border-radius:2px;background:#d6d8de;
+#skyload .fill{height:100%;width:0;border-radius:5px;background:#d6d8de;
   transition:width .5s ease}
-#skyload .lbl{margin-top:7px;font-size:10.5px;letter-spacing:.14em;
-  text-transform:uppercase;color:#8e8e8e;font-family:var(--mono)}
+#skyload .lbl{margin-top:10px;font-size:14px;letter-spacing:.16em;
+  text-transform:uppercase;color:#a8a8a8;font-family:var(--mono)}
 /* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
    follows it edge-for-edge, unlike the wordmark's tighter window */
 body.painting #sky-color{
@@ -3600,8 +3667,12 @@ body.perf #chat-scroll{scroll-behavior:auto}
   font-size:92px;font-weight:700;letter-spacing:-.015em;
   position:relative;z-index:0;color:#9a9a9a;-webkit-text-fill-color:#9a9a9a;
 }
-#hero h1::before,#hero h1::after{
-  content:attr(data-word);
+/* The halo is a REAL child element (.halo > span), not ::before: Blink
+   drops background-clip:text when the SAME box also carries a filter, so
+   a blurred ::before rendered as a rectangular fog on the web. Splitting
+   them — blur on the wrapper, gradient-clip on the inner span — renders
+   a text-shaped glow in every engine. */
+#hero h1::after,#hero h1 .halo span{
   position:absolute;left:0;top:0;white-space:nowrap;pointer-events:none;
   /* tile starts and ends on the same color; sliding one full tile
      (background-size 200% -> position 200%) loops seamlessly */
@@ -3618,25 +3689,30 @@ body.perf #chat-scroll{scroll-behavior:auto}
   -webkit-mask-size:300% 100%;mask-size:300% 100%;
   -webkit-mask-position:100% 0;mask-position:100% 0;
 }
+#hero h1::after{content:attr(data-word)}
 /* the tube's halo: the same travelling colours, thrown 16px */
-#hero h1::before{
-  z-index:-1;opacity:.85;
+#hero h1 .halo{
+  position:absolute;left:0;top:0;z-index:-1;opacity:.85;
+  pointer-events:none;
   filter:blur(16px) saturate(1.4);
 }
+#hero h1 .halo span{position:static;display:block}
 /* once painted it stays painted */
-body.painted #hero h1::before,body.painted #hero h1::after{
+body.painted #hero h1 .halo span,body.painted #hero h1::after{
   -webkit-mask-position:0 0;mask-position:0 0;
 }
-body.painting #hero h1::before,body.painting #hero h1::after{
+body.painting #hero h1 .halo span,body.painting #hero h1::after{
   transition:-webkit-mask-position .55s linear,mask-position .55s linear;
   transition-delay:2.15s;
+}
+body.painting #hero h1::after{
   animation:rainbow 16s linear infinite,neonCatch 1s 2.75s both;
 }
 @keyframes neonCatch{
   0%{opacity:1}8%{opacity:.15}16%{opacity:1}28%{opacity:.45}
   36%{opacity:1}46%{opacity:.82}56%,100%{opacity:1}
 }
-body.painting #hero h1::before{animation:rainbow 16s linear infinite,neonCatchGlow 1s 2.75s both}
+body.painting #hero h1 .halo{animation:neonCatchGlow 1s 2.75s both}
 @keyframes neonCatchGlow{
   0%{opacity:.85}8%{opacity:.1}16%{opacity:.85}28%{opacity:.35}
   36%{opacity:.85}46%{opacity:.68}56%,100%{opacity:.85}
@@ -3644,7 +3720,7 @@ body.painting #hero h1::before{animation:rainbow 16s linear infinite,neonCatchGl
 @keyframes rainbow{from{background-position:0% 50%}to{background-position:200% 50%}}
 body.perf #hero h1{animation:none}
 /* performance mode skips the theatre — show it lit immediately */
-body.perf #hero h1::before,body.perf #hero h1::after{
+body.perf #hero h1 .halo span,body.perf #hero h1::after{
   animation:none;-webkit-mask-position:0 0;mask-position:0 0;
 }
 #hero p{color:var(--dim);font-size:15px}
@@ -4167,7 +4243,7 @@ __MODEL_ROWS__
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
-      <div class="h1row"><h1 data-word="MillenAI">MillenAI</h1><span class="live-big">LIVE</span></div>
+      <div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1><span class="live-big">LIVE</span></div>
       <div class="beta-tag">__APP_BETA__</div>
       <p class="greet">What's going on today?</p>
     </div>
@@ -4373,8 +4449,20 @@ async function showTierPop(el,name){
   tierPop.style.top=Math.round(r.top-4)+"px";
 }
 function hideTierPop(){tierPop.hidden=true;}
+// the tier list is a DROPDOWN: collapsed it shows only the active tier
+// with a caret; clicking it unfolds the rest, picking one folds it back
+const tierRows=$("#tier-rows");
+tierRows.classList.add("closed");
 $$(".tier").forEach(el=>{
-  el.addEventListener("click",()=>setTier(el.dataset.tier));
+  el.addEventListener("click",ev=>{
+    if(tierRows.classList.contains("closed")){
+      ev.stopPropagation();
+      tierRows.classList.remove("closed");
+      return;
+    }
+    setTier(el.dataset.tier);
+    tierRows.classList.add("closed");
+  });
   const ib=el.querySelector(".infobtn");
   if(ib)ib.addEventListener("click",ev=>{
     ev.stopPropagation();
@@ -4384,6 +4472,9 @@ $$(".tier").forEach(el=>{
 });
 document.addEventListener("click",e=>{
   if(!e.target.classList.contains("infobtn"))hideTierPop();
+  // clicking anywhere outside the tier list folds it
+  if(!e.target.closest||!e.target.closest("#tier-rows"))
+    tierRows.classList.add("closed");
 });
 setTier(tier);
 
@@ -4391,6 +4482,21 @@ setTier(tier);
 $("#adv-toggle").addEventListener("click",()=>{
   const w=$("#adv-wrap");w.hidden=!w.hidden;
   $("#adv-caret").textContent=w.hidden?"▸":"▾";
+});
+
+// each hardware-class group inside is its own dropdown, folded by default —
+// open one tier of the ladder at a time instead of a wall of models
+$$("#adv-wrap .group-label").forEach(gl=>{
+  const fold=on=>{
+    gl.classList.toggle("folded",on);
+    let n=gl.nextElementSibling;
+    while(n&&!n.classList.contains("group-label")){
+      n.style.display=on?"none":"";
+      n=n.nextElementSibling;
+    }
+  };
+  fold(true);
+  gl.addEventListener("click",()=>fold(!gl.classList.contains("folded")));
 });
 
 /* ------------------------------------------------------ markdown-lite */
@@ -4671,7 +4777,7 @@ async function pushChatsToDisk(){
 }
 
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI</h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
+  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
   paintLive();
 }
 function saveChats(){
@@ -4897,8 +5003,8 @@ function bootSkyline(){
       if(bar){
         bar.hidden=false;
         fill.style.width=(st.pct||0)+"%";
-        lbl.textContent=(st.status==="remuxing"?"preparing the backdrop":
-          "loading the backdrop · "+(st.pct||0)+"%");
+        lbl.textContent=(st.status==="remuxing"?"Loading":
+          "Loading · "+(st.pct||0)+"%");
       }
       setTimeout(poll,900);
     }).catch(hideBar);
@@ -5635,10 +5741,41 @@ input.focus();
 """
 
 
+def reap_orphan_engines():
+    """MLX engines whose parent died keep multi-GB of WIRED Metal memory
+    pinned forever (their RSS reads ~0, which is how it hid). Seen live:
+    NINE orphans (ppid 1) starved two 12B models into OOM mid-answer.
+    At boot, any listener on our engine ports whose parent is init and
+    whose command looks like a python server is a corpse — reap it.
+    Engines owned by a living instance (desktop AND the go-live service
+    coexist) have that instance as their parent and are left alone."""
+    if IS_WIN:
+        return
+    ports = sorted({i["port"] for i in MODEL_INFO.values() if i["port"]})
+    for port in ports:
+        try:
+            pids = subprocess.run(
+                ["lsof", "-ti", f"tcp:{port}", "-sTCP:LISTEN"],
+                capture_output=True, text=True, timeout=5).stdout.split()
+            for pid in pids:
+                ppid = subprocess.run(
+                    ["ps", "-o", "ppid=", "-p", pid],
+                    capture_output=True, text=True, timeout=5).stdout.strip()
+                cmd = subprocess.run(
+                    ["ps", "-o", "command=", "-p", pid],
+                    capture_output=True, text=True, timeout=5).stdout
+                if ppid == "1" and ("ython" in cmd or "mlx" in cmd):
+                    os.kill(int(pid), signal.SIGTERM)
+                    print(f"  reaped orphan engine on :{port} (pid {pid})")
+        except Exception:
+            pass
+
+
 if __name__ == "__main__":
     threading.Thread(target=start_backend, daemon=True).start()
     print(f"\n  MillenAI {APP_VERSION}")
     print(f"  running on http://127.0.0.1:{PORT}")
+    reap_orphan_engines()
     start_managed_engines()
     if not HAS_SEARCH:
         print("  (web search disabled — pip install ddgs to enable)")
