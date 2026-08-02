@@ -725,3 +725,30 @@ active — idle cost is zero. Tiles rebuild if the snapshot dims change.
 * SYNTH_INSTRUCTION carries the voice spec (lead with the answer, prose
   over bullets, no filler, length matched to the question) — the merge is
   where the final answer's personality is written; SYSTEM_PROMPT aligned.
+
+## 1.13.0 — the masterpiece pass
+* THE SLAM replaces the bloom at wash-impact (2.3s): two conic-rainbow
+  shockwave rings (ring shape cut by a radial mask), a screen flash
+  centred on the wordmark (--fx/--fy custom props), an 18-spark burst
+  (per-spark --dx/--dy/--hue), chromaSnap on the h1 (red/cyan ghosts at
+  ±14px snapping together with overshoot), and a decaying quake on #main.
+  All CSS-driven; perf mode kills the lot. Verified by frozen-frame
+  (paused animations at negative delays).
+* Google SSO is LIVE end-to-end: project "millenai" under the
+  millertechnology.net org, client "MillenAI Web", redirect
+  https://ai.millertechnology.net/auth/google/callback, audience External
+  + In production (no verification needed for openid/email). Secret went
+  clipboard->google_oauth.json (0600), clipboard cleared, never displayed.
+  GOTCHA: curl with a spoofed Cf-Connecting-Ip header gets Cloudflare
+  error 1000 — CF rejects requests carrying its reserved headers; test
+  remote behaviour with plain requests through the tunnel instead.
+* Reliability run (live engines): Llama 3.2 3B passed the exact
+  central-park looper prompt post-guard (2995 chars, max 3-gram x5);
+  Hermes 3 8B clean. NB: offline single models hallucinate facts
+  confidently (Hermes invented a "Hot Dog Palace") — that is what Live
+  web search is for. Voice prompts now push generous, human answers.
+* First-run: "N models fit in your memory", button "Send it" -> "LFG".
+* Dock icon: the icns body is already 922px/90% (bigger than Apple's
+  824px standard) in BOTH repo and installed app — the "tiny icon" is
+  macOS icon-cache staleness. lsregister -f + Dock restart applied; the
+  system store (/Library/Caches/com.apple.iconservices.store) needs sudo.

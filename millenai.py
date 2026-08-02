@@ -108,12 +108,15 @@ SYSTEM_PROMPT = {
     "content": (
         "You are a warm, authentic, adaptive, and insightful AI collaborator. "
         "Avoid sounding like a rigid textbook, robot, or bullet-point generator. "
-        "Speak naturally in clear, engaging prose as if talking to a smart peer. "
-        "Be direct, concise, and grounded—use brief analogies and natural human "
-        "warmth instead of formal fluff. Lead with the answer itself: never "
-        "open by restating the question or with filler like 'Great question'. "
-        "Use a list only for truly enumerable things, keep short questions to "
-        "short answers, and when you don't know something, say so plainly."
+        "Speak naturally in clear, engaging prose as if talking to a smart peer "
+        "— contractions, natural rhythm, a little dry humour when it fits. "
+        "Lead with the answer itself: never open by restating the question or "
+        "with filler like 'Great question'. Then give a GENEROUS, complete "
+        "answer — develop the interesting angles, add concrete texture and "
+        "lived-in detail, anticipate the obvious follow-up. A rich, satisfying "
+        "reply beats a terse one; only truly trivial questions get one-liners. "
+        "Use a list only for truly enumerable things, and when you don't know "
+        "something, say so plainly."
     ),
 }
 
@@ -1803,9 +1806,12 @@ SYNTH_INSTRUCTION = (
     "- Write in confident, flowing prose, as one smart person talking to "
     "another. Use a list ONLY when the content is truly enumerable; never "
     "turn an explanation into bullet points.\n"
-    "- Match length to the question: simple question, short answer. No "
-    "headers on short answers. No summary paragraph that repeats what you "
-    "just said.\n"
+    "- Give the question a FULL answer: develop every useful angle from "
+    "the drafts with concrete detail — a rich, satisfying reply beats a "
+    "terse one. Only truly trivial questions get short answers. No summary "
+    "paragraph that repeats what you just said.\n"
+    "- Sound like a person: contractions, warmth, natural sentence rhythm "
+    "— never robotic list-speak.\n"
     "- Be concrete and specific; prefer an example over an abstraction.\n"
     "- If something is uncertain or the drafts leave a gap, say so "
     "plainly instead of papering over it.\n"
@@ -3954,19 +3960,70 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 
 
-/* the impact — a soft bloom centred on the wordmark as the band reaches it */
-#celebrate .bloom{
-  position:absolute;border-radius:50%;
-  background:radial-gradient(circle,rgba(255,255,255,.85),
-             rgba(255,255,255,.16) 45%,transparent 70%);
-  mix-blend-mode:screen;opacity:0;
-  animation:bloomPop 1.2s ease-out 2.3s forwards;
+/* THE SLAM — what happens when the wash reaches the wordmark. The old
+   soft white bloom is dead ("that little white bubble sucks"). Four
+   layers, all timed to detonate together at 2.3s:
+   shockwave rings + full-screen flash + spark burst + (on the h1 itself)
+   a chromatic-aberration snap and a screen quake, defined below. */
+#celebrate .shock{
+  position:absolute;border-radius:50%;pointer-events:none;
+  transform:translate(-50%,-50%) scale(.1);opacity:0;
+  border:3px solid transparent;
+  background:conic-gradient(from 0deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff,#ff8f8f) border-box;
+  -webkit-mask:radial-gradient(closest-side,transparent 92%,#000 93%);
+          mask:radial-gradient(closest-side,transparent 92%,#000 93%);
+  mix-blend-mode:screen;filter:blur(1.5px) saturate(1.6);
 }
-@keyframes bloomPop{
-  0%  {opacity:0;transform:translate(-50%,-50%) scale(.35)}
-  22% {opacity:.85}
-  100%{opacity:0;transform:translate(-50%,-50%) scale(1.9)}
+#celebrate .shock.s1{animation:shockOut .9s cubic-bezier(.1,.7,.2,1) 2.3s forwards}
+#celebrate .shock.s2{animation:shockOut 1.15s cubic-bezier(.1,.7,.2,1) 2.42s forwards}
+@keyframes shockOut{
+  0%  {opacity:0;transform:translate(-50%,-50%) scale(.12)}
+  8%  {opacity:1}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(3.6)}
 }
+#celebrate .flashx{
+  position:absolute;inset:0;pointer-events:none;opacity:0;
+  background:radial-gradient(circle at var(--fx) var(--fy),
+             rgba(255,255,255,.95),rgba(255,255,255,.25) 30%,transparent 62%);
+  mix-blend-mode:screen;
+  animation:flashPop .5s ease-out 2.3s forwards;
+}
+@keyframes flashPop{0%{opacity:0}14%{opacity:1}100%{opacity:0}}
+#celebrate .spark{
+  position:absolute;width:5px;height:5px;border-radius:50%;
+  left:var(--sx);top:var(--sy);opacity:0;pointer-events:none;
+  background:hsl(var(--hue) 100% 72%);
+  box-shadow:0 0 10px 2px hsl(var(--hue) 100% 62% / .9);
+  mix-blend-mode:screen;
+  animation:sparkFly .8s cubic-bezier(.08,.75,.2,1) 2.32s forwards;
+}
+@keyframes sparkFly{
+  0%  {opacity:0;transform:translate(0,0) scale(1)}
+  10% {opacity:1}
+  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.25)}
+}
+/* chromatic-aberration snap: the wordmark splits into red/cyan ghosts and
+   SNAPS back together with an overshoot as the wash detonates on it */
+#hero h1.slam{animation:chromaSnap .55s cubic-bezier(.2,.9,.25,1.2) both}
+@keyframes chromaSnap{
+  0%  {filter:drop-shadow(-14px 0 rgba(255,40,90,.85))
+              drop-shadow(14px 0 rgba(40,170,255,.85));
+       transform:scale(1.16)}
+  55% {filter:drop-shadow(-3px 0 rgba(255,40,90,.5))
+              drop-shadow(3px 0 rgba(40,170,255,.5));
+       transform:scale(.985)}
+  100%{filter:none;transform:scale(1)}
+}
+/* the room shakes — decaying jitter on the whole main panel */
+#main.quake{animation:quakeHit .46s linear both}
+@keyframes quakeHit{
+  0%{transform:translate(0,0)}12%{transform:translate(-7px,5px)}
+  24%{transform:translate(6px,-4px)}38%{transform:translate(-5px,-3px)}
+  52%{transform:translate(4px,3px)}68%{transform:translate(-2px,2px)}
+  84%{transform:translate(1px,-1px)}100%{transform:translate(0,0)}
+}
+body.perf #main.quake,body.perf #hero h1.slam{animation:none}
 
 /* ------------------------------------------------------- first-run setup */
 #setup-veil{
@@ -5121,7 +5178,9 @@ function renderSetup(st){
   // show what it chose and one number, never the catalog. The full list
   // only exists behind "Add models…" for people who go looking.
   if(!setupManual){
-    html+='<div class="setup-head">picked for this machine</div>'
+    html+='<div class="setup-head">'+st.models.length
+      +' models fit in your memory — starting with the best '
+      +stars.length+'</div>'
       +'<div class="sub" style="margin:4px 0 0">'
       +stars.map(m=>esc(m.label)).join(" · ")
       +'</div>';
@@ -5176,10 +5235,10 @@ function renderSetup(st){
   if(anyDl){
     setupGo.disabled=true;setupGo.textContent="Downloading\u2026";
   }else if(setupAllReady){
-    setupGo.disabled=false;setupGo.textContent="Let\u2019s go";
+    setupGo.disabled=false;setupGo.textContent="LFG";
   }else{
     setupGo.disabled=!st.mlx_ok;
-    setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Let\u2019s go")+
+    setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Send it")+
       " \u00b7 "+Math.max(0,Math.round(st.want_gb-st.have_gb))+" GB";
   }
 }
@@ -5196,10 +5255,10 @@ function finishSetupChrome(st,stars,anyDl){
   if(anyDl){
     setupGo.disabled=true;setupGo.textContent="Downloading\u2026";
   }else if(setupAllReady){
-    setupGo.disabled=false;setupGo.textContent="Let\u2019s go";
+    setupGo.disabled=false;setupGo.textContent="LFG";
   }else{
     setupGo.disabled=!st.mlx_ok;
-    setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Let\u2019s go")+
+    setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Send it")+
       " \u00b7 "+Math.max(0,Math.round(st.want_gb-st.have_gb))+" GB";
   }
 }
@@ -5219,13 +5278,42 @@ function rainbowWipe(){
   const hero1=$("#hero h1");
   if(hero1){
     const r0=hero1.getBoundingClientRect();
-    const bloom=document.createElement("div");
-    bloom.className="bloom";
-    const D=Math.max(r0.width*1.5,420);
-    bloom.style.width=D+"px";bloom.style.height=D+"px";
-    bloom.style.left=(r0.left+r0.width/2)+"px";
-    bloom.style.top=(r0.top+r0.height/2)+"px";
-    cel.appendChild(bloom);
+    const cxp=r0.left+r0.width/2, cyp=r0.top+r0.height/2;
+    // THE SLAM: two rainbow shockwave rings + a flash centred on the
+    // wordmark + an 18-spark burst, all detonating as the wash arrives;
+    // the h1 chroma-snaps and the room quakes at the same instant
+    const D=Math.max(r0.width*1.6,460);
+    ["s1","s2"].forEach(k=>{
+      const s=document.createElement("div");
+      s.className="shock "+k;
+      s.style.width=D+"px";s.style.height=D+"px";
+      s.style.left=cxp+"px";s.style.top=cyp+"px";
+      cel.appendChild(s);
+    });
+    const fl=document.createElement("div");
+    fl.className="flashx";
+    fl.style.setProperty("--fx",Math.round(cxp)+"px");
+    fl.style.setProperty("--fy",Math.round(cyp)+"px");
+    cel.appendChild(fl);
+    for(let i=0;i<18;i++){
+      const p=document.createElement("div");
+      p.className="spark";
+      const a=Math.random()*Math.PI*2,d=90+Math.random()*240;
+      p.style.setProperty("--sx",Math.round(cxp)+"px");
+      p.style.setProperty("--sy",Math.round(cyp)+"px");
+      p.style.setProperty("--dx",Math.round(Math.cos(a)*d)+"px");
+      p.style.setProperty("--dy",Math.round(Math.sin(a)*d)+"px");
+      p.style.setProperty("--hue",Math.round(Math.random()*360));
+      cel.appendChild(p);
+    }
+    setTimeout(()=>{
+      hero1.classList.add("slam");
+      const mn=$("#main");if(mn)mn.classList.add("quake");
+      setTimeout(()=>{
+        hero1.classList.remove("slam");
+        if(mn)mn.classList.remove("quake");
+      },700);
+    },2300);
     hero1.classList.add("flyin");
     [$("#hero .beta-tag"),$("#hero .greet")].forEach(e=>{
       if(e)e.classList.add("flyin");
