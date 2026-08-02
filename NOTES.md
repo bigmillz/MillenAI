@@ -283,9 +283,7 @@ creep) and dissolves under them. Answer lands → shards decelerate and clear,
 video fades back at scale 1. Offline there is no backdrop and therefore no
 warp — nothing animates, by design. The CORS taint is back and permanent
 (drawImage of the Apple stream): drawing is fine, `getImageData` on the
-stars canvas will throw forever. Physics verified headlessly (0 respawns at
-0.5s = tear-off from home positions; ~470 respawns/s at full warp; zero
-numeric errors; clean teardown).
+stars canvas will throw forever. Physics verified headlessly, then live (620 shards, video opacity 0, full warp at 1.6s). Two fixes the first ship needed: the canvas must sit ABOVE the skyline in the DOM (below it, the still-opaque video hid the whole tear-off), and the attack must be FAST (WARP_UP 1.4s — at the original 3s, a Fast query finished before the effect existed). Shards are pixel-grade: 620 fragments, 16px source patches.
 
 **Failure is the old behaviour.** The div starts hidden and is shown only
 after BOTH videos fire `playing`; any error hides it again. Offline, blocked,

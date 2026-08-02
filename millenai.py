@@ -74,8 +74,8 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "1.7.4"   # bump here — UI, window, DMG all follow
-APP_BUILD = 44               # integer compared against the GitHub release tag
+APP_VERSION = "1.7.5"   # bump here — UI, window, DMG all follow
+APP_BUILD = 45               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -3216,10 +3216,10 @@ __MODEL_ROWS__
 </aside>
 
 <main id="main">
-  <canvas id="stars"></canvas>
   <div id="skyline" hidden>
     <video id="sky-color" muted loop playsinline></video>
   </div>
+  <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
       <div class="h1row"><h1 data-word="MillenAI">MillenAI</h1><span class="live-big">LIVE</span></div>
@@ -3926,9 +3926,9 @@ function starResize(){
 starResize();
 window.addEventListener("resize",starResize);
 
-const WARP_UP=3.0, WARP_DOWN=1.8;   // seconds to full warp / back to calm
+const WARP_UP=1.4, WARP_DOWN=1.6;   // fast attack: a 3s query must SHOW it
 const WARP_IDLE=0.5, WARP_FULL=22;
-const SHARD_N=380, SHARD_SRC=30;    // shard count / source patch (video px)
+const SHARD_N=620, SHARD_SRC=16;    // dense, pixel-grade fragments
 let warpT=0,warpLast=0,warpSpeed=WARP_IDLE,skyCreep=0;
 
 function shardSpawn(vw,vh){
@@ -3941,7 +3941,7 @@ function shardSpawn(vw,vh){
   let dx=ax-sw/2,dy=ay-sh/2,d=Math.hypot(dx,dy);
   if(d<28){const t=Math.random()*6.283;dx=Math.cos(t)*28;dy=Math.sin(t)*28;d=28;}
   return {sx:u*(vw-SHARD_SRC),sy:v*(vh-SHARD_SRC),
-          nx:dx/d,ny:dy/d,d0:d,d:d,p:3+Math.random()*5};
+          nx:dx/d,ny:dy/d,d0:d,d:d,p:2+Math.random()*3.5};
 }
 
 function starTick(ts){
@@ -3967,16 +3967,16 @@ function starTick(ts){
   else skyCreep=Math.max(0,skyCreep-dt*.3);
   const z=1+1.5*e+skyCreep*e;
   skyline.style.transform="scale("+z.toFixed(4)+")";
-  skyline.style.opacity=Math.max(0,1-e*1.7).toFixed(3);
+  skyline.style.opacity=Math.max(0,1-e*2.2).toFixed(3);
 
   if(!shards.length)
     for(let i=0;i<SHARD_N;i++)shards.push(shardSpawn(vid.videoWidth,vid.videoHeight));
   sctx.clearRect(0,0,sw,sh);
   const cx=sw/2,cy=sh/2,edge=Math.hypot(sw,sh)*.62;
-  sctx.globalAlpha=Math.min(1,e*1.6);
+  sctx.globalAlpha=Math.min(1,e*2.5);
   const sp=warpSpeed*dt;
   for(const s of shards){
-    s.d=s.d*(1+sp*.09)+sp*6;        // exponential outward + linear floor
+    s.d=s.d*(1+sp*.09)+sp*8;        // exponential outward + linear floor
     if(s.d>edge){                   // flew past — respawn at its home patch
       Object.assign(s,shardSpawn(vid.videoWidth,vid.videoHeight));
       continue;
