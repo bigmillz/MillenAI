@@ -3723,8 +3723,13 @@ body.perf #sidebar{
 }
 #sb-resize:hover,body.resizing #sb-resize{background:rgba(255,255,255,.18)}
 body.resizing{cursor:col-resize;user-select:none}
+/* the 34px brand outgrew a single row (clipped to "lenAI" beside the
+   buttons): the name owns its line now, controls sit beneath it */
 #brand-wrap{padding:0 6px 12px}
-#brand-row{display:flex;align-items:center;gap:8px}
+#brand-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#brand-row #brand{flex:1 0 100%;min-width:0}
+#brand-row #brand .tag{margin-left:auto}
+#brand-row #settings-btn{margin-left:2px}
 #update-flag{
   font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
   color:#e26d5a;cursor:pointer;margin-top:1px;
@@ -4559,9 +4564,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div class="group-label chats">Chats</div>
   <div id="chat-list"></div>
 
-  <div class="model" id="open-setup" title="Download more models">
-    <span class="ico">⬇</span>Add models…</div>
-
   <div id="lib-tabs">
     <span class="ltab" data-t="models">Models</span>
     <span class="ltab" data-t="agents">Agents</span>
@@ -4588,6 +4590,9 @@ __AGENT_ROWS__
       <div class="switch"></div>
       Arena mode
     </div>
+    <div class="model" id="open-setup" title="Download more models"
+         style="margin-top:10px">
+      <span class="ico">⬇</span>Add models…</div>
   </div>
 
   <div id="telemetry">
