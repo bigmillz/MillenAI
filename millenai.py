@@ -2380,6 +2380,7 @@ SKY_DARK = [0, 3, 4, 6, 8, 11, 14, 16, 23, 25, 27, 31, 36, 42, 47, 52,
             56, 61, 65, 71, 75, 76, 83]
 
 _sky_lock = threading.Lock()
+_last_seen = {}          # identity -> last request ts, for the user count
 _sky_jobs = {}          # idx -> {"status": ..., "pct": int}
 
 
@@ -3123,6 +3124,17 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _send_stats(self):
+        # who's around: every profile ever created, and identities seen in
+        # the last 5 minutes (the owner's desktop counts via this very poll)
+        now = time.time()
+        uid = self._uid()
+        _last_seen[uid or "owner"] = now
+        try:
+            total = 1 + len([d for d in os.listdir(
+                os.path.join(app_dir(), "users")) if d != "_anon"])
+        except Exception:
+            total = 1
+        online = sum(1 for t in _last_seen.values() if now - t < 300)
         gpu = gpu_utilization()
         if HAS_PSUTIL:
             vm = psutil.virtual_memory()
@@ -3132,9 +3144,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "mem_total_gb": round(vm.total / 1e9, 1),
                 "mem_pct": vm.percent,
                 "gpu_pct": gpu,  # None when ioreg has no accelerator stats
+                "users_online": online, "users_total": total,
             }
         else:
-            stats = {"real": False, "gpu_pct": gpu}
+            stats = {"real": False, "gpu_pct": gpu,
+                     "users_online": online, "users_total": total}
         body = json.dumps(stats).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
@@ -4450,6 +4464,9 @@ __MODEL_ROWS__
       <div class="meter-label"><span>GPU COMPUTE</span><b id="gpu-label">—</b></div>
       <div class="meter" id="gpu-meter"></div>
     </div>
+    <div class="meter-row" id="user-row">
+      <div class="meter-label"><span>USERS</span><b id="user-label">—</b></div>
+    </div>
   </div>
 </aside>
 
@@ -5228,6 +5245,9 @@ async function pollStats(){
   try{
     const r=await fetch("/api/stats"),st=await r.json();
     gpu=st.gpu_pct;
+    if(st.users_total!=null)
+      $("#user-label").textContent=
+        st.users_online+" online · "+st.users_total+" total";
     if(st.real){
       $("#mem-label").textContent=st.mem_used_gb+" / "+st.mem_total_gb+" GB";
       paintMeter($("#mem-meter"),st.mem_pct);
