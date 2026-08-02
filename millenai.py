@@ -3746,7 +3746,7 @@ body.perf #skyline{display:none}
 #chat-scroll{flex:1;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth;position:relative;z-index:1}
 body.perf #chat-scroll{scroll-behavior:auto}
 #chat-inner{
-  max-width:780px;margin:0 auto;padding:36px 24px 150px;
+  max-width:90%;margin:0 auto;padding:36px 24px 150px;
   -webkit-user-select:text;user-select:text;   /* chat is copyable */
 }
 
@@ -4833,6 +4833,13 @@ input.addEventListener("paste",e=>{
   });
 });
 
+/* stick to the bottom only when the reader is already there — scrolling
+   up mid-answer used to be a losing fight against every chunk */
+function autoScroll(){
+  if(scroller.scrollHeight-scroller.scrollTop-scroller.clientHeight<140)
+    scroller.scrollTop=scroller.scrollHeight;
+}
+
 /* stream one model's answer into an arena column */
 async function streamArenaCol(colBody,payload,signal){
   const resp=await fetch("/api/chat",{
@@ -4851,7 +4858,7 @@ async function streamArenaCol(colBody,payload,signal){
     const cut=full.lastIndexOf("\u0000RESET\u0000");
     if(cut>=0)full=full.slice(cut+7);
     colBody.innerHTML=renderMD(full)+'<span class="caret"></span>';
-    scroller.scrollTop=scroller.scrollHeight;
+    autoScroll();
   }
   let full=raw.replace(/\u0000STATUS:(.*?)\u0000/g,"")
               .replace(/\u0000DRAFT:(.*?)\u0000/g,"");
@@ -4994,7 +5001,7 @@ async function send(){
           ?'<span class="statusline">◇ '+esc(status)+'…</span>':"")
         +(searched?'<span class="websrc">🌐 searched the web</span>':"")
         +renderMD(full)+'<span class="caret"></span>';
-      scroller.scrollTop=scroller.scrollHeight;
+      autoScroll();
     }
   }catch(err){
     if(err.name==="AbortError")wasAborted=true;
@@ -5033,7 +5040,7 @@ async function send(){
   setToks(0,"idle");
   generating=false;abortCtl=null;document.body.classList.remove("gen");
   sendBtn.textContent="↑";sendBtn.classList.remove("stop");sendBtn.title="Send";
-  scroller.scrollTop=scroller.scrollHeight;
+  autoScroll();
   input.focus();
 }
 
