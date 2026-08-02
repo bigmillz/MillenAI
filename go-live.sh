@@ -8,7 +8,7 @@
 #     newest RELEASE tag (not main — you only ever serve shipped builds)
 #   * a LaunchAgent that keeps a headless MillenAI server running on :9889
 #     (your desktop app keeps :8889, engines keep 88xx — they coexist)
-#   * a LaunchAgent that checks for a new release every 6 hours and
+#   * a LaunchAgent that checks for a new release every hour and
 #     restarts the server on the new build automatically
 #   * a Cloudflare named tunnel at https://ai.millertechnology.net
 #     (the ONE step that needs a human: if the tunnel was never authorized,
@@ -70,7 +70,7 @@ fi
 # ------------------------------------------------------------- updater
 cat > "$LIVE/update.sh" <<EOF
 #!/bin/bash
-# ran by launchd every 6h: move to the newest release tag and restart
+# ran by launchd hourly: move to the newest release tag and restart
 set -e
 cd "$LIVE/repo"
 git fetch --tags --force --quiet
@@ -116,7 +116,7 @@ cat > "$AGENTS/$LABEL-update.plist" <<EOF
   <key>Label</key><string>$LABEL-update</string>
   <key>ProgramArguments</key>
   <array><string>/bin/bash</string><string>$LIVE/update.sh</string></array>
-  <key>StartInterval</key><integer>21600</integer>
+  <key>StartInterval</key><integer>3600</integer>
   <key>RunAtLoad</key><true/>
   <key>StandardOutPath</key><string>$LIVE/update.log</string>
   <key>StandardErrorPath</key><string>$LIVE/update.log</string>
