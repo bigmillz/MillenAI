@@ -3973,7 +3973,9 @@ body.perf .msg{animation:none}
 .msg.ai .who{color:var(--accent)}
 .msg .body{line-height:1.65;font-size:15px}
 .msg.user .body{
-  background:var(--panel2);border:1px solid var(--line-soft);
+  background:rgba(12,13,17,.38);border:1px solid rgba(255,255,255,.10);
+  -webkit-backdrop-filter:blur(16px) saturate(1.2);
+          backdrop-filter:blur(16px) saturate(1.2);
   border-radius:var(--radius);padding:12px 16px;white-space:pre-wrap;
 }
 .msg.ai .body{padding:0 2px}
@@ -3992,15 +3994,21 @@ body.perf .msg{animation:none}
   border:1px solid var(--line-soft);padding:1.5px 5px;border-radius:4px;
   color:var(--accent-hot);
 }
+/* content panels are SMOKED GLASS, not drywall: barely-there black with
+   a heavy blur doing the readability, so the warp lives behind the text */
 .body pre{
-  background:var(--panel);border:1px solid var(--line-soft);
+  background:rgba(8,9,12,.32);border:1px solid rgba(255,255,255,.09);
+  -webkit-backdrop-filter:blur(16px) saturate(1.2);
+          backdrop-filter:blur(16px) saturate(1.2);
   border-radius:var(--radius);padding:13px 15px;overflow-x:auto;margin:0 0 10px;
 }
 .body pre code{background:none;border:none;padding:0;color:var(--text);font-size:12.5px}
 .body strong{color:#fff}
 .body details{
-  border:1px solid var(--line-soft);border-radius:8px;
-  margin:0 0 10px;background:var(--panel);
+  border:1px solid rgba(255,255,255,.09);border-radius:8px;
+  margin:0 0 10px;background:rgba(8,9,12,.32);
+  -webkit-backdrop-filter:blur(16px) saturate(1.2);
+          backdrop-filter:blur(16px) saturate(1.2);
 }
 .body details summary{
   cursor:pointer;padding:8px 12px;font-family:var(--mono);
@@ -4022,8 +4030,10 @@ body.perf .msg{animation:none}
 
 /* arena mode: two answers side by side */
 .arena-row{display:flex;gap:12px;align-items:stretch}
-.arena-col{flex:1;min-width:0;border:1px solid var(--line);
-  border-radius:12px;padding:10px 13px;background:rgba(255,255,255,.025)}
+.arena-col{flex:1;min-width:0;border:1px solid rgba(255,255,255,.09);
+  border-radius:12px;padding:10px 13px;background:rgba(8,9,12,.32);
+  -webkit-backdrop-filter:blur(16px) saturate(1.2);
+          backdrop-filter:blur(16px) saturate(1.2)}
 .ac-name{font-family:var(--mono);font-size:11px;letter-spacing:.1em;
   text-transform:uppercase;color:var(--dim);margin-bottom:8px;
   border-bottom:1px solid var(--line-soft);padding-bottom:6px}
