@@ -2373,6 +2373,12 @@ SKY_SOURCES = [
     "https://sylvan.apple.com/Videos/comp_C004_C003_PS_v01_SDR_PS_20180925_SDR_2K_AVC.mov",
 ]
 
+# Clips that read DARK (Apple's own labels: the Night city passes, the
+# aurora, and the deep-ocean dives). After 7pm local the backdrop picker
+# prefers these; in daylight it avoids them.
+SKY_DARK = [0, 3, 4, 6, 8, 11, 14, 16, 23, 25, 27, 31, 36, 42, 47, 52,
+            56, 61, 65, 71, 75, 76, 83]
+
 _sky_lock = threading.Lock()
 _sky_jobs = {}          # idx -> {"status": ..., "pct": int}
 
@@ -2850,6 +2856,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     .replace("__WIN_WIPE__",
                              "1" if (HAS_WEBVIEW and IS_MAC) else "0")
                     .replace("__SKY_N__", str(len(SKY_SOURCES)))
+                    .replace("__SKY_DARK__", json.dumps(SKY_DARK))
                     .replace("__APP_VER__", APP_VERSION))
             body = html.encode("utf-8")
             self.send_response(200)
@@ -5332,18 +5339,34 @@ async function bootSkyline(){
   let cached=[];
   try{cached=(await(await fetch("/api/sky/cached")).json()).cached||[];}
   catch(e){}
+  // TIME OF DAY drives the mood: after 7pm the picker prefers the dark
+  // clips (night city passes, aurora, deep ocean); in daylight it avoids
+  // them. Falls back to whatever exists rather than showing nothing.
+  const darkSet=new Set(JSON.parse('__SKY_DARK__'));
+  const h=new Date().getHours(), night=(h>=19||h<7);
+  const mood=x=>night===darkSet.has(x);
   let i;
   if(cached.length){
-    const pool=cached.filter(x=>x!==last);
+    let pool=cached.filter(x=>x!==last&&mood(x));
+    if(!pool.length)pool=cached.filter(x=>x!==last);
     const pick=pool.length?pool:cached;
     i=pick[Math.floor(Math.random()*pick.length)];
     if(cached.length<SKY_N){
-      let n=Math.floor(Math.random()*SKY_N);
-      while(cached.includes(n))n=(n+1)%SKY_N;
+      // warm a clip of the CURRENT mood first, so tonight's rotation
+      // grows tonight-appropriate variety
+      const want=[];
+      for(let n=0;n<SKY_N;n++)if(!cached.includes(n)&&mood(n))want.push(n);
+      const all=[];
+      for(let n=0;n<SKY_N;n++)if(!cached.includes(n))all.push(n);
+      const src=(want.length?want:all);
+      const n=src[Math.floor(Math.random()*src.length)];
       fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{}); // silent prewarm
     }
   }else{
-    i=Math.floor(Math.random()*SKY_N);
+    const moody=[];
+    for(let n=0;n<SKY_N;n++)if(mood(n))moody.push(n);
+    const src=moody.length?moody:[...Array(SKY_N).keys()];
+    i=src[Math.floor(Math.random()*src.length)];
     if(i===last)i=(i+1)%SKY_N;
   }
   localStorage.setItem("millen.sky",i);
