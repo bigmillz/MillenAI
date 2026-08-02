@@ -5295,11 +5295,36 @@ async function bootSkyline(){
   c.preload="auto";
   function hideBar(){if(bar)bar.hidden=true;}
   function attach(){
-    hideBar();
-    // first decodable frame, not full playback readiness — on a cold cache
-    // "playing" lagged ~10s of black; a briefly-still frame beats no city
-    c.addEventListener("loadeddata",()=>{skyline.hidden=false;},{once:true});
-    c.addEventListener("error",()=>{skyline.hidden=true;},{once:true});
+    // the bar rides the BUFFER now: unhiding on the first frame let
+    // playback race the network and stutter ("super jittery") — wait for
+    // canplaythrough, showing buffered % meanwhile. A 12s cap means a
+    // slow link still gets its city rather than an eternal bar.
+    let shown=false;
+    function reveal(){
+      if(shown)return;shown=true;
+      hideBar();skyline.hidden=false;
+    }
+    c.addEventListener("canplaythrough",reveal,{once:true});
+    c.addEventListener("error",()=>{hideBar();skyline.hidden=true;},{once:true});
+    function buf(){
+      if(shown)return;
+      try{
+        const d=c.duration,e=c.buffered.length?c.buffered.end(0):0;
+        // STREAM as it loads: ~6s of runway is enough cushion to play
+        // smoothly while the rest keeps downloading — on a decent
+        // connection the city is on screen in well under 10 seconds
+        if(d>0&&e>=Math.min(6,d*.25)){reveal();return;}
+        if(bar&&d>0){
+          bar.hidden=false;
+          const p=Math.min(99,Math.round(e/Math.min(d,6)*100));
+          fill.style.width=p+"%";
+          lbl.textContent="Loading · "+p+"%";
+        }
+      }catch(err){}
+      setTimeout(buf,400);
+    }
+    buf();
+    setTimeout(reveal,10000);   // 10 seconds, tops — then play with what we have
     c.src="/sky/"+i+".mov";
     const pr=c.play(); if(pr&&pr.catch)pr.catch(()=>{});
   }
