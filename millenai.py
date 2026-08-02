@@ -4595,7 +4595,9 @@ bootSkyline();
 const starCv=$("#stars"),sctx=starCv.getContext("2d");
 let sw=0,sh=0,tiles=[],tileMeta=null;
 function starResize(){
-  const dpr=Math.min(window.devicePixelRatio||1,2);
+  // 1.5 caps fill-rate cost: the warp is fast-moving slats, where the
+  // difference from 2x is invisible but the pixel count nearly halves
+  const dpr=Math.min(window.devicePixelRatio||1,1.5);
   sw=starCv.width=Math.max(1,starCv.offsetWidth*dpr);
   sh=starCv.height=Math.max(1,starCv.offsetHeight*dpr);
   tiles=[];tileMeta=null;           // anchors depend on the viewport
@@ -4603,7 +4605,13 @@ function starResize(){
 starResize();
 window.addEventListener("resize",starResize);
 
-const WARP_UP=1.4, WARP_DOWN=1.6;   // fast attack: a 3s query must SHOW it
+const WARP_UP=1.1, WARP_DOWN=1.6;   // fast attack: a 3s query must SHOW it
+// Per-frame snapshot of the video at capped resolution: every slat then
+// blits canvas->canvas, which skips the per-drawImage video-frame
+// conversion that made ~150 tiles x 60fps expensive while a model is
+// already eating the machine. The snapshot is the ONLY video read per
+// frame, and the warp looks identical.
+const snapCv=document.createElement("canvas"),snapCtx=snapCv.getContext("2d");
 const WARP_IDLE=0.5, WARP_FULL=22;
 let warpT=0,warpLast=0,warpSpeed=WARP_IDLE,skyCreep=0;
 
@@ -4617,7 +4625,8 @@ let warpT=0,warpLast=0,warpSpeed=WARP_IDLE,skyCreep=0;
 // collapses to zero, and the intact video fades up beneath the landing.
 // No spin, no radial rotation — slats stay upright and just zoom.
 function buildTiles(vw,vh){
-  const cols=Math.max(14,Math.round(sw/56)),rows=3;
+  // narrower slats, four rows, wider desync — "much more split up"
+  const cols=Math.max(16,Math.round(sw/44)),rows=4;
   const cover=Math.max(sw/vw,sh/vh);
   const srcW=sw/cover,srcH=sh/cover;
   const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
@@ -4627,7 +4636,7 @@ function buildTiles(vw,vh){
     tiles.push({ax:(c+.5)*tw,ay:(r+.5)*th,
                 sx:srcX+c*stw,sy:srcY+r*sth,
                 z:1,
-                zj:.82+Math.random()*.5,          // depth desync = the split
+                zj:.7+Math.random()*.9,           // depth desync = the split
                 jx:(Math.random()-.5)*2,          // slight lateral drift
                 jy:(Math.random()-.5)*2});
   }
@@ -4659,11 +4668,17 @@ function starTick(ts){
   skyline.style.transform="";
   skyline.style.opacity=Math.max(0,1-e*3).toFixed(3);
 
-  if(!tiles.length)buildTiles(vid.videoWidth,vid.videoHeight);
+  const sw2=Math.min(1280,vid.videoWidth);
+  const sh2=Math.round(vid.videoHeight*sw2/vid.videoWidth);
+  if(snapCv.width!==sw2||snapCv.height!==sh2){
+    snapCv.width=sw2;snapCv.height=sh2;tiles=[];tileMeta=null;
+  }
+  snapCtx.drawImage(vid,0,0,sw2,sh2);   // the one video read per frame
+  if(!tiles.length)buildTiles(sw2,sh2);
   const m=tileMeta,cx=sw/2,cy=sh/2;
   sctx.clearRect(0,0,sw,sh);
   sctx.globalAlpha=Math.min(1,e*3);
-  const rate=dt*(.35+2.1*e+skyCreep);
+  const rate=dt*(.45+2.8*e+skyCreep);
   for(const t of tiles){
     const zPrev=t.z;
     if(generating){
@@ -4679,8 +4694,8 @@ function starTick(ts){
     }
     const inv=1/t.z;
     const scat=(1-Math.min(t.z,1));       // 0 at rest, grows toward viewer
-    const px=cx+(t.ax-cx)*inv+t.jx*scat*sw*.035;
-    const py=cy+(t.ay-cy)*inv+t.jy*scat*sh*.035;
+    const px=cx+(t.ax-cx)*inv+t.jx*scat*sw*.05;
+    const py=cy+(t.ay-cy)*inv+t.jy*scat*sh*.05;
     const w=m.tw*inv, h=m.th*inv;
     if(px<-w*2||px>sw+w*2||py<-h*2||py>sh+h*2){
       if(generating)t.z=1+Math.random()*.5;
@@ -4696,7 +4711,7 @@ function starTick(ts){
     const dpx=px+.28*scat*sw*t.zj, dpy=py-.16*scat*sh*t.zj;
     const tl=-.12*scat, ct=Math.cos(tl), st=Math.sin(tl);
     sctx.setTransform(ct,st,-st,ct,dpx,dpy);
-    sctx.drawImage(vid,t.sx,t.sy,m.stw,m.sth,-w/2,-h*vstr/2,w,h*vstr);
+    sctx.drawImage(snapCv,t.sx,t.sy,m.stw,m.sth,-w/2,-h*vstr/2,w,h*vstr);
   }
   sctx.setTransform(1,0,0,1,0,0);
   sctx.globalAlpha=1;

@@ -701,3 +701,12 @@ Per Patrick ("more diagonal like stars shooting"): the slat field drifts
 up-right (.28/-.16, jittered by zj) and leans ~7° into the motion, both
 scaled by scat=(1-z) so the settle still lands pixel-exact. Vertical
 motion-stretch unchanged.
+
+### 1.10.2 — warp: more split, and optimized
+More fragments (44px slats, FOUR rows, zj .7+.9, scatter .05, rate
+.45+2.8e, WARP_UP 1.1) and two render optimizations that keep the look
+identical: the video is drawn ONCE per frame into a 1280-wide snapshot
+canvas and every slat blits canvas->canvas (the per-tile video reads were
+the cost), and the warp canvas caps at 1.5x DPR (invisible on fast-moving
+slats, nearly halves fill). Snapshot only happens while the warp is
+active — idle cost is zero. Tiles rebuild if the snapshot dims change.
