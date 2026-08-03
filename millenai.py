@@ -313,6 +313,10 @@ def cloud_stream(messages: list, emit) -> bool:
     req = urllib.request.Request(
         c["base"].rstrip("/") + "/chat/completions", data=payload,
         headers={"Content-Type": "application/json",
+                 "Accept": "text/event-stream",
+                 # a bare Python-urllib UA gets 403'd by provider edges
+                 # (Cloudflare "error code: 1010" from Groq — seen live)
+                 "User-Agent": "MillenAI/%s" % APP_VERSION,
                  "Authorization": "Bearer " + c["key"]})
     got = False
     try:
@@ -2578,7 +2582,9 @@ REVISE_INSTRUCTION = (
     "obvious follow-up\n"
     "- cut filler, repetition and any restating of the question\n"
     "- keep it flowing prose in a confident, natural voice\n"
-    "Output ONLY the improved answer, nothing about this process.\n\n")
+    "Output ONLY the improved answer itself. Never begin with a preamble "
+    "like 'Here is the improved answer' or 'Here's a rewritten version' — "
+    "start directly with the substance.\n\n")
 
 _GREETING_RE = re.compile(
     r"^(hi|hey|hello|yo|sup|thanks|thank you|ok|okay|cool|nice|lol|"

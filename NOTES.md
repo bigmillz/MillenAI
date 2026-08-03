@@ -930,3 +930,9 @@ that found all three: re-execute the page's own script text via
   to local silently. The key is never entered through the UI or chat.
   NOT usable: Colab/Kaggle notebooks — their terms forbid using them as
   a remote inference server.
+- 2.12.1 TURBO GOTCHA: provider edges (Groq behind Cloudflare) 403 a bare
+  `Python-urllib` UA with "error code: 1010" — cloud_stream now sends a
+  real User-Agent + Accept. curl works where urllib doesn't; if a
+  provider "tests fine in turbo.sh but says unavailable in-app", that is
+  the fingerprint. Also: the revise pass had to be told not to open with
+  "Here's a rewritten version".
