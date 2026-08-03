@@ -4969,11 +4969,45 @@ body.perf .msg{animation:none}
 }
 .msg .meta b{color:var(--accent);font-weight:500}
 
-.body p{margin:0 0 10px}
+.body p{margin:0 0 1.05em}
 .body p:last-child{margin-bottom:0}
-.body h1,.body h2,.body h3{margin:14px 0 8px;font-size:16.5px}
-.body ul,.body ol{margin:0 0 10px 22px}
-.body li{margin-bottom:3px}
+/* a real hierarchy instead of three identical sizes */
+.body h1,.body h2,.body h3{
+  font-family:var(--helv);font-weight:600;color:#fff;
+  line-height:1.3;letter-spacing:-.005em;
+  margin:1.8em 0 .6em;
+}
+.body h1{font-size:21px}
+.body h2{font-size:18px}
+.body h3{font-size:16px;color:var(--text)}
+.body>h1:first-child,.body>h2:first-child,.body>h3:first-child{margin-top:0}
+.body ul,.body ol{margin:0 0 1.05em;padding-left:1.35em}
+.body li{margin-bottom:.42em;padding-left:.15em}
+.body li:last-child{margin-bottom:0}
+.body li>ul,.body li>ol{margin:.42em 0 0}
+.body ul li::marker{color:var(--faint)}
+.body ol li::marker{color:var(--faint);font-variant-numeric:tabular-nums}
+.body blockquote{
+  margin:0 0 1.05em;padding:.15em 0 .15em 1.1em;color:var(--dim);
+  border-left:2px solid var(--line);font-style:normal;
+}
+.body hr{
+  border:0;border-top:1px solid var(--line-soft);margin:1.6em 0;
+}
+.body table{
+  border-collapse:collapse;width:100%;margin:0 0 1.05em;
+  font-size:14px;display:block;overflow-x:auto;
+}
+.body th,.body td{
+  text-align:left;padding:9px 12px;
+  border-bottom:1px solid var(--line-soft);vertical-align:top;
+}
+.body th{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--faint);font-weight:600;
+  border-bottom:1px solid var(--line);white-space:nowrap;
+}
+.body tbody tr:last-child td{border-bottom:none}
 .body code{
   font-family:var(--mono);font-size:12.5px;background:var(--panel2);
   border:1px solid var(--line-soft);padding:1.5px 5px;border-radius:4px;
@@ -4988,7 +5022,11 @@ body.perf .msg{animation:none}
   border-radius:var(--radius);padding:13px 15px;overflow-x:auto;margin:0 0 10px;
 }
 .body pre code{background:none;border:none;padding:0;color:var(--text);font-size:12.5px}
-.body strong{color:#fff}
+.body strong{color:#fff;font-weight:600}
+.body em{color:var(--text)}
+.body a{color:var(--accent-hot);text-decoration:none;
+  border-bottom:1px solid rgba(255,255,255,.22)}
+.body a:hover{border-bottom-color:currentColor}
 .body details{
   border:1px solid rgba(255,255,255,.09);border-radius:8px;
   margin:0 0 10px;background:rgba(8,9,12,.32);
@@ -5883,6 +5921,23 @@ function renderMD(raw){
   // http(s) is allowed through, so a model cannot emit javascript: or data:
   s=s.replace(/\[([^\]\n]+)\]\((https?:\/\/[^\s)]+)\)/g,
     (_,t,u)=>'<a href="'+u+'" target="_blank" rel="noopener noreferrer">'+t+"</a>");
+  // PIPE TABLES — models reach for them constantly and they used to
+  // render as raw pipes
+  s=s.replace(/(^|\n)((?:\|.*\|[ \t]*(?:\n|$)){2,})/g,(m,pre,block)=>{
+    const rows=block.trim().split(/\n/).map(r=>r.trim());
+    if(!/^\|[\s:|-]+\|$/.test(rows[1]||""))return m;   // needs a divider
+    const cells=r=>r.replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
+    const head=cells(rows[0]).map(c=>"<th>"+c+"</th>").join("");
+    const body=rows.slice(2).map(r=>
+      "<tr>"+cells(r).map(c=>"<td>"+c+"</td>").join("")+"</tr>").join("");
+    return pre+"<table><thead><tr>"+head+"</tr></thead><tbody>"
+           +body+"</tbody></table>";
+  });
+  // horizontal rules and block quotes
+  s=s.replace(/(^|\n)(?:---|\*\*\*|___)[ \t]*(?=\n|$)/g,"$1<hr>");
+  s=s.replace(/(^|\n)((?:&gt; ?.*(?:\n|$))+)/g,(m,pre,block)=>
+    pre+"<blockquote>"+block.trim().split(/\n/)
+      .map(l=>l.replace(/^&gt; ?/,"")).join("<br>")+"</blockquote>");
   // lists
   s=s.replace(/(^|\n)((?:[-*] .*(?:\n|$))+)/g,(m,pre,block)=>{
     const items=block.trim().split(/\n/).map(l=>"<li>"+l.replace(/^[-*] /,"")+"</li>").join("");
@@ -5894,7 +5949,7 @@ function renderMD(raw){
   });
   // paragraphs
   s=s.split(/\n{2,}/).map(p=>{
-    if(/^<(pre|ul|ol|h\d|details)/.test(p.trim()))return p;
+    if(/^<(pre|ul|ol|h\d|details|table|blockquote|hr)/.test(p.trim()))return p;
     return "<p>"+p.replace(/\n/g,"<br>")+"</p>";
   }).join("");
   // restore think blocks
