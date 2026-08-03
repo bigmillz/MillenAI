@@ -5345,11 +5345,28 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #turbo-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
   color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
   text-align:left}
-#turbo-row input{margin-top:2px;accent-color:var(--accent)}
+#turbo-row input,#polish-row input,#nolimits-row input{
+  appearance:none;-webkit-appearance:none;
+  width:17px;height:17px;flex:none;margin:0;border-radius:5px;
+  border:1.5px solid var(--faint);background:rgba(255,255,255,.04);
+  cursor:pointer;position:relative;transition:all .15s;
+}
+#turbo-row input:hover,#polish-row input:hover,#nolimits-row input:hover{
+  border-color:var(--accent-hot)}
+#turbo-row input:checked,#polish-row input:checked,
+#nolimits-row input:checked{
+  background:var(--accent);border-color:var(--accent)}
+#turbo-row input:checked::after,#polish-row input:checked::after,
+#nolimits-row input:checked::after{
+  content:"";position:absolute;left:5px;top:1.5px;
+  width:4px;height:9px;border:solid #14161c;
+  border-width:0 2.2px 2.2px 0;transform:rotate(45deg)}
+#turbo-row,#polish-row,#nolimits-row{
+  align-items:center;gap:10px;font-size:12.5px;color:var(--text);
+  padding:7px 2px}
 #polish-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
   color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
   text-align:left}
-#polish-row input{margin-top:2px;accent-color:var(--accent)}
 #fleet-box{margin:14px 0 4px;text-align:left}
 #fleet-own{font-family:var(--mono);font-size:10.5px;color:var(--dim);
   margin-bottom:8px;line-height:1.6}
@@ -5551,7 +5568,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #nolimits-row{display:flex;gap:8px;align-items:flex-start;
   font-size:11px;color:var(--faint);margin:10px 2px 0;cursor:pointer;
   line-height:1.5;text-align:left}
-#nolimits-row input{margin-top:2px;accent-color:var(--accent)}
 #setup-go{background:var(--accent);color:#1a1a1a;border:none}
 #setup-go:hover{background:var(--accent-hot);color:#000}
 #setup-go:disabled{opacity:.55;cursor:default}
@@ -5753,9 +5769,9 @@ __AGENT_ROWS__
         <input id="contrib-url" placeholder="Hub URL (blank = default)">
       </details>
     </div>
+    <button class="about-btn" id="about-sky">New backdrop</button>
     <button class="about-btn" id="open-setup">Download models&hellip;</button>
     <button class="about-btn" id="about-check">Check for updates</button>
-    <button class="about-btn" id="about-logs">Open logs folder</button>
     <button class="about-btn" id="about-forget">Forget what you know about me</button>
     <button class="about-btn primary" id="about-close">Close</button>
   </div>
@@ -6630,15 +6646,15 @@ async function bootSkyline(){
   // pick comes from what's already on disk (instant), and ONE new clip
   // warms silently in the background so variety keeps growing anyway.
   const last=parseInt(localStorage.getItem("millen.sky")||"-1",10);
+  const firstEver=last<0;
   let cached=[];
   try{cached=(await(await fetch("/api/sky/cached")).json()).cached||[];}
   catch(e){}
   const darkSet=new Set(JSON.parse('__SKY_DARK__'));
-  // CURATED, for now: only the light-field clips — night city passes,
-  // aurora, deep-ocean glow. Dense bright points on dark are what make
-  // the warp a surreal starfield; a daylight bridge makes mush. The
-  // time-of-day switch is parked until the pool reopens.
-  const mood=x=>darkSet.has(x);
+  // THE POOL IS OPEN: all 89 Apple clips are eligible ("getting kinda
+  // stale"). The dark set is only a first-run preference now — the warp
+  // reads best over them — and any clip is fair game after that.
+  const mood=x=>darkSet.has(x)||!firstEver;
   let i;
   if(last>=0&&last<SKY_N&&mood(last)){
     // THE HOUSE BACKDROP, per Patrick: the same clip every launch,
@@ -7725,7 +7741,19 @@ $("#contrib-toggle").addEventListener("click",async()=>{
 });
 $("#about-close").addEventListener("click",()=>{aboutVeil.hidden=true;});
 aboutVeil.addEventListener("click",e=>{if(e.target===aboutVeil)aboutVeil.hidden=true;});
-$("#about-logs").addEventListener("click",()=>fetch("/api/open-logs",{method:"POST"}));
+$("#about-sky").addEventListener("click",async()=>{
+  // pick a different clip, warm it, then swap it in — one deliberate
+  // change, and it becomes the new permanent backdrop
+  const btn=$("#about-sky");btn.textContent="Finding one\u2026";
+  try{
+    const cur=parseInt(localStorage.getItem("millen.sky")||"-1",10);
+    let n=cur;
+    for(let i=0;i<40&&n===cur;i++)n=Math.floor(Math.random()*SKY_N);
+    localStorage.setItem("millen.sky",n);
+    await fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{});
+    location.reload();
+  }catch(e){btn.textContent="New backdrop";}
+});
 $("#about-check").addEventListener("click",async ev=>{
   const b=ev.currentTarget,was=b.textContent;
   b.disabled=true;b.textContent="Checking\u2026";
