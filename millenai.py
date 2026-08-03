@@ -2474,6 +2474,30 @@ def _detruncate(text: str) -> str:
     return t.strip()
 
 
+REVISE_INSTRUCTION = (
+    "Below is your own first draft answer to a question. Rewrite it into "
+    "the best answer you are capable of:\n"
+    "- fix anything inaccurate or vague; add the concrete specifics, "
+    "names, numbers and examples the draft was missing\n"
+    "- develop the interesting angles further; anticipate and answer the "
+    "obvious follow-up\n"
+    "- cut filler, repetition and any restating of the question\n"
+    "- keep it flowing prose in a confident, natural voice\n"
+    "Output ONLY the improved answer, nothing about this process.\n\n")
+
+_GREETING_RE = re.compile(
+    r"^(hi|hey|hello|yo|sup|thanks|thank you|ok|okay|cool|nice|lol|"
+    r"good (morning|afternoon|evening|night))\b[\s!.?]*$", re.I)
+
+
+def _is_substantive(prompt: str) -> bool:
+    """Worth a second pass? Greetings and one-liners are not."""
+    p = (prompt or "").strip()
+    if len(p) < 12 or _GREETING_RE.match(p):
+        return False
+    return len(p.split()) >= 3
+
+
 PEER_INSTRUCTION = (
     "Below are several draft answers to the same question, plus the "
     "question itself. Write YOUR OWN single best answer: take the "
@@ -4298,8 +4322,38 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 lbl = route_label or model_name
                 ftext = fleet_run(lbl, full_messages, status) \
                     if not images else ""
+                polish = (load_prefs(None).get("polish", True)
+                          and not images and not query
+                          and _is_substantive(prompt))
                 if ftext:
                     emit(ftext)
+                elif polish:
+                    # TWO PASS: draft in silence, then stream the rewrite.
+                    # The reader waits a little longer and gets a visibly
+                    # better answer instead of a first-take one.
+                    status(f"{lbl} is thinking it through")
+                    parts = []
+                    draft = ""
+                    try:
+                        run_model(lbl, full_messages, parts.append)
+                        draft = strip_think("".join(parts))
+                    except Exception:
+                        draft = ""
+                    if draft and not _looks_degenerate(draft):
+                        status(f"{lbl} is sharpening the answer")
+                        _stream_guarded(
+                            lbl,
+                            [full_messages[0],
+                             {"role": "user",
+                              "content": REVISE_INSTRUCTION
+                              + "QUESTION: " + prompt
+                              + "\n\nFIRST DRAFT:\n" + draft[:6000]}],
+                            emit, status, draft,
+                            "showing the first draft")
+                    else:
+                        _stream_guarded(lbl, full_messages, emit, status,
+                                        None,
+                                        "kept the part before it wandered")
                 else:
                     # guarded like every other path: a lone model that
                     # collapses into repetition gets cut back to its
@@ -5057,6 +5111,26 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #model-chip b{color:var(--dim);font-weight:500}
 
 /* -------------------------------------------------------------- about */
+#share-veil{position:fixed;inset:0;z-index:60;display:flex;
+  align-items:center;justify-content:center;background:rgba(6,7,10,.72);
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+#share-veil[hidden]{display:none}
+#share-card{max-width:420px;margin:24px;padding:26px 26px 20px;
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius);text-align:center;
+  animation:doorPop .5s cubic-bezier(.16,1,.3,1) both}
+@keyframes doorPop{from{opacity:0;transform:translateY(18px) scale(.97)}
+                   to{opacity:1;transform:none}}
+#share-card .sh-icon{font-size:34px;margin-bottom:6px}
+#share-card h2{margin:0 0 8px;font-size:21px}
+#share-card p{color:var(--dim);font-size:13.5px;line-height:1.6;margin:0}
+#share-card .sh-foot{display:flex;gap:10px;margin-top:20px}
+#share-card button{flex:1;padding:11px 14px;border-radius:10px;
+  border:1px solid var(--line);background:none;color:var(--dim);
+  font-size:13.5px;cursor:pointer}
+#share-card button.primary{background:var(--accent);color:#1a1a1a;
+  border:none;font-weight:700}
+#share-card button:hover{color:var(--text)}
 #new-veil,#update-veil,#about-veil{
   position:fixed;inset:0;z-index:60;background:rgba(0,0,0,.66);
   backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);
@@ -5091,6 +5165,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   font-family:var(--mono);font-size:11.5px;color:var(--accent-hot);
   margin:12px 0 4px;line-height:1.7;text-align:left;
 }
+#polish-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
+  color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
+  text-align:left}
+#polish-row input{margin-top:2px;accent-color:var(--accent)}
 #fleet-box{margin:14px 0 4px;text-align:left}
 #fleet-own{font-family:var(--mono);font-size:10.5px;color:var(--dim);
   margin-bottom:8px;line-height:1.6}
@@ -5480,6 +5558,8 @@ __AGENT_ROWS__
     <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
       placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
     <button class="about-btn" id="persona-save">Save preferences</button>
+    <label id="polish-row"><input type="checkbox" id="polish" checked>
+      Best quality — answers are drafted, then rewritten (slower)</label>
     <div id="fleet-box">
       <div id="fleet-own" hidden><span id="fleet-n"></span></div>
       <div id="fleet-pending"></div>
@@ -5494,6 +5574,20 @@ __AGENT_ROWS__
     <button class="about-btn" id="about-logs">Open logs folder</button>
     <button class="about-btn" id="about-forget">Forget what you know about me</button>
     <button class="about-btn primary" id="about-close">Close</button>
+  </div>
+</div>
+
+<div id="share-veil" hidden>
+  <div id="share-card">
+    <div class="sh-icon">&#9889;</div>
+    <h2>Share your GPU?</h2>
+    <p>When your machine is idle, it can answer questions for friends on
+       MillenAI — and theirs can answer yours. Nothing leaves your computer
+       unless you turn this on, and you can stop any time in Settings.</p>
+    <div class="sh-foot">
+      <button id="share-no">Not now</button>
+      <button id="share-yes" class="primary">&#9889; Share GPU power</button>
+    </div>
   </div>
 </div>
 
@@ -7071,6 +7165,25 @@ setupGo.addEventListener("click",async()=>{
 });
 $("#open-setup").addEventListener("click",()=>{aboutVeil.hidden=true;openSetup();});
 $("#models-up").addEventListener("click",openSetup);
+// ONE-TIME invitation: after the app is actually usable, offer the fleet
+(async function shareInvite(){
+  try{
+    const pr=await(await fetch("/api/prefs")).json();
+    if(pr.seen_share||pr.contrib_on)return;
+    const st=await(await fetch("/api/setup")).json();
+    if(st.needs_setup||st.busy)return;      // let them finish setting up
+    setTimeout(()=>{$("#share-veil").hidden=false;},2500);
+  }catch(e){}
+})();
+function shareDone(on){
+  $("#share-veil").hidden=true;
+  fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(on?{seen_share:true,contrib_on:true}
+                          :{seen_share:true})});
+}
+$("#share-no").addEventListener("click",()=>shareDone(false));
+$("#share-yes").addEventListener("click",()=>shareDone(true));
 // WEB ONLY: a browser visitor is borrowing someone else's GPU — offer
 // them the real app for their own platform
 (async()=>{
@@ -7238,6 +7351,7 @@ async function openAbout(){
     try{
       const pr2=await(await fetch("/api/prefs")).json();
       const mine=await(await fetch("/api/fleet/mine")).json();
+      $("#polish").checked=pr2.polish!==false;
       $("#contrib-url").value=pr2.contrib_url||"";
       $("#contrib-toggle").classList.toggle("on",!!pr2.contrib_on);
       $("#contrib-toggle").innerHTML=pr2.contrib_on
@@ -7330,6 +7444,11 @@ $("#persona-save").addEventListener("click",async ev=>{
     b.textContent="Saved \u2713";
   }catch(e){b.textContent="Couldn\u2019t save";}
   setTimeout(()=>{b.textContent="Save preferences";},1800);
+});
+$("#polish").addEventListener("change",()=>{
+  fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({polish:$("#polish").checked})});
 });
 $("#contrib-toggle").addEventListener("click",async()=>{
   const on=!$("#contrib-toggle").classList.contains("on");

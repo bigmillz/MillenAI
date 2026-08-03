@@ -892,3 +892,16 @@ that found all three: re-execute the page's own script text via
   GOTCHA: docstring-anchored inserts — model_fits_memory has NO
   docstring; the gate landed in weather_snippets and would have returned
   True for every forecast. Anchor on the def line, always.
+
+## 2.10 — quality + fleet invite
+- TWO-PASS ANSWERS (biggest local quality lever): single-model tiers now
+  draft SILENTLY, then stream a self-revision (REVISE_INSTRUCTION). Same
+  weights, markedly better prose — councils already had a critic step,
+  single answers never did. Skipped for greetings/short prompts
+  (_is_substantive), images, and web-data answers. Pref `polish`
+  (default on) + Settings checkbox. Measured: 1583 -> 2664 chars.
+- One-time "Share your GPU?" invite after the app is usable (prefs
+  seen_share); Yes flips contrib_on straight to the fleet.
+- REMINDER (cost me a test cycle again): a stale server holding the port
+  means the new process silently fails to bind and you test OLD code.
+  Always `kill $(lsof -tnP -iTCP:<port> -sTCP:LISTEN)` first.
