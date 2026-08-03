@@ -3201,19 +3201,6 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                       % str(exc)[:80]))
                 return
             self._set_user_cookie(_user_id("google", email))
-        elif self.path == "/api/arena/pair":
-            # the two strongest DISTINCT models that are installed and fit
-            pulled = ollama_pulled_tags() or set()
-            pair = []
-            for l in TIERS["Fast"]["picks"] + MERGE_RANK:
-                if (l in MODEL_ROUTES and l not in pair
-                        and l not in BLEND_EXCLUDE
-                        and model_cached(l, pulled)
-                        and model_fits_memory(l)):
-                    pair.append(l)
-                if len(pair) == 3:
-                    break
-            self._send_json({"pair": pair})
         elif self.path == "/api/sky/cached":
             self._send_json({"cached": [
                 i for i in range(len(SKY_SOURCES))
@@ -3948,7 +3935,7 @@ html.winwipe.winwipe-run body{
   -webkit-backdrop-filter:blur(18px) saturate(1.4);
           backdrop-filter:blur(18px) saturate(1.4);
   border-right:1px solid var(--line-soft);
-  display:flex;flex-direction:column;padding:20px 16px 14px;gap:4px;
+  display:flex;flex-direction:column;padding:22px 18px 18px;gap:6px;
 }
 body.perf #sidebar{
   background:var(--panel);
@@ -4113,14 +4100,15 @@ body.perf #brand .name{animation:none;filter:none}
 }
 .tier .tname{font-weight:600}
 
-#chat-list{margin-bottom:2px;overflow-y:auto;max-height:34vh}
+#chat-list{margin-bottom:2px;overflow-y:auto}
 #chat-list:empty::after{
   content:"no chats yet";display:block;color:var(--faint);
   font-size:11px;padding:2px 10px 6px;
 }
 .chat-item{
-  display:flex;align-items:center;gap:6px;padding:6px 10px;
-  border-radius:8px;cursor:pointer;color:var(--dim);font-size:12.5px;
+  margin-bottom:3px;
+  display:flex;align-items:center;gap:6px;padding:10px 11px;
+  border-radius:8px;cursor:pointer;color:var(--dim);font-size:13.5px;
   border:1px solid transparent;user-select:none;
 }
 .chat-item:hover{color:var(--text);background:var(--panel2)}
@@ -4456,18 +4444,6 @@ body.perf .msg{animation:none}
 .contrib>summary .caretmark{transition:transform .16s}
 .contrib[open]>summary .caretmark{transform:rotate(90deg)}
 
-/* arena mode: two answers side by side */
-.arena-row{display:flex;gap:12px;align-items:stretch}
-/* arena needs the whole stage — the reading measure yields to the duel */
-#chat-inner:has(.arena-row){max-width:94%}
-.arena-col{flex:1;min-width:0;border:1px solid rgba(255,255,255,.09);
-  border-radius:12px;padding:10px 13px;background:rgba(8,9,12,.32);
-  -webkit-backdrop-filter:blur(16px) saturate(1.2);
-          backdrop-filter:blur(16px) saturate(1.2)}
-.ac-name{font-family:var(--mono);font-size:11px;letter-spacing:.1em;
-  text-transform:uppercase;color:var(--dim);margin-bottom:8px;
-  border-bottom:1px solid var(--line-soft);padding-bottom:6px}
-.ac-body{font-size:14.5px;line-height:1.6;overflow-wrap:break-word}
 
 /* pasted images: chips above the composer, thumbnails in the sent bubble */
 #imgchips{max-width:780px;margin:0 auto 8px;pointer-events:auto;
@@ -4853,7 +4829,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   #tierpop{left:12px!important;right:12px;max-width:none}
   #hero{padding:0 12px}
   #hero .greet{font-size:24px;margin-top:14px}
-  .arena-row{flex-direction:column}
 }
 
 </style>
@@ -4905,14 +4880,9 @@ __AGENT_ROWS__
       <div class="switch"></div>
       Live web search
     </div>
-    <div class="toggle-row" id="perf-toggle" style="margin-top:9px">
+    <div class="toggle-row" id="perf-toggle" style="margin-top:14px">
       <div class="switch"></div>
       Performance mode
-    </div>
-    <div class="toggle-row" id="arena-toggle" style="margin-top:9px"
-         title="Two models answer the same prompt side by side">
-      <div class="switch"></div>
-      Arena mode
     </div>
     <div class="model" id="open-setup" title="Download more models"
          style="margin-top:10px">
@@ -5100,15 +5070,6 @@ function setPerf(on){
 }
 $("#perf-toggle").addEventListener("click",()=>setPerf(!perf));
 setPerf(perf);
-
-/* ------------------------------------------------------- arena mode */
-let arenaMode=localStorage.getItem("millen.arena")==="1";
-function setArena(on){
-  arenaMode=on;$("#arena-toggle").classList.toggle("on",on);
-  localStorage.setItem("millen.arena",on?"1":"0");
-}
-$("#arena-toggle").addEventListener("click",()=>setArena(!arenaMode));
-setArena(arenaMode);
 
 /* --------------------------------------------------- live web search */
 function paintLive(){
@@ -5433,85 +5394,10 @@ function autoScroll(){
     scroller.scrollTop=scroller.scrollHeight;
 }
 
-/* stream one model's answer into an arena column */
-async function streamArenaCol(colBody,payload,signal){
-  const resp=await fetch("/api/chat",{
-    method:"POST",headers:{"Content-Type":"application/json"},
-    signal,body:JSON.stringify(payload)});
-  const reader=resp.body.getReader(),dec=new TextDecoder();
-  let raw="";
-  while(true){
-    const {done,value}=await reader.read();
-    if(done)break;
-    raw+=dec.decode(value,{stream:true});
-    let full=raw.replace(/\u0000STATUS:(.*?)\u0000/g,"")
-                .replace(/\u0000STATUS:[^\u0000]*$/,"")
-                .replace(/\u0000DRAFT:(.*?)\u0000/g,"")
-                .replace(/\u0000DRAFT:[^\u0000]*$/,"");
-    const cut=full.lastIndexOf("\u0000RESET\u0000");
-    if(cut>=0)full=full.slice(cut+7);
-    colBody.innerHTML=renderMD(full)+'<span class="caret"></span>';
-    autoScroll();
-  }
-  let full=raw.replace(/\u0000STATUS:(.*?)\u0000/g,"")
-              .replace(/\u0000DRAFT:(.*?)\u0000/g,"");
-  const cut=full.lastIndexOf("\u0000RESET\u0000");
-  if(cut>=0)full=full.slice(cut+7);
-  colBody.innerHTML=renderMD(full.trim()||"*(no answer)*");
-  return full.trim();
-}
-
-async function sendArena(text){
-  let pair=[];
-  try{pair=(await(await fetch("/api/arena/pair")).json()).pair||[];}catch(e){}
-  if(pair.length<2){
-    addMsg("assistant","Arena needs two installed models that fit in "
-      +"memory right now — grab another under **Add models…**");
-    return;
-  }
-  input.value="";input.style.height="auto";
-  messages.push({role:"user",content:text});
-  addMsg("user",text);
-  generating=true;document.body.classList.add("gen");
-  sendBtn.textContent="■";sendBtn.classList.add("stop");sendBtn.title="Stop";
-  const div=document.createElement("div");
-  div.className="msg ai";
-  div.innerHTML='<div class="who">arena · '+pair.map(esc).join(" vs ")
-    +'</div><div class="body"><div class="arena-row">'
-    +pair.map(p=>'<div class="arena-col"><div class="ac-name">'+esc(p)
-      +'</div><div class="ac-body"><span class="caret"></span></div></div>').join("")
-    +'</div></div>';
-  inner.appendChild(div);scroller.scrollTop=scroller.scrollHeight;
-  abortCtl=new AbortController();
-  const cols=div.querySelectorAll(".ac-body");
-  const outs=[];
-  try{
-    // sequential on purpose: one resident engine at a time on this machine
-    for(let k=0;k<pair.length;k++){
-      outs.push(await streamArenaCol(cols[k],
-        {model:pair[k],models:[pair[k]],tier:"",
-         messages,auto_web:autoWeb,images:[]},abortCtl.signal));
-    }
-  }catch(err){
-    if(err.name!=="AbortError")
-      cols[Math.min(outs.length,cols.length-1)]
-        .innerHTML=renderMD("⚠️ "+err.message);
-  }
-  generating=false;abortCtl=null;document.body.classList.remove("gen");
-  sendBtn.textContent="↑";sendBtn.classList.remove("stop");sendBtn.title="Send";
-  if(outs.some(o=>o)){
-    messages.push({role:"assistant",content:
-      pair.map((p,k)=>"**"+p+"**\n\n"+(outs[k]||"(no answer)"))
-          .join("\n\n---\n\n")});
-    persistCurrent();
-  }
-  input.focus();
-}
 
 async function send(){
   const text=input.value.trim();
   if((!text&&!pendingImages.length&&!pendingDocs.length)||generating)return;
-  if(arenaMode&&text&&!pendingImages.length&&!pendingDocs.length){sendArena(text);return;}
 
   // engine down? give launch instructions instead of a doomed request.
   // in combine mode, drop unavailable models rather than failing outright
