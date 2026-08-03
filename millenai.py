@@ -6619,6 +6619,107 @@ def _mlx_janitor():
             pass
 
 
+# ---------------------------------------------------- version splash
+# After an update installs, the FIRST launch of the new build throws a
+# frameless transparent always-on-top window over the whole screen:
+# WELCOME TO x.y.z zooms out of a blur, a light band sweeps it, and the
+# window destroys itself. Pure theatre, ~3 seconds, Mac only.
+SPLASH_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
+html,body{margin:0;height:100%;background:transparent;overflow:hidden}
+#w{position:fixed;inset:0;display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  animation:allout .5s ease 2.3s forwards}
+#hello{font-family:'Helvetica Neue',sans-serif;font-size:22px;
+  letter-spacing:.55em;color:#cfcfcf;text-transform:uppercase;
+  text-shadow:0 2px 18px rgba(0,0,0,.8);opacity:0;
+  animation:helloIn .5s ease .25s forwards}
+#v{font-family:'Helvetica Neue',sans-serif;font-weight:800;
+  font-size:150px;letter-spacing:.02em;margin-top:6px;
+  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 4px 30px rgba(120,140,255,.45));
+  animation:vIn 1.1s cubic-bezier(.16,.8,.24,1) both}
+#flash{position:fixed;inset:-20%;pointer-events:none;opacity:0;
+  background:linear-gradient(105deg,transparent 30%,
+             rgba(255,255,255,.9) 50%,transparent 70%);
+  background-size:300% 100%;background-position:120% 0;
+  mix-blend-mode:screen;
+  animation:sweep .7s ease-out 1.15s forwards}
+@keyframes vIn{
+  0%{opacity:0;transform:scale(3.2);filter:blur(40px)
+     drop-shadow(0 4px 30px rgba(120,140,255,0))}
+  55%{opacity:1;filter:blur(4px)
+     drop-shadow(-10px 0 rgba(255,60,90,.7))
+     drop-shadow(10px 0 rgba(60,170,255,.7))}
+  100%{opacity:1;transform:scale(1);filter:blur(0)
+     drop-shadow(0 4px 30px rgba(120,140,255,.45))}}
+@keyframes helloIn{to{opacity:1}}
+@keyframes sweep{0%{opacity:1;background-position:120% 0}
+  100%{opacity:0;background-position:-20% 0}}
+@keyframes allout{to{opacity:0;transform:scale(1.07)}}
+#aura{position:fixed;left:50%;top:50%;width:900px;height:900px;
+  transform:translate(-50%,-50%) scale(.3);border-radius:50%;opacity:0;
+  background:conic-gradient(from 0deg,rgba(255,143,143,.5),
+    rgba(255,196,110,.5),rgba(245,230,99,.5),rgba(126,240,166,.5),
+    rgba(110,199,255,.5),rgba(143,157,255,.5),rgba(201,143,255,.5),
+    rgba(255,143,143,.5));
+  filter:blur(70px);mix-blend-mode:screen;
+  animation:auraIn 1.4s cubic-bezier(.16,.8,.3,1) .15s both,
+            auraSpin 3s linear infinite,allout .5s ease 2.3s forwards}
+@keyframes auraIn{0%{opacity:0;transform:translate(-50%,-50%) scale(.25)}
+  100%{opacity:.9;transform:translate(-50%,-50%) scale(1.25)}}
+@keyframes auraSpin{to{filter:blur(70px) hue-rotate(360deg)}}
+.spk{position:fixed;left:50%;top:52%;width:6px;height:6px;
+  border-radius:50%;mix-blend-mode:screen;opacity:0;
+  animation:spkOut .9s cubic-bezier(.1,.75,.2,1) 1.15s forwards}
+@keyframes spkOut{0%{opacity:0;transform:translate(0,0) scale(1)}
+  10%{opacity:1}
+  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.3)}}
+</style></head><body>
+<div id="aura"></div>
+<div id="w"><div id="hello">Welcome to</div><div id="v">__V__</div></div>
+<div id="flash"></div>
+<script>
+for(let i=0;i<30;i++){
+  const s=document.createElement("div");s.className="spk";
+  const a=Math.random()*Math.PI*2,d=180+Math.random()*380;
+  s.style.setProperty("--dx",Math.round(Math.cos(a)*d)+"px");
+  s.style.setProperty("--dy",Math.round(Math.sin(a)*d*.6)+"px");
+  s.style.background="hsl("+Math.round(Math.random()*360)+" 100% 70%)";
+  s.style.boxShadow="0 0 12px 2px "+s.style.background;
+  document.body.appendChild(s);
+}
+</script>
+</body></html>"""
+
+
+def maybe_version_splash():
+    """Show the WELCOME splash on the first launch of a NEW version."""
+    try:
+        prefs = load_prefs()
+        last = prefs.get("last_version")
+        if last == APP_VERSION:
+            return
+        prefs["last_version"] = APP_VERSION
+        store_prefs(prefs)
+        if last is None or not (HAS_WEBVIEW and IS_MAC):
+            return          # fresh install gets the boot wipe, not this
+        w = webview.create_window(
+            "", html=SPLASH_HTML.replace("__V__", APP_VERSION),
+            frameless=True, transparent=True, on_top=True,
+            width=1100, height=420, focus=False)
+
+        def _bye():
+            try:
+                w.destroy()
+            except Exception:
+                pass
+        threading.Timer(3.1, _bye).start()
+    except Exception:
+        pass          # theatre must never block the app
+
+
 def reap_orphan_engines():
     """MLX engines whose parent died keep multi-GB of WIRED Metal memory
     pinned forever (their RSS reads ~0, which is how it hid). Seen live:
@@ -6654,6 +6755,7 @@ if __name__ == "__main__":
     print(f"\n  MillenAI {APP_VERSION}")
     print(f"  running on http://127.0.0.1:{PORT}")
     reap_orphan_engines()
+    maybe_version_splash()
     threading.Thread(target=_mlx_janitor, daemon=True).start()
     start_managed_engines()
     if not HAS_SEARCH:
