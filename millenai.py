@@ -2017,6 +2017,21 @@ def _looks_degenerate(text: str) -> bool:
     # runaway repetition: "to make up to make up to…"
     if len(words) >= 120 and len(set(words)) / len(words) < 0.15:
         return True
+    # a CONSECUTIVE run of one word can't be diluted by healthy prose
+    # around it — "hipster" x60 inside a 200-token answer slid under the
+    # tail-window ratio (seen live, on a phone). Twelve in a row is never
+    # language.
+    run = best = 1
+    for a, b in zip(words, words[1:]):
+        run = run + 1 if a == b else 1
+        best = max(best, run)
+    if best >= 12:
+        return True
+    # short-burst window: the last 60 words on their own
+    if len(words) >= 60:
+        t60 = words[-60:]
+        if len(set(t60)) / len(t60) < 0.30:
+            return True
     # a collapse AFTER a healthy start hides inside the whole-text
     # average: a real three-paragraph answer followed by "party" x600
     # still scored 0.33 and streamed to a phone (seen live). The TAIL
@@ -3738,9 +3753,12 @@ body.resizing{cursor:col-resize;user-select:none}
 #brand-row #brand .tag{margin-left:auto}
 #brand-row #settings-btn{margin-left:2px}
 #update-flag{
-  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
-  color:#e26d5a;cursor:pointer;margin-top:1px;
+  font-family:var(--mono);font-size:10px;letter-spacing:.12em;
+  color:#fff;background:#e26d5a;border-radius:8px;padding:5px 9px;
+  cursor:pointer;font-weight:700;align-self:center;
+  animation:updatePulse 2.2s ease-in-out infinite;
 }
+@keyframes updatePulse{0%,100%{opacity:1}50%{opacity:.65}}
 #update-flag:hover{text-decoration:underline}
 #update-flag[hidden]{display:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
@@ -4561,6 +4579,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
       <span class="name">MillenAI</span>
       <span class="tag">__APP_VER_TAG__</span>
     </div>
+    <div id="update-flag" hidden title="Install the update">UPDATE</div>
     <button id="settings-btn" title="Settings — preferences &amp; about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg></button>
     <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
@@ -4570,7 +4589,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
       </svg>
     </button>
     </div>
-    <div id="update-flag" hidden>UPDATE AVAILABLE</div>
   </div>
 
 
