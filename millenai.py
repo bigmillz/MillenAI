@@ -1945,11 +1945,28 @@ def setup_status() -> dict:
     }
 
 
+def _other_millenai_running() -> bool:
+    """Another MillenAI server on this machine (desktop + live service
+    coexist by design). If one exists, our shutdown must NOT terminate
+    the shared engines it may be using."""
+    for p in (8889, 9889):
+        if p != PORT and _port_in_use(p):
+            return True
+    return False
+
+
 def stop_managed_engines():
     # THE ORPHAN FACTORY, finally closed: this used to clear() _mlx_procs
     # without terminating them — every quit left engines pinning wired
     # Metal memory (nine were found feral at once). Kill everything we
     # spawned, MLX engines included.
+    # ...unless a SIBLING MillenAI is live on this machine: engines are
+    # shared by port, so killing ours would knife the app still using
+    # them (seen live: a live-service restart broke the desktop's next
+    # query). The boot reaper and idle janitor clean up either way.
+    if _other_millenai_running():
+        _mlx_procs.clear()
+        return
     for p in list(_managed_procs) + list(_mlx_procs.values()):
         try:
             p.terminate()
@@ -2287,10 +2304,24 @@ def run_model(label: str, messages: list, emit, thinking: bool = False) -> None:
     msgs, attempts, folded = messages, 0, False
     while True:
         try:
+            got = []
+
+            def _tap(chunk):
+                got.append(chunk)
+                emit(chunk)
+
             if kind == "ollama":
-                stream_ollama(target, msgs, emit)
+                stream_ollama(target, msgs, _tap)
             else:
-                stream_openai_compat(target, label, msgs, emit, thinking)
+                stream_openai_compat(target, label, msgs, _tap, thinking)
+            if not "".join(got).strip() and attempts < 1 and kind == "mlx":
+                # a silent engine is a dead engine — respawn once
+                attempts += 1
+                with _engine_lock:
+                    _mlx_procs.pop(label, None)
+                    ensure_mlx_engine(label)
+                time.sleep(1.5)
+                continue
             return
         except urllib.error.HTTPError as e:
             detail = ""
@@ -2306,11 +2337,18 @@ def run_model(label: str, messages: list, emit, thinking: bool = False) -> None:
             e.cached_body = detail  # for offline_hint (read-once)
             raise  # real answer from the engine — surface it
         except urllib.error.URLError:
-            # engine may be mid-startup — one short grace retry
+            # engine may be mid-startup, or another MillenAI instance on
+            # this machine terminated it on ITS exit (shared 88xx ports —
+            # seen live: a release restart killed the desktop's engine).
+            # Respawn it and try again before ever surfacing an error.
             attempts += 1
-            if attempts > 1:
+            if attempts > 2:
                 raise
-            time.sleep(1.2)
+            if kind == "mlx":
+                with _engine_lock:
+                    _mlx_procs.pop(label, None)
+                    ensure_mlx_engine(label)
+            time.sleep(1.5 * attempts)
 
 
 # The merge is where the final answer's VOICE gets written, so the style

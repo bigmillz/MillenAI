@@ -905,3 +905,12 @@ that found all three: re-execute the page's own script text via
 - REMINDER (cost me a test cycle again): a stale server holding the port
   means the new process silently fails to bind and you test OLD code.
   Always `kill $(lsof -tnP -iTCP:<port> -sTCP:LISTEN)` first.
+- 2.10.1 SELF-HEALING ENGINES (root cause of "The engine returned
+  nothing"): MillenAI instances SHARE engine ports 8884-8930, so the
+  live service restarting (every release kickstart!) or any second
+  instance exiting terminated engines the desktop was mid-use of.
+  Fixes: (a) run_model respawns the MLX engine and retries on URLError
+  AND on a silent/empty stream (once each); (b) stop_managed_engines
+  leaves engines alone when a sibling MillenAI is listening on 8889/9889.
+  Verified by killing the live engine pid mid-session: next query
+  recovered with no user-visible error.
