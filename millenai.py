@@ -3880,7 +3880,7 @@ body.resizing{cursor:col-resize;user-select:none}
 /* the 34px brand outgrew a single row (clipped to "lenAI" beside the
    buttons): the name owns its line now, controls sit beneath it */
 #brand-wrap{padding:0 6px 12px}
-#brand-row{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+#brand-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 #brand-row #brand{flex:0 1 auto;min-width:0}
 #update-flag{margin-left:auto}
 #brand-row #newchat{margin-left:2px}
@@ -3893,6 +3893,15 @@ body.resizing{cursor:col-resize;user-select:none}
   animation:updatePulse 2.2s ease-in-out infinite;
 }
 @keyframes updatePulse{0%,100%{opacity:1}50%{opacity:.65}}
+#models-flag{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+  color:#fff;background:#4a7fd4;border-radius:8px;padding:5px 9px;
+  cursor:pointer;font-weight:700;
+  flex:1 0 100%;align-self:flex-start;width:max-content;
+  animation:updatePulse 2.6s ease-in-out infinite;
+}
+#models-flag:hover{text-decoration:underline}
+#models-flag[hidden]{display:none}
 #update-flag:hover{text-decoration:underline}
 #update-flag[hidden]{display:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
@@ -4760,6 +4769,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
       <span class="name"><i class="nm1">Millen</i><i class="nm2">AI</i></span>
     </div>
     <div id="update-flag" hidden title="Install the update">UPDATE</div>
+    <div id="models-flag" hidden
+         title="More models fit this machine">MODELS AVAILABLE</div>
     <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
@@ -6380,33 +6391,18 @@ function renderSetup(st){
         +'<div class="bar"><i style="width:'+(m.pct||0)+'%"></i></div></div>';
   // CONSOLIDATED "Update Models" view: recommended picks up front,
   // everything else counted and folded — never a wall of every model
+  // SUPER simple, per Patrick: no memory talk, no catalog, no folds —
+  // one sentence, the bar above, one button below
   const missing=st.models.filter(m=>m.status!=="ready");
-  const have=st.models.filter(m=>m.status==="ready");
   const recs=missing.filter(m=>m.star);
-  const others=missing.filter(m=>!m.star);
   if(recs.length)
-    html+='<div class="setup-head">'+(st.mem_gb?st.mem_gb+" GB memory detected — ":"")
-         +'these models fit your machine</div>'
-         +recs.map(row).join("");
+    html+='<div class="setup-head">More brainpower is available for '
+         +'MillenAI \u2014 one tap downloads it in the background while '
+         +'you keep chatting.</div>';
   else
-    html+='<div class="setup-head">Everything recommended is installed'
-         +' \u2713</div>';
-  if(others.length)
-    html+='<details class="setup-fold"><summary>More models \u00b7 '
-         +others.length+'</summary>'
-         +others.map(row).join("")+'</details>';
-  if(have.length)
-    html+='<details class="setup-fold"><summary>Installed \u00b7 '
-         +have.length+'</summary>'+have.map(row).join("")+'</details>';
+    html+='<div class="setup-head">You\u2019re fully loaded \u2713 '
+         +'Nothing more to download.</div>';
   setupList.innerHTML=html;
-
-  setupList.querySelectorAll(".setup-row.clickable").forEach(el=>{
-    el.addEventListener("click",()=>{
-      fetch("/api/model/download",{method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({labels:[el.dataset.model]})}).then(setupTick);
-    });
-  });
 
   if(!st.mlx_ok){
     setupNote.textContent="engine not installed — reopen the app to finish setup";
@@ -6414,7 +6410,7 @@ function renderSetup(st){
   }else if(stars.some(m=>m.status==="error")){
     setupNote.textContent="a download failed — check your connection, then retry";
   }else{
-    setupNote.textContent="free disk: "+st.disk_free_gb+" GB";
+    setupNote.textContent="";
   }
 
   if(anyDl){
@@ -6435,7 +6431,7 @@ function finishSetupChrome(st,stars,anyDl){
   }else if(stars.some(m=>m.status==="error")){
     setupNote.textContent="a download failed \u2014 check your connection, then retry";
   }else{
-    setupNote.textContent="free disk: "+st.disk_free_gb+" GB";
+    setupNote.textContent="";
   }
   if(anyDl){
     setupGo.disabled=true;setupGo.textContent="Downloading\u2026";
@@ -6531,6 +6527,8 @@ setupGo.addEventListener("click",async()=>{
   setupTick();
 });
 $("#open-setup").addEventListener("click",openSetup);
+$("#models-flag").addEventListener("click",()=>{
+  $("#models-flag").hidden=true;openSetup();});
 // Every launch opens with the wipe. It deliberately does *not* wait on the
 // /api/setup round trip below — that call enumerates every model on disk and
 // can take seconds, which would leave the window sitting there looking frozen
@@ -6569,6 +6567,8 @@ setTimeout(kickWipe,450);
   try{
     const st=await(await fetch("/api/setup")).json();
     // auto-open only when the app can't hold a conversation yet
+    $("#models-flag").hidden=!(st.mlx_ok&&!st.needs_setup&&!st.busy&&
+      st.models.some(m=>m.star&&m.status!=="ready"));
     if(st.needs_setup){
       openSetup();setupManual=false;
       // zero-click, per Patrick: detect the memory, download the right
