@@ -7208,22 +7208,36 @@ setupGo.addEventListener("click",async()=>{
 });
 $("#open-setup").addEventListener("click",()=>{aboutVeil.hidden=true;openSetup();});
 $("#models-up").addEventListener("click",openSetup);
-// ONE-TIME invitation: after the app is actually usable, offer the fleet
+// ONE-TIME invitation, and never during the show: it waits for the
+// rainbow wipe to LAND (body.painted, wipeBusy clear) so the card never
+// crowds the boot flourish. Marked seen the moment it appears, so it is
+// genuinely once — answered or not.
 (async function shareInvite(){
   try{
     const pr=await(await fetch("/api/prefs")).json();
     if(pr.seen_share||pr.contrib_on)return;
     const st=await(await fetch("/api/setup")).json();
     if(st.needs_setup||st.busy)return;      // let them finish setting up
-    setTimeout(()=>{$("#share-veil").hidden=false;},2500);
+    const t0=Date.now();
+    const wait=setInterval(()=>{
+      const settled=document.body.classList.contains("painted")&&!wipeBusy;
+      if(!settled&&Date.now()-t0<20000)return;   // 20s failsafe
+      clearInterval(wait);
+      setTimeout(()=>{
+        if(!veil.hidden||!aboutVeil.hidden)return;   // never stack modals
+        $("#share-veil").hidden=false;
+        fetch("/api/prefs",{method:"POST",
+          headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({seen_share:true})});
+      },900);
+    },400);
   }catch(e){}
 })();
 function shareDone(on){
   $("#share-veil").hidden=true;
-  fetch("/api/prefs",{method:"POST",
+  if(on)fetch("/api/prefs",{method:"POST",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(on?{seen_share:true,contrib_on:true}
-                          :{seen_share:true})});
+    body:JSON.stringify({contrib_on:true})});
 }
 $("#share-no").addEventListener("click",()=>shareDone(false));
 $("#share-yes").addEventListener("click",()=>shareDone(true));
