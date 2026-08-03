@@ -2007,9 +2007,21 @@ def setup_status() -> dict:
 
 
 def _other_millenai_running() -> bool:
-    """Another MillenAI server on this machine (desktop + live service
-    coexist by design). If one exists, our shutdown must NOT terminate
-    the shared engines it may be using."""
+    """Another MillenAI process on this machine — desktop, live service,
+    or a dev instance on any port. Engines are shared by port, so our
+    shutdown must never terminate one a sibling is still using. (Checking
+    only 8889/9889 missed a :9899 instance and knifed the desktop's
+    engine — seen live, twice.)"""
+    try:
+        out = subprocess.run(["pgrep", "-f", "millenai.py"],
+                             capture_output=True, text=True, timeout=4).stdout
+        pids = {int(x) for x in out.split() if x.isdigit()}
+        pids.discard(os.getpid())
+        pids.discard(os.getppid())
+        if pids:
+            return True
+    except Exception:
+        pass
     for p in (8889, 9889):
         if p != PORT and _port_in_use(p):
             return True
@@ -4394,10 +4406,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         return
         threading.Thread(target=_heartbeat, daemon=True).start()
 
+        sent = [0]
+
         def emit(chunk: str):
             chunk = strip_special(chunk)
             if not chunk:
                 return
+            sent[0] += len(chunk)
             _write(chunk.encode("utf-8"))
 
         def status(text: str):
@@ -4486,6 +4501,24 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 emit("\n" + offline_hint(kind, exc))
             except (BrokenPipeError, ConnectionResetError):
                 pass
+            if not sent[0]:
+                # every path stayed silent (engine died mid-answer, a
+                # provider returned nothing). Try the smallest brain on
+                # disk before admitting defeat.
+                try:
+                    pulled = ollama_pulled_tags() or set()
+                    alt = next((l for l in reversed(MERGE_RANK)
+                                if model_cached(l, pulled)
+                                and l != (route_label or model_name)), None)
+                    if alt:
+                        status(f"retrying on {alt}")
+                        run_model(alt, full_messages, emit)
+                except Exception:
+                    pass
+            if not sent[0]:
+                emit("That engine stopped responding and the backup "
+                     "didn't answer either. Ask again — it usually "
+                     "comes straight back.")
         finally:
             hb_stop.set()
             plain = prompt[8:] if prompt.lower().startswith("/search") \
@@ -4772,8 +4805,8 @@ body.resizing{cursor:col-resize;user-select:none}
   font-size:11px;padding:2px 10px 6px;
 }
 .chat-item{
-  margin-bottom:3px;
-  display:flex;align-items:center;gap:6px;padding:10px 11px;
+  margin-bottom:1px;
+  display:flex;align-items:center;gap:6px;padding:5px 11px;
   border-radius:8px;cursor:pointer;color:var(--dim);font-size:13.5px;
   border:1px solid transparent;user-select:none;
 }

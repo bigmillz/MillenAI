@@ -954,3 +954,10 @@ that found all three: re-execute the page's own script text via
   launches (or always while the cache is thin), never repeat the last
   clip, LRU 6 -> 12 (~2.6 GB), and one background prewarm per launch.
   Modelled over 400 launches: 82 distinct clips.
+- 2.14.5 "engine returned nothing", ROOT CAUSE (2nd time): the sibling
+  check in stop_managed_engines listed only ports 8889/9889, so a dev
+  instance on ANY other port (mine on 9899) killed the desktop's shared
+  engines on exit. Now it pgrep's for millenai.py — any sibling process
+  spares the engines. Plus a last-resort guarantee: if the whole chat
+  pipeline emits ZERO bytes, retry on the smallest cached model and, if
+  that is silent too, say so in plain language. A reply is never blank.
