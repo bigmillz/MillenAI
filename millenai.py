@@ -1310,13 +1310,13 @@ def _voice_supported() -> bool:
 
 def _voice_ready() -> bool:
     d = _hf_model_dir(WHISPER_REPO)
-    if glob.glob(os.path.join(d, "blobs", "*.incomplete")):
-        return False
     snaps = glob.glob(os.path.join(d, "snapshots", "*", "config.json"))
     if not snaps:
         return False
     snap = os.path.dirname(snaps[0])
-    # MLX ships weights.*; CTranslate2 (faster-whisper) ships model.bin
+    # the weights symlink only appears once its blob COMPLETED — that is
+    # the real signal. (A stale *.incomplete carcass beside a finished
+    # blob bricked voice when this gated on carcasses. Seen live.)
     return bool(glob.glob(os.path.join(snap, "weights.*"))
                 or glob.glob(os.path.join(snap, "model.bin")))
 
@@ -1607,7 +1607,29 @@ def _dl_speed(have: int) -> float:
     return _dl_sample["bps"]
 
 
+_job_watch = {}   # label -> (pct, ts of last movement)
+
+
 def setup_status() -> dict:
+    # WATCHDOG: a download thread that dies mid-write leaves its job in
+    # "downloading" forever, and the whole setup panel reads busy for the
+    # rest of the process's life (seen live: Phi-4 wedged at 99%). Ten
+    # minutes without the pct moving flips the job to error.
+    now = time.time()
+    with _setup_lock:
+        for label, job in list(_setup_jobs.items()):
+            if job.get("status") != "downloading":
+                _job_watch.pop(label, None)
+                continue
+            pct = job.get("pct", 0)
+            prev = _job_watch.get(label)
+            if prev is None or prev[0] != pct:
+                _job_watch[label] = (pct, now)
+            elif now - prev[1] > 600:
+                job["status"] = "error"
+                job["note"] = "stalled — press Retry"
+                _setup_jobs[label] = job
+                _job_watch.pop(label, None)
     pulled = ollama_pulled_tags() or set()
     models = []
 

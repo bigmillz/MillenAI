@@ -854,3 +854,9 @@ that found all three: re-execute the page's own script text via
   TDZ rule: grep for EVERY identifier a removal deletes, including uses
   inside guards. send() is now wrapped (sendSafe): any exception paints
   "send failed — <msg>" into the composer instead of eating the click.
+- 2.5.2 hardening: (a) stuck-download WATCHDOG in setup_status — a job
+  10 min at the same pct flips to error instead of holding busy forever
+  (Phi-4 wedged at 99% after my .incomplete sweep raced its writer);
+  (b) _voice_ready keys on the weights symlink existing, NOT on carcass
+  absence — a stale *.incomplete beside a finished blob bricked voice.
+  Voice verified end-to-end: say -> /api/transcribe exact match, speak ok.
