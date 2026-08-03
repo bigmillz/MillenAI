@@ -117,10 +117,17 @@ SYSTEM_PROMPT = {
         "Speak naturally in clear, engaging prose as if talking to a smart peer "
         "— contractions, natural rhythm, a little dry humour when it fits. "
         "Lead with the answer itself: never open by restating the question or "
-        "with filler like 'Great question'. Then give a GENEROUS, complete "
-        "answer — develop the interesting angles, add concrete texture and "
-        "lived-in detail, anticipate the obvious follow-up. A rich, satisfying "
-        "reply beats a terse one; only truly trivial questions get one-liners. "
+        "with filler like 'Great question'. NEVER respond with only "
+        "clarifying questions — when a request is broad, make reasonable "
+        "assumptions, say them in one clause, and deliver the substance "
+        "anyway (someone asking for a Brooklyn restaurant wants actual "
+        "named restaurants, not an interview about their vibe). Then give "
+        "a LONG-FORM, complete answer, the way a thorough expert would "
+        "write it: several developed paragraphs, concrete names, numbers "
+        "and lived-in detail, the interesting angles explored, the obvious "
+        "follow-up anticipated and answered. Aim for two to three times "
+        "more depth than feels minimal — a rich, essay-quality reply is "
+        "the default; only truly trivial questions get one-liners. "
         "Use a list only for truly enumerable things, and when you don't know "
         "something, say so plainly."
     ),
@@ -2029,8 +2036,10 @@ SYNTH_INSTRUCTION = (
     "- Write in confident, flowing prose, as one smart person talking to "
     "another. Use a list ONLY when the content is truly enumerable; never "
     "turn an explanation into bullet points.\n"
-    "- Give the question a FULL answer: develop every useful angle from "
-    "the drafts with concrete detail — a rich, satisfying reply beats a "
+    "- Give the question a LONG-FORM answer: develop every useful angle "
+    "from every draft with concrete detail, and EXPAND where the drafts "
+    "are thin — the final answer should be the longest, most complete "
+    "text in this conversation. A rich, satisfying reply beats a "
     "terse one. Only truly trivial questions get short answers. No summary "
     "paragraph that repeats what you just said.\n"
     "- Sound like a person: contractions, warmth, natural sentence rhythm "
@@ -5989,8 +5998,8 @@ function buildTiles(vw,vh){
   // ~28px chips, TONS of them — the frame splits like pizza slices from
   // the centre and every chip streaks radially, "like stars" (Patrick,
   // after the slat era). Cap keeps the worst-case draw count sane.
-  let cols=Math.max(56,Math.round(sw/10)),rows=Math.max(38,Math.round(sh/10));
-  while(cols*rows>3200){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
+  let cols=Math.max(84,Math.round(sw/6)),rows=Math.max(50,Math.round(sh/8));
+  while(cols*rows>5200){cols=Math.round(cols*.94);rows=Math.round(rows*.94);}
   const cover=Math.max(sw/vw,sh/vh);
   const srcW=sw/cover,srcH=sh/cover;
   const srcX=(vw-srcW)/2,srcY=(vh-srcH)/2;
@@ -6114,8 +6123,9 @@ function starTick(ts){
     // still reads as the picture) and erodes into a needle as it
     // accelerates — the image visibly crumbles into shooting stars, and
     // the settle reverses it: needles fatten back into the frame
-    const needle=.12/Math.sqrt(Math.max(1,len*.5));
-    const thin=1-(1-needle)*Math.min(1,scat*2.5);
+    const needle=.055/Math.sqrt(Math.max(1,len*.5));
+    const base=1-.6*Math.min(1,e*1.6);
+    const thin=(1-(1-needle)*Math.min(1,scat*4))*base;
     sctx.drawImage(snapCv,t.sx,t.sy,m.stw,m.sth,
       -ww*len*.35,-hh*thin/2,ww*len*.7,hh*thin);
   }
