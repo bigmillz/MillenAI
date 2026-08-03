@@ -4564,20 +4564,25 @@ body.resizing{cursor:col-resize;user-select:none}
 #models-flag:hover{text-decoration:underline}
 #models-flag[hidden]{display:none}
 /* web visitors only: a quiet outline chip pointing at the real app */
+/* INVERTED: a solid white pill — the one thing on the page that reads
+   like a real call to action */
 #get-app{
   font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
-  color:rgba(255,255,255,.82);background:none;text-decoration:none;
-  border:1px solid rgba(255,255,255,.42);border-radius:8px;
-  padding:5px 9px;font-weight:700;flex:1 0 100%;
+  color:#111;background:#f2f2f2;text-decoration:none;
+  border:none;border-radius:8px;
+  padding:7px 10px;font-weight:700;flex:1 0 100%;
   display:flex;align-items:center;gap:6px;margin-top:4px;
+  box-shadow:0 6px 20px -10px rgba(255,255,255,.55);
+  transition:background .18s,transform .18s,box-shadow .25s;
 }
-#get-app:hover{border-color:#fff;color:#fff}
+#get-app:hover{background:#fff;transform:translateY(-1px);
+  box-shadow:0 10px 26px -10px rgba(255,255,255,.8)}
 #get-app[hidden]{display:none}
 #get-app i{
   font-style:normal;width:13px;height:13px;flex:none;cursor:help;
-  border:1px solid rgba(255,255,255,.45);border-radius:50%;
+  border:1px solid rgba(0,0,0,.42);border-radius:50%;
   font-size:9px;line-height:11px;text-align:center;
-  font-family:var(--helv);margin-left:auto;
+  font-family:var(--helv);margin-left:auto;color:#111;
 }
 #update-flag:hover{text-decoration:underline}
 #update-flag[hidden]{display:none}
