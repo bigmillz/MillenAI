@@ -4160,7 +4160,7 @@ body.resizing{cursor:col-resize;user-select:none}
 
 /* telemetry — the instrument cluster */
 #telemetry{
-  margin-top:12px;background:rgba(47,47,47,.5);border:1px solid var(--line-soft);
+  margin-top:12px;background:rgba(21,23,29,.8);border:1px solid var(--line-soft);
   -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
   border-radius:var(--radius);padding:12px 12px 11px;
   font-family:var(--mono);
