@@ -3965,10 +3965,8 @@ body.resizing{cursor:col-resize;user-select:none}
 #brand-wrap{padding:0 6px 12px}
 #brand-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 #brand-row #brand{flex:0 1 auto;min-width:0}
-#update-flag{margin-left:auto}
 #brand-row #newchat{margin-left:2px}
-/* chip hidden -> the buttons inherit the push to the right edge */
-#update-flag[hidden]+#newchat{margin-left:auto}
+#update-flag{margin-top:4px}
 #update-flag{
   font-family:var(--mono);font-size:10px;letter-spacing:.12em;
   color:#fff;background:#e26d5a;border-radius:8px;padding:5px 9px;
@@ -3980,7 +3978,7 @@ body.resizing{cursor:col-resize;user-select:none}
   font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
   color:#fff;background:#4a7fd4;border-radius:8px;padding:5px 9px;
   cursor:pointer;font-weight:700;
-  flex:1 0 100%;align-self:flex-start;width:max-content;
+  flex:1 0 100%;text-align:left;
   animation:updatePulse 2.6s ease-in-out infinite;
 }
 #models-flag:hover{text-decoration:underline}
@@ -3989,7 +3987,11 @@ body.resizing{cursor:col-resize;user-select:none}
 #update-flag[hidden]{display:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
    sitting it on the wordmark's baseline hangs it low against the taller type */
-#brand{display:flex;align-items:center;gap:8px}
+#brand{display:flex;align-items:flex-start;gap:8px}
+#brand .vghost{
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
+  color:rgba(255,255,255,.22);margin-top:9px;user-select:none;
+}
 /* the brand is a CHAMELEON: its gradient is sampled live from the
    backdrop footage (see paintBrandFromSky) — an SF dusk turns it amber
    and umber, the aurora turns it green-violet. The rainbow is only the
@@ -4271,7 +4273,7 @@ body.perf #skyline{display:none}
 #chat-scroll{flex:1;overflow-y:auto;overflow-x:hidden;scroll-behavior:smooth;position:relative;z-index:1}
 body.perf #chat-scroll{scroll-behavior:auto}
 #chat-inner{
-  max-width:90%;margin:0 auto;padding:36px 24px 150px;
+  max-width:780px;margin:0 auto;padding:36px 24px 150px;
   -webkit-user-select:text;user-select:text;   /* chat is copyable */
 }
 
@@ -4392,7 +4394,12 @@ body.perf .msg{animation:none}
 }
 .msg.user .who{color:var(--teal)}
 .msg.ai .who{color:var(--accent)}
-.msg .body{line-height:1.65;font-size:15px}
+.msg .body{
+  font-family:var(--helv);font-size:15.5px;line-height:1.75;
+  letter-spacing:.002em;
+  font-kerning:normal;text-rendering:optimizeLegibility;
+  -webkit-font-smoothing:antialiased;
+}
 .msg.user .body{
   background:rgba(12,13,17,.38);border:1px solid rgba(255,255,255,.10);
   -webkit-backdrop-filter:blur(16px) saturate(1.2);
@@ -4451,6 +4458,8 @@ body.perf .msg{animation:none}
 
 /* arena mode: two answers side by side */
 .arena-row{display:flex;gap:12px;align-items:stretch}
+/* arena needs the whole stage — the reading measure yields to the duel */
+#chat-inner:has(.arena-row){max-width:94%}
 .arena-col{flex:1;min-width:0;border:1px solid rgba(255,255,255,.09);
   border-radius:12px;padding:10px 13px;background:rgba(8,9,12,.32);
   -webkit-backdrop-filter:blur(16px) saturate(1.2);
@@ -4859,11 +4868,9 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
     <div id="brand-row">
     <div id="brand" title="About MillenAI">
       <span class="name"><i class="nm1">Millen</i><i class="nm2">AI</i></span>
+      <span class="vghost">__APP_VER__</span>
     </div>
-    <div id="update-flag" hidden title="Install the update">UPDATE</div>
-    <div id="models-flag" hidden
-         title="More models fit this machine">MODELS AVAILABLE</div>
-    <button id="newchat" title="New chat">
+<button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="M13 4H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7"/>
@@ -4871,6 +4878,9 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
       </svg>
     </button>
     <button id="settings-btn" title="Settings — preferences &amp; about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg></button>
+    <div id="update-flag" hidden title="Install the update">UPDATE</div>
+    <div id="models-flag" hidden
+         title="More models fit this machine">MODELS AVAILABLE</div>
     </div>
   </div>
 
