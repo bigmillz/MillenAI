@@ -39,22 +39,14 @@ def req(path, method="GET", data=None, headers=None, cookie=None, timeout=30):
 
 
 print("== access control ==")
+# the key door is retired (1.20): local goes straight to the app, remote
+# strangers land on the account screen
 s, h, b = req("/")
-check("door on bare URL", s == 200 and b"enter your access key" in b)
-s, h, b = req("/?key=wrong")
-check("wrong key gets the note", "isn’t right" in b.decode("utf-8", "replace"))
-class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, *a, **k):
-        return None
-_noredir = urllib.request.build_opener(_NoRedirect)
-try:
-    _noredir.open(BASE + "/?key=" + KEY, timeout=10)
-    check("right key -> 302 + cookie", False, "no redirect raised")
-except urllib.error.HTTPError as e:
-    check("right key -> 302 + cookie",
-          e.code == 302 and "millen_key" in str(e.headers))
-s, h, b = req("/", cookie=K)
-check("keyed local -> app", b"id=\"skyline\"" in b)
+check("local bare URL -> app", s == 200 and b"id=\"skyline\"" in b)
+s, h, b = req("/?key=oldlink")
+check("legacy key links still land", s == 200 and b"id=\"skyline\"" in b)
+s, h, b = req("/", headers={"X-Forwarded-For": "1.2.3.4"})
+check("remote stranger -> account screen", b"pick a name and a PIN" in b)
 
 print("== identities ==")
 s, h, b = req("/", cookie=K, headers={"X-Forwarded-For": "1.2.3.4"})
@@ -153,25 +145,32 @@ def healthy(text):
         f"{len(text)} chars, 3gram x{rep}"
 
 
+# Fast and Smart merged in 1.20: Fast now runs the strongest fitting
+# model, so it earns the strict health bar
 t = chat({"model": "", "models": [], "tier": "Fast", "auto_web": False,
           "messages": [{"role": "user", "content": "tell me about central park"}]})
-# Fast is the SPEED tier (a 3B): judge it on collapse, not eloquence —
-# the server-side tail guard owns catastrophe; x14 tolerates 3B waffle
-words = re.findall(r"[a-z']+", t.lower())
-grams = Counter(tuple(words[i:i+3]) for i in range(max(0, len(words)-2)))
-rep = max(grams.values()) if grams else 0
-check("Fast tier answer healthy", len(t) > 300 and rep <= 14 and "⚠️" not in t,
-      f"{len(t)} chars, 3gram x{rep}")
+ok, d = healthy(t)
+check("Fast tier answer healthy", ok, d)
 
 t = chat({"model": "", "models": [], "tier": "Smart", "auto_web": False,
           "messages": [{"role": "user", "content": "give me a great one-day brooklyn itinerary"}]})
 ok, d = healthy(t)
-check("Smart tier answer healthy", ok, d)
+check("legacy Smart alias still answers", ok, d)
 
 t = chat({"model": "", "models": [], "tier": "Fast", "auto_web": True,
           "messages": [{"role": "user", "content": "whats the weather in 11221"}]})
 check("weather answer carries real data", ("°F" in t or "degrees" in t or " mph" in t)
       and "⚠️" not in t and len(t) > 60, t[:120])
+
+
+print("== attached files ==")
+t = chat({"model": "", "models": [], "tier": "Fast", "auto_web": True,
+          "messages": [{"role": "user", "content": "what is the project codename mentioned in this file?"}],
+          "docs": [{"name": "notes.txt",
+                    "text": "quarterly planning notes\nthe project codename is ZEBRA-42\nlunch is at noon"}]})
+affirms = "zebra-42" in t.lower() and not re.search(
+    r"not seeing|don't see|do not see|there is no|isn't a|can't help", t.lower())
+check("doc content reaches the model", affirms, t[:160])
 
 PNG = ("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8"
        "z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")

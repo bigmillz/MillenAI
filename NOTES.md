@@ -788,3 +788,44 @@ save you — TDZ throws on typeof too). Every shared mutable `let` now
 belongs at the TOP of the script next to `messages`. Diagnosis trick
 that found all three: re-execute the page's own script text via
 `new Function(src)()` in the console and read the thrown line.
+
+## 1.20.0
+- File upload: 📎 in the composer. Images join the vision pipeline
+  (shared addImageFile with paste), text-like files ride as ATTACHED FILES
+  blocks in the last message (2 max, 50k chars each, auto_web off).
+  Doc chips reuse the imgchips strip. Smoketest: ZEBRA-42 retrieval.
+- Fast + Smart MERGED into "Fast" (strongest fitting model, count 1).
+  Aliases in BOTH places: client localStorage may hold "Smart", old
+  clients may POST tier:"Smart" — both map to Fast. Smoketest keeps a
+  legacy-alias check.
+- ACCESS KEY DOOR RETIRED per Patrick: _gate() returns True; the welcome
+  screen (name+PIN, Google SSO button when configured) is the front door.
+  Old /?key= links land on the app harmlessly. ADMIN_PATHS + per-identity
+  storage are the real protection now. GATE_PAGE is dead code.
+- Sidebar 340px; controls row order: version pill, UPDATE, (spacer),
+  newchat, gear. The .tag moved OUT of #brand — selector is #brand-row .tag.
+- Wordmark is HOLLOW: gradient lives in the stroke. Trick: background-clip
+  clips gradient to text+stroke, then a SOLID -webkit-text-fill-color
+  paints the fill back on top, leaving gradient only in the ring.
+  51px/800, drift slowed to 52s. Chameleon vars unchanged.
+- Hero: halo opacity .85->1 + blur 16->19 (the "+20% glow"); greet 48px;
+  LIVE fill rgba(85,85,85,.5).
+- Agents list folds like the tier dropdown (#agents-wrap.closed). Boot
+  always opens the AI tab and CLEARS any stored agent (per-session now).
+- Telemetry: meters 4px; t-head 12.5px nowrap (13.5 wrapped M4 PRO into
+  the models count at 340px).
+- GOTCHA: `pkill -f "MILLENAI_PORT=9894"` does NOT kill the server — env
+  assignments aren't in python's argv; it kills the background *shell
+  wrapper* only, orphaning the python (which keeps the port; the "new"
+  server then silently fails to bind and you test STALE CODE). Kill by
+  port: `kill $(lsof -tnP -iTCP:9894 -sTCP:LISTEN)`.
+- GOTCHA: mlx_lm.server seeds its RNG identically at spawn — same prompt
+  on a fresh engine can reproduce output byte-for-byte even at temp .75.
+  Consequences: (a) identical-output "caching" mirages while testing,
+  (b) a bare retry after a collapse can replay the SAME collapse — the
+  guard's retry now appends an anti-repetition nudge to the last user
+  message so attempt 2 takes a different path.
+- Doc QA framing: question-first + raw ATTACHED FILES block made the 35B
+  read ZEBRA-42 and then DENY it existed ("is this a prank?"). Files
+  first, explicit "real data, answer factually" frame, QUESTION: last.
+  Smoketest rejects denial-shaped answers, not just substring hits.

@@ -254,21 +254,16 @@ OLLAMA_TAGS = {l: i["ollama"] for l, i in MODEL_INFO.items() if i["ollama"]}
 # candidates strongest-first; whatever is downloaded and fits RAM is used,
 # and Gemma blends the answers when a tier has more than one.
 TIERS = {
-    # THE DEFAULT: one answer from the strongest brain this machine holds.
-    # "Fast" (a 3B) used to be the default, and casual queries read like a
-    # 3B wrote them \u2014 Smart is what makes the everyday feel top-tier.
-    "Smart": {
-        "icon": "\U0001f3af", "desc": "the strongest model that fits",
+    # THE DEFAULT: Fast and Smart merged, per Patrick \u2014 one answer
+    # from the strongest brain this machine holds. A single engine keeps
+    # it the quick path; the ladder still gives every machine its best.
+    "Fast": {
+        "icon": "\u26a1\ufe0f", "desc": "the strongest model that fits",
         "picks": ["Qwen 3 235B MoE", "GPT-OSS 120B", "Llama 4 Scout",
                   "Llama 3.3 70B", "Qwen 3.6 35B MoE", "Qwen 3.6 27B",
                   "GPT-OSS 20B", "Gemma 4 26B", "Gemma 4 12B",
                   "Phi-4 14B", "Mistral Nemo 12B", "Llama 3.1 8B",
-                  "Llama 3.2 3B"],
-        "count": 1,
-    },
-    "Fast": {
-        "icon": "\u26a1\ufe0f", "desc": "one quick model",
-        "picks": ["Llama 3.2 3B", "Gemma 2 2B", "Llama 3.2 1B"],
+                  "Llama 3.2 3B", "Gemma 2 2B", "Llama 3.2 1B"],
         "count": 1,
     },
     "Thinking": {
@@ -2052,20 +2047,21 @@ def _looks_degenerate(text: str) -> bool:
     the repetition ratio reads 0.79 — indistinguishable from good prose.
     """
     words = text.split()
-    if len(words) < 60:
-        return False                      # too short to judge either way
-    # runaway repetition: "to make up to make up to…"
-    if len(words) >= 120 and len(set(words)) / len(words) < 0.15:
-        return True
     # a CONSECUTIVE run of one word can't be diluted by healthy prose
     # around it — "hipster" x60 inside a 200-token answer slid under the
-    # tail-window ratio (seen live, on a phone). Twelve in a row is never
-    # language.
+    # tail-window ratio, and "user" x42 in a 50-word answer slid under the
+    # too-short bail below (both seen live). Twelve in a row is never
+    # language, at any length — so this check runs before the length gate.
     run = best = 1
     for a, b in zip(words, words[1:]):
         run = run + 1 if a == b else 1
         best = max(best, run)
     if best >= 12:
+        return True
+    if len(words) < 60:
+        return False                      # too short to judge either way
+    # runaway repetition: "to make up to make up to…"
+    if len(words) >= 120 and len(set(words)) / len(words) < 0.15:
         return True
     # short-burst window: the last 60 words on their own
     if len(words) >= 60:
@@ -2116,31 +2112,46 @@ def _stream_guarded(label: str, msgs: list, emit, status,
     is watched as it arrives now, and on collapse the UI is told to throw
     away what it has shown and the known-good `fallback` replaces it.
     """
-    seen = []
+    for attempt in (1, 2):
+        seen = []
 
-    def guarded(chunk):
-        seen.append(chunk)
-        if len(seen) % 40 == 0 and _looks_degenerate("".join(seen)):
-            raise _Degenerate
-        emit(chunk)
+        def guarded(chunk):
+            seen.append(chunk)
+            if len(seen) % 40 == 0 and _looks_degenerate("".join(seen)):
+                raise _Degenerate
+            emit(chunk)
 
-    try:
-        run_model(label, msgs, guarded)
-        if _looks_degenerate("".join(seen)):
-            raise _Degenerate
-        return True
-    except _Degenerate:
-        emit(f"{NUL}RESET{NUL}")      # tells the UI to discard the garbage
-        status(f"{label} lost the thread — {note}")
-        if fallback is None:
-            # single-model runs have no other draft to fall back on: keep
-            # the part BEFORE the collapse (seen in the wild: a fine answer
-            # that decayed into "a walking path, a walking path, …" x300)
-            fallback = _detruncate("".join(seen)) or (
-                "The model lost the thread on this one — ask again, or "
-                "switch tiers for a second opinion.")
-        emit(fallback)
-        return False
+        try:
+            run_model(label, msgs, guarded)
+            if _looks_degenerate("".join(seen)):
+                raise _Degenerate
+            return True
+        except _Degenerate:
+            emit(f"{NUL}RESET{NUL}")  # tells the UI to discard the garbage
+            if attempt == 1:
+                # collapse is often sampling luck — but MLX engines seed
+                # deterministically, so an IDENTICAL retry can replay the
+                # identical collapse. Nudge the prompt so the second run
+                # takes a different path, and say what went wrong.
+                status(f"{label} lost the thread — trying again")
+                if msgs and msgs[-1].get("role") == "user":
+                    nudged = dict(msgs[-1])
+                    nudged["content"] = str(nudged.get("content", "")) + (
+                        "\n\n(Your previous attempt collapsed into "
+                        "repetition. Answer cleanly this time — plain "
+                        "prose, no repeated words.)")
+                    msgs = msgs[:-1] + [nudged]
+                continue
+            status(f"{label} lost the thread — {note}")
+            if fallback is None:
+                # single-model runs have no other draft to fall back on:
+                # keep the part BEFORE the collapse (seen in the wild: a
+                # fine answer decaying into "a walking path, …" x300)
+                fallback = _detruncate("".join(seen)) or (
+                    "The model lost the thread on this one — ask again, "
+                    "or switch tiers for a second opinion.")
+            emit(fallback)
+            return False
 
 
 def _detruncate(text: str) -> str:
@@ -2896,11 +2907,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
     def _gate(self):
         """True = let the request through; False = already answered it.
 
-        Browsers hitting the root get the DOOR — a MillenAI-styled page
-        with a key box, so the URL handed to friends is just the bare
-        domain plus a key they type once (the cookie remembers them for
-        30 days). API paths keep the terse 403 so fetches never receive
-        HTML."""
+        The access-key door is RETIRED, per Patrick: the welcome screen
+        (account + PIN, Google SSO when configured) is the front door now.
+        Old /?key=... links simply land on the app; the admin lockdown and
+        per-identity storage below are what actually protect the host."""
+        return True
         if not ACCESS_KEY:
             return True
         cookie = self.headers.get("Cookie", "") or ""
@@ -3012,7 +3023,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         if not self._gate():
             return
-        if self.path == "/":
+        if self.path == "/" or self.path.startswith("/?"):
+            # ("/?key=..." legacy links included — the key is simply ignored)
             # tunnel visitors must have an identity before the app loads —
             # this is what keeps the owner's chats out of everyone's hands
             if self._remote() and not self._uid():
@@ -3112,7 +3124,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             # the two strongest DISTINCT models that are installed and fit
             pulled = ollama_pulled_tags() or set()
             pair = []
-            for l in TIERS["Smart"]["picks"] + MERGE_RANK:
+            for l in TIERS["Fast"]["picks"] + MERGE_RANK:
                 if (l in MODEL_ROUTES and l not in pair
                         and l not in BLEND_EXCLUDE
                         and model_cached(l, pulled)
@@ -3485,6 +3497,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         auto_web = req_json.get("auto_web", True)
         # a tier resolves to its own line-up; otherwise honour explicit picks
         tier = req_json.get("tier") or ""
+        if tier == "Smart":
+            tier = "Fast"   # merged tiers (1.20) — old clients still send Smart
         if tier in TIERS:
             council = resolve_tier(tier)
         else:
@@ -3507,6 +3521,32 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     council = [ag_label]
                     model_name = ag_label
                     tier = "Research" if ag_research else ""
+
+        docs = [d for d in (req_json.get("docs") or [])
+                if isinstance(d, dict) and d.get("text")][:2]
+        if docs:
+            # attached files ARE the context: fold them into the message,
+            # keep the search out of the way
+            auto_web = False
+            block = "\n\n".join(
+                "--- FILE: %s ---\n%s" % (str(d.get("name", "file"))[:120],
+                                           str(d["text"])[:50000])
+                for d in docs)
+            vm = dict(messages[-1]) if messages else {"role": "user",
+                                                      "content": ""}
+            base = str(vm.get("content", "")).strip() \
+                or "Summarize the attached file(s) and note anything notable."
+            # files first, question last, and an explicit "this is real
+            # data" frame: without it the 35B read ZEBRA-42 and then
+            # DENIED it existed, treating "secret launch code" as a prank
+            vm["content"] = (
+                "The user attached the following file(s). Their contents "
+                "are real data provided by the user — read them and "
+                "answer from them directly and factually.\n\n"
+                "ATTACHED FILES:\n" + block +
+                "\n\nQUESTION: " + base)
+            messages = messages[:-1] + [vm] if messages else [vm]
+            prompt = base
 
         if images:
             # vision answers come from the pixels: no web search, no tier
@@ -3780,7 +3820,7 @@ html.winwipe.winwipe-run body{
    reads as light and colour through the glass, never as detail. */
 #sidebar{
   position:relative;z-index:1;
-  width:284px;min-width:284px;height:100%;
+  width:384px;min-width:384px;height:100%;
   /* real frosted glass, per Patrick: ~30% panel, heavy blur carrying the
      legibility instead of the tint */
   background:rgba(21,23,29,.30);
@@ -3802,10 +3842,10 @@ body.resizing{cursor:col-resize;user-select:none}
 /* the 34px brand outgrew a single row (clipped to "lenAI" beside the
    buttons): the name owns its line now, controls sit beneath it */
 #brand-wrap{padding:0 6px 12px}
-#brand-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#brand-row #brand{flex:1 0 100%;min-width:0}
-#brand-row #brand .tag{margin-left:auto}
-#brand-row #settings-btn{margin-left:2px}
+#brand-row{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
+#brand-row #brand{flex:0 1 auto;min-width:0}
+#brand-row .tag{margin-left:auto}
+#brand-row #newchat{margin-left:2px}
 #update-flag{
   font-family:var(--mono);font-size:10px;letter-spacing:.12em;
   color:#fff;background:#e26d5a;border-radius:8px;padding:5px 9px;
@@ -3822,21 +3862,28 @@ body.resizing{cursor:col-resize;user-select:none}
    backdrop footage (see paintBrandFromSky) — an SF dusk turns it amber
    and umber, the aurora turns it green-violet. The rainbow is only the
    pre-video fallback. */
+/* HOLLOW wordmark, per Patrick: the LIVE treatment — a muted glassy fill
+   with the chameleon gradient living in the OUTLINE. The trick: clip the
+   gradient to text+stroke, then paint the fill back on top with a solid
+   -webkit-text-fill-color, leaving the gradient visible only in the
+   stroke ring. Drift is deliberately glacial. */
 #brand .name{
-  font-weight:700;font-size:34px;letter-spacing:.02em;
+  font-weight:800;font-size:44px;letter-spacing:.01em;line-height:1.1;
   background:linear-gradient(90deg,
              var(--bw1,#ff8f8f),var(--bw2,#ffc46e),var(--bw3,#f5e663),
              var(--bw1,#7ef0a6),var(--bw2,#6ec7ff),var(--bw3,#8f9dff),
              var(--bw1,#ff8f8f));
   background-size:200% 100%;
   -webkit-background-clip:text;background-clip:text;
-  color:transparent;-webkit-text-fill-color:transparent;
-  animation:rainbow 26s linear infinite;
-  filter:drop-shadow(0 1px 7px var(--bwglow,rgba(150,160,255,.30)));
+  color:transparent;
+  -webkit-text-fill-color:rgba(30,32,40,.42);
+  -webkit-text-stroke:2.4px transparent;
+  animation:rainbow 52s linear infinite;
+  filter:drop-shadow(0 1px 9px var(--bwglow,rgba(150,160,255,.30)));
   transition:filter 1.2s ease;
 }
 body.perf #brand .name{animation:none;filter:none}
-#brand .tag{font-family:var(--mono);font-size:10px;color:var(--accent);
+#brand-row .tag{font-family:var(--mono);font-size:10px;color:var(--accent);
   border:1px solid var(--accent-dim);background:var(--accent-dim);
   padding:2px 6px;border-radius:4px;letter-spacing:.08em}
 
@@ -3847,8 +3894,7 @@ body.perf #brand .name{animation:none;filter:none}
   color:var(--accent-hot);cursor:pointer;padding:0;
   transition:border-color .15s,background .15s,color .15s;
 }
-#settings-btn{margin-left:auto;color:var(--dim)}
-#newchat{margin-left:6px}
+#settings-btn{margin-left:6px;color:var(--dim)}
 #newchat svg{width:15px;height:15px}
 #settings-btn svg{width:15px;height:15px}
 #newchat:hover,#settings-btn:hover{border-color:var(--accent-hot);background:var(--accent-dim);color:var(--text)}
@@ -3916,6 +3962,12 @@ body.perf #brand .name{animation:none;filter:none}
   content:"▾";margin-left:auto;color:var(--faint);font-size:12px;
 }
 #tier-rows:not(.closed) .tier{animation:tierDrop .16s ease both}
+/* the agent list folds the same way: closed shows only the choice */
+#agents-wrap.closed .agent:not(.on){display:none}
+#agents-wrap.closed .agent.on::after{
+  content:"▾";margin-left:auto;color:var(--faint);font-size:12px;
+}
+#agents-wrap:not(.closed) .agent{animation:tierDrop .16s ease both}
 @keyframes tierDrop{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
 
 .tier.active{
@@ -3999,18 +4051,20 @@ body.perf #brand .name{animation:none;filter:none}
   font-family:var(--mono);
 }
 #telemetry .t-head{
-  font-size:9.5px;letter-spacing:.16em;color:var(--faint);
-  display:flex;justify-content:space-between;margin-bottom:10px;
+  font-size:14px;letter-spacing:.08em;color:var(--dim);
+  display:flex;justify-content:space-between;align-items:baseline;
+  margin-bottom:10px;gap:10px;
 }
-#telemetry .t-head .live{color:var(--dim);white-space:nowrap}
+#telemetry .t-head span{white-space:nowrap}
+#telemetry .t-head .live{color:var(--text);white-space:nowrap}
 .meter-row{margin-bottom:9px}
 .meter-row:last-child{margin-bottom:0}
 .meter-label{
-  display:flex;justify-content:space-between;font-size:10px;
+  display:flex;justify-content:space-between;font-size:13px;
   color:var(--dim);margin-bottom:4px;
 }
 .meter-label b{color:var(--text);font-weight:500}
-.meter{display:flex;gap:2px;height:8px}
+.meter{display:flex;gap:2px;height:2px}
 .meter i{
   flex:1;background:var(--line);border-radius:1px;transition:background .3s;
 }
@@ -4062,7 +4116,7 @@ body.gen #skyline,body.gen #stars{filter:brightness(.7)}
    the MAIN PANEL like the hero text (50% of the viewport is the window's
    centre, which the sidebar pushes visibly off-axis — the --sbw var is
    kept current by setSidebar) */
-#skyload{position:fixed;left:calc(50% + var(--sbw,284px)/2);top:57%;
+#skyload{position:fixed;left:calc(50% + var(--sbw,384px)/2);top:57%;
   transform:translateX(-50%);
   z-index:4;width:min(440px,50vw);text-align:center;pointer-events:none}
 #skyload[hidden]{display:none}
@@ -4127,9 +4181,9 @@ body.perf #chat-scroll{scroll-behavior:auto}
 #hero h1::after{content:attr(data-word)}
 /* the tube's halo: the same travelling colours, thrown 16px */
 #hero h1 .halo{
-  position:absolute;left:0;top:0;z-index:-1;opacity:.85;
+  position:absolute;left:0;top:0;z-index:-1;opacity:1;
   pointer-events:none;
-  filter:blur(16px) saturate(1.4);
+  filter:blur(19px) saturate(1.55);
 }
 #hero h1 .halo span{position:static;display:block}
 /* once painted it stays painted */
@@ -4149,8 +4203,8 @@ body.painting #hero h1::after{
 }
 body.painting #hero h1 .halo{animation:neonCatchGlow 1s 2.75s both}
 @keyframes neonCatchGlow{
-  0%{opacity:.85}8%{opacity:.1}16%{opacity:.85}28%{opacity:.35}
-  36%{opacity:.85}46%{opacity:.68}56%,100%{opacity:.85}
+  0%{opacity:1}8%{opacity:.12}16%{opacity:1}28%{opacity:.4}
+  36%{opacity:1}46%{opacity:.8}56%,100%{opacity:1}
 }
 @keyframes rainbow{from{background-position:0% 50%}to{background-position:200% 50%}}
 body.perf #hero h1{animation:none}
@@ -4160,7 +4214,7 @@ body.perf #hero h1 .halo span,body.perf #hero h1::after{
 }
 #hero p{color:var(--dim);font-size:15px}
 /* the greeting reads as a headline, not a caption */
-#hero .greet{font-size:24px;font-weight:700;margin-top:20px}
+#hero .greet{font-size:48px;font-weight:700;margin-top:20px}
 /* the wordmark centres on its own; LIVE is pulled out of the flow so it
    sits further right without dragging the title off-centre */
 #hero .h1row{display:flex;align-items:center;justify-content:center;position:relative}
@@ -4168,7 +4222,7 @@ body.perf #hero h1 .halo span,body.perf #hero h1::after{
    "MillenAI" to the left. Same face and size as the wordmark, dark grey. */
 #hero .live-big{
   font-size:92px;font-weight:700;letter-spacing:-.015em;line-height:1;
-  color:#555;white-space:nowrap;overflow:hidden;
+  color:rgba(85,85,85,.75);white-space:nowrap;overflow:hidden;
   -webkit-text-stroke:2px #d4d6da;
   text-shadow:0 2px 14px rgba(0,0,0,.5);
   max-width:0;opacity:0;margin-left:0;
@@ -4274,6 +4328,16 @@ body.perf .msg{animation:none}
   color:var(--dim);font-size:12px;line-height:18px;text-align:center;
   cursor:pointer}
 .imgchip b:hover{color:#fff}
+.docchip{position:relative;display:inline-flex;align-items:center;gap:6px;
+  height:34px;padding:0 14px 0 10px;border-radius:10px;font-size:12.5px;
+  color:var(--text);border:1px solid var(--line);background:rgba(21,23,29,.55);
+  -webkit-backdrop-filter:blur(10px);backdrop-filter:blur(10px);
+  max-width:220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.docchip b{position:absolute;top:-7px;right:-7px;width:20px;height:20px;
+  border-radius:50%;background:#20232b;border:1px solid var(--line);
+  color:var(--dim);font-size:12px;line-height:18px;text-align:center;
+  cursor:pointer}
+.docchip b:hover{color:#fff}
 .sentimgs{display:flex;gap:8px;margin-top:8px}
 .sentimgs img{max-height:140px;max-width:46%;border-radius:12px;
   border:1px solid var(--line)}
@@ -4610,12 +4674,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   }
   #hero h1{font-size:10.5vw}
   #hero .live-big{font-size:10.5vw;-webkit-text-stroke:1.2px #d4d6da}
-  #hero .greet{font-size:19px}
+  #hero .greet{font-size:30px}
   #skyload{left:50%;width:min(340px,78vw)}
   #composer-wrap{padding:0 10px 12px}
   #tierpop{left:12px!important;right:12px;max-width:none}
   #hero{padding:0 12px}
-  #hero .greet{font-size:17px;margin-top:14px}
+  #hero .greet{font-size:26px;margin-top:14px}
   .arena-row{flex-direction:column}
 }
 
@@ -4631,10 +4695,9 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
     <div id="brand-row">
     <div id="brand" title="About MillenAI">
       <span class="name">MillenAI</span>
-      <span class="tag">__APP_VER_TAG__</span>
     </div>
+    <span class="tag">__APP_VER_TAG__</span>
     <div id="update-flag" hidden title="Install the update">UPDATE</div>
-    <button id="settings-btn" title="Settings — preferences &amp; about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg></button>
     <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
@@ -4642,6 +4705,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
         <path d="M18.4 2.6a1.7 1.7 0 0 1 2.4 2.4L12.8 13l-3.2.8.8-3.2z"/>
       </svg>
     </button>
+    <button id="settings-btn" title="Settings — preferences &amp; about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg></button>
     </div>
   </div>
 
@@ -4726,6 +4790,9 @@ __MODEL_ROWS__
     <div id="model-chip">engine <b id="chip-model">Llama 3.2 3B</b></div>
     <div id="imgchips" hidden></div>
     <div id="composer">
+      <button class="cbtn" id="attach" title="Attach files">📎</button>
+      <input type="file" id="fpick" multiple hidden
+        accept="image/*,.txt,.md,.markdown,.csv,.json,.js,.ts,.py,.html,.css,.log,.sh,.yaml,.yml,.xml,.toml,.rtf">
       <button class="cbtn" id="mic" title="Voice input">🎙️</button>
       <textarea id="input" rows="1" placeholder="Message MillenAI…"></textarea>
       <button class="cbtn" id="voicebtn" title="Voice chat — replies are read aloud">
@@ -4916,6 +4983,7 @@ setVoice(voiceChat);
 // each tier to whatever is downloaded and fits RAM, and Gemma blends.
 let agent="";           // declared early: setTier reads it (TDZ!)
 let tier=localStorage.getItem("millen.tier")||"Fast";
+if(tier==="Smart")tier="Fast";        // merged tiers (1.20)
 function setTier(name){
   tier=name;localStorage.setItem("millen.tier",name);
   councilManual=false;
@@ -4970,6 +5038,8 @@ document.addEventListener("click",e=>{
   // clicking anywhere outside the tier list folds it
   if(!e.target.closest||!e.target.closest("#tier-rows"))
     tierRows.classList.add("closed");
+  if(!e.target.closest||!e.target.closest("#agents-wrap"))
+    agentsWrap.classList.add("closed");
 });
 setTier(tier);
 
@@ -4991,7 +5061,7 @@ $("#adv-toggle").addEventListener("click",()=>{
 /* ------------------------------------------------------------ agents */
 // radio choice: a task specialist (Coding, Resumes…) or the standard
 // model path. Picking a tier or model flips back to Standard.
-agent=localStorage.getItem("millen.agent")||"";
+agent="";localStorage.setItem("millen.agent","");   // AI is the default view
 function paintAgents(){
   $$("#agents-wrap .agent").forEach(el=>
     el.classList.toggle("on",(el.dataset.agent||"")===agent));
@@ -5003,10 +5073,18 @@ function setAgent(name){
   agent=name;localStorage.setItem("millen.agent",name);
   paintAgents();
 }
+const agentsWrap=$("#agents-wrap");
+agentsWrap.classList.add("closed");
 $$("#agents-wrap .agent").forEach(el=>
-  el.addEventListener("click",()=>setAgent(el.dataset.agent||"")));
+  el.addEventListener("click",ev=>{
+    if(agentsWrap.classList.contains("closed")){
+      ev.stopPropagation();agentsWrap.classList.remove("closed");return;
+    }
+    setAgent(el.dataset.agent||"");
+    agentsWrap.classList.add("closed");
+  }));
 paintAgents();
-modeShow(agent?"agents":"ai");
+modeShow("ai");
 
 // each hardware-class group inside is its own dropdown, folded by default —
 // open one tier of the ladder at a time instead of a wall of models
@@ -5161,35 +5239,57 @@ sendBtn.addEventListener("click",()=>{ generating?abortCtl.abort():send(); });
 // paste a screenshot/photo straight into the composer: it becomes a chip,
 // and the request routes to the vision engine. Downscaled client-side so
 // a 12 MP photo doesn't ride the wire.
-let pendingImages=[];
+let pendingImages=[],pendingDocs=[];
 function paintChips(){
   const w=$("#imgchips");
-  w.hidden=!pendingImages.length;
+  w.hidden=!pendingImages.length&&!pendingDocs.length;
   w.innerHTML=pendingImages.map((d,i)=>
     '<span class="imgchip"><img src="'+d+'">'+
-    '<b data-i="'+i+'" title="Remove">×</b></span>').join("");
+    '<b data-k="i" data-i="'+i+'" title="Remove">×</b></span>').join("")
+   +pendingDocs.map((d,i)=>
+    '<span class="docchip" title="'+esc(d.name)+'">📄 '+esc(d.name.slice(0,22))+
+    '<b data-k="d" data-i="'+i+'" title="Remove">×</b></span>').join("");
   w.querySelectorAll("b").forEach(b=>b.addEventListener("click",()=>{
-    pendingImages.splice(+b.dataset.i,1);paintChips();
+    (b.dataset.k==="i"?pendingImages:pendingDocs).splice(+b.dataset.i,1);
+    paintChips();
   }));
 }
+function addImageFile(f){
+  if(pendingImages.length>=3)return;
+  const img=new Image();
+  img.onload=()=>{
+    const s=Math.min(1,1280/Math.max(img.width,img.height));
+    const c=document.createElement("canvas");
+    c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
+    c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+    pendingImages.push(c.toDataURL("image/jpeg",.85));
+    URL.revokeObjectURL(img.src);
+    paintChips();
+  };
+  img.src=URL.createObjectURL(f);
+}
+async function addDocFile(f){
+  if(pendingDocs.length>=2)return;
+  try{
+    const text=(await f.text()).slice(0,50000);
+    if(text.trim()){pendingDocs.push({name:f.name,text});paintChips();}
+  }catch(e){}
+}
+$("#attach").addEventListener("click",()=>$("#fpick").click());
+$("#fpick").addEventListener("change",()=>{
+  [...$("#fpick").files].forEach(f=>{
+    if(f.type.startsWith("image/"))addImageFile(f);
+    else if(f.size<2_000_000)addDocFile(f);
+  });
+  $("#fpick").value="";
+});
 input.addEventListener("paste",e=>{
   const items=[...(e.clipboardData||{}).items||[]]
     .filter(it=>it.type&&it.type.startsWith("image/"));
   if(!items.length)return;
   e.preventDefault();
   items.slice(0,3-pendingImages.length).forEach(it=>{
-    const f=it.getAsFile();if(!f)return;
-    const img=new Image();
-    img.onload=()=>{
-      const s=Math.min(1,1280/Math.max(img.width,img.height));
-      const c=document.createElement("canvas");
-      c.width=Math.round(img.width*s);c.height=Math.round(img.height*s);
-      c.getContext("2d").drawImage(img,0,0,c.width,c.height);
-      pendingImages.push(c.toDataURL("image/jpeg",.85));
-      URL.revokeObjectURL(img.src);
-      paintChips();
-    };
-    img.src=URL.createObjectURL(f);
+    const f=it.getAsFile();if(f)addImageFile(f);
   });
 });
 
@@ -5277,8 +5377,8 @@ async function sendArena(text){
 
 async function send(){
   const text=input.value.trim();
-  if((!text&&!pendingImages.length)||generating)return;
-  if(arenaMode&&text&&!pendingImages.length){sendArena(text);return;}
+  if((!text&&!pendingImages.length&&!pendingDocs.length)||generating)return;
+  if(arenaMode&&text&&!pendingImages.length&&!pendingDocs.length){sendArena(text);return;}
 
   // engine down? give launch instructions instead of a doomed request.
   // in combine mode, drop unavailable models rather than failing outright
@@ -5304,8 +5404,12 @@ async function send(){
   if(audioCtx&&audioCtx.state==="suspended")audioCtx.resume();
   input.value="";input.style.height="auto";
   const sentImages=pendingImages.slice();
-  pendingImages=[];paintChips();
-  const shown=text||(sentImages.length?"🖼️ (image)":"");
+  const sentDocs=pendingDocs.slice();
+  pendingImages=[];pendingDocs=[];paintChips();
+  const shown=(text||(sentImages.length?"🖼️ (image)":"")
+    ||(sentDocs.length?"📄 (file)":""))
+    +(sentDocs.length&&text?"":"")
+    +(sentDocs.length?"\n📄 "+sentDocs.map(d=>d.name).join(", "):"");
   messages.push({role:"user",content:shown});
   const uDiv=addMsg("user",shown);
   if(sentImages.length){
@@ -5328,7 +5432,7 @@ async function send(){
       method:"POST",headers:{"Content-Type":"application/json"},
       signal:abortCtl.signal,
       body:JSON.stringify({model,models:council,tier,messages,
-        auto_web:autoWeb,images:sentImages,agent}),
+        auto_web:autoWeb,images:sentImages,docs:sentDocs,agent}),
     });
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
@@ -5367,7 +5471,13 @@ async function send(){
     }
   }catch(err){
     if(err.name==="AbortError")wasAborted=true;
-    else full+="\n\n⚠️ "+err.message;
+    else{
+      // the wire died but drafts already arrived: the best draft IS the
+      // answer — only surface the error when we truly have nothing
+      const rescued=drafts.filter(x=>!/^\(no answer/.test(x.t));
+      if(!full.trim()&&rescued.length)full=rescued[0].t;
+      else full+="\n\n⚠️ "+err.message;
+    }
   }
 
   paintDrafts(aiDiv,drafts,false);   // merge done: collapse (or clear bar)
@@ -6461,7 +6571,7 @@ $("#sb-resize").addEventListener("mousedown",e=>{
   window.addEventListener("mousemove",move);
   window.addEventListener("mouseup",up);
 });
-$("#sb-resize").addEventListener("dblclick",()=>setSidebar(284));
+$("#sb-resize").addEventListener("dblclick",()=>setSidebar(384));
 
 /* ---------------------------------------------------------------- about */
 const aboutVeil=$("#about-veil");
