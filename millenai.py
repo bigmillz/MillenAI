@@ -4785,9 +4785,12 @@ body.perf .msg{animation:none}
   border:1px solid var(--line)}
 
 /* the blend progress bar — replaces live draft output entirely */
-.blendprog{margin:4px 0 16px;max-width:640px}
-.blendprog .lbl{animation:loadPulse 1.6s ease-in-out infinite}
-@keyframes loadPulse{0%,100%{opacity:.85}50%{opacity:.35}}
+.blendprog{margin:10px 0 16px;max-width:520px}
+.blendprog .track{height:4px;border-radius:2px;overflow:hidden;
+  background:rgba(255,255,255,.10)}
+.blendprog .fill{height:100%;width:0;border-radius:2px;
+  background:linear-gradient(90deg,var(--accent),var(--accent-hot));
+  box-shadow:0 0 12px var(--accent-dim)}
 .blendprog .lbl{font-family:var(--mono);font-size:13px;letter-spacing:.12em;
   text-transform:uppercase;color:var(--dim);margin-bottom:9px}
 .blendprog .track{height:9px;border-radius:5px;overflow:hidden;
@@ -5582,15 +5585,39 @@ function paintDrafts(div,drafts,live,statusText){
   if(live){
     if(d)d.remove();
     if(!drafts.length&&!statusText)return;
-    // one word, no bar, no play-by-play — per Patrick
     if(!p){
       p=document.createElement("div");p.className="blendprog";
-      p.innerHTML='<div class="lbl">Loading</div>';
+      p.innerHTML='<div class="track"><div class="fill"></div></div>';
       div.insertBefore(p,div.querySelector(".body"));
+    }
+    const mm=/(\d+)\s*of\s*(\d+)/.exec(statusText||"");
+    const total=mm?+mm[2]:Math.max(drafts.length+1,2);
+    const done=Math.min(drafts.length,total);
+    const now=performance.now();
+    if(!p.dataset.start)p.dataset.start=now;
+    if(p.dataset.done!==String(done)){
+      if(done>0)p.dataset.per=(now-(+p.dataset.start))/done;
+      p.dataset.done=done;p.dataset.t0=now;
+    }
+    p.dataset.total=total;
+    // a 150ms ticker owns the motion: MONOTONIC glide toward the pace
+    // estimate, alive even through silent engine loads
+    if(!p._tick){
+      p._tick=setInterval(()=>{
+        const t2=+p.dataset.total||2,d2=+p.dataset.done||0;
+        const per2=+p.dataset.per||28000;
+        const fr=Math.min(.96,(performance.now()-(+p.dataset.t0||performance.now()))/per2);
+        const want=Math.min(97,((d2+fr)/t2*100));
+        const cur=+p.dataset.w||0;
+        const w=Math.max(cur,cur+(want-cur)*.06);
+        p.dataset.w=w;
+        const f=p.querySelector(".fill");
+        if(f)f.style.width=w.toFixed(2)+"%";
+      },150);
     }
     return p;
   }
-  if(p)p.remove();
+  if(p){if(p._tick)clearInterval(p._tick);p.remove();}
   if(!drafts||!drafts.length)return;
   if(!d){
     d=document.createElement("details");
@@ -5613,8 +5640,7 @@ function paintDrafts(div,drafts,live,statusText){
 // instead; a single model keeps its name
 function whoLabel(s){
   if(!s)return s;
-  const n=s.split(",").length;
-  return n>1?("running "+n+" models"):s;
+  return s.split(",").length>1?"":s;
 }
 
 function addMsg(role,text,drafts){
