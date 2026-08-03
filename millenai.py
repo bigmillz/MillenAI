@@ -4490,6 +4490,15 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 .setup-row.clickable:hover{background:var(--accent-dim)}
 .setup-row .st.get{color:var(--accent)}
 #setup-list{max-height:46vh;overflow-y:auto;margin-right:-6px;padding-right:6px}
+.setup-fold{margin:10px 0 0}
+.setup-fold summary{
+  cursor:pointer;font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+  padding:6px 0;user-select:none;list-style:none;
+}
+.setup-fold summary::before{content:"\25b8  ";font-size:9px}
+.setup-fold[open] summary::before{content:"\25be  "}
+.setup-fold summary:hover{color:var(--dim)}
 #setup-note{color:var(--faint);font-size:11.5px;margin-top:10px;font-family:var(--mono)}
 #setup-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:14px}
 #setup-foot button{
@@ -6145,13 +6154,28 @@ function renderSetup(st){
       : '<div class="setup-row clickable" data-model="'+esc(m.label)+'">'
         +'<span class="nm">'+esc(m.label)+'</span>'+state(m)
         +'<div class="bar"><i style="width:'+(m.pct||0)+'%"></i></div></div>';
+  // CONSOLIDATED "Update Models" view: recommended picks up front,
+  // everything else counted and folded — never a wall of every model
   const missing=st.models.filter(m=>m.status!=="ready");
   const have=st.models.filter(m=>m.status==="ready");
-  if(missing.length)
-    html+='<div class="setup-head">Available to add \u2014 click one</div>'
-         +missing.map(row).join("");
+  const recs=missing.filter(m=>m.star);
+  const others=missing.filter(m=>!m.star);
+  const busy=st.models.filter(m=>m.status==="downloading"||m.status==="queued");
+  if(busy.length)
+    html+='<div class="setup-head">Downloading</div>'+busy.map(row).join("");
+  if(recs.length)
+    html+='<div class="setup-head">Recommended for this machine</div>'
+         +recs.filter(m=>!busy.includes(m)).map(row).join("");
+  else if(!busy.length)
+    html+='<div class="setup-head">Everything recommended is installed'
+         +' \u2713</div>';
+  if(others.length)
+    html+='<details class="setup-fold"><summary>More models \u00b7 '
+         +others.length+'</summary>'
+         +others.filter(m=>!busy.includes(m)).map(row).join("")+'</details>';
   if(have.length)
-    html+='<div class="setup-head">Installed</div>'+have.map(row).join("");
+    html+='<details class="setup-fold"><summary>Installed \u00b7 '
+         +have.length+'</summary>'+have.map(row).join("")+'</details>';
   setupList.innerHTML=html;
 
   setupList.querySelectorAll(".setup-row.clickable").forEach(el=>{
