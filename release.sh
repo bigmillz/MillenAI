@@ -75,8 +75,9 @@ ZIP="MillenAI-${VERSION}-Windows.zip"
 echo "→ publishing v$BUILD"
 git add -A && git commit -m "Release $VERSION (build $BUILD)" || true
 git push origin HEAD
+SHOW="$VERSION"; [[ "$VERSION" == *.*.0 ]] && SHOW="${VERSION%.0}"
 gh release create "v$BUILD" "$DMG" "$ZIP" \
-  --title "$VERSION" \
+  --title "$SHOW" \
   --notes "MillenAI $VERSION.
 
 **macOS** — download the .dmg. Existing installs update themselves.

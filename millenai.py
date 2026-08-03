@@ -81,6 +81,12 @@ except ImportError:
     HAS_WEBVIEW = False
 
 APP_VERSION = "2.0.1"   # bump here — UI, window, DMG all follow
+
+
+def short_version(v: str = None) -> str:
+    """Display form, macOS-style: '2.0.0'->'2.0', '2.0.1' stays."""
+    v = v or APP_VERSION
+    return v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
 APP_BUILD = 100               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
@@ -3043,16 +3049,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             html = (HTML_CONTENT
                     .replace("__AGENT_ROWS__", build_agent_rows())
                     .replace("__APP_VER_TAG__",
-                             APP_VERSION.replace(" ", "&nbsp;"))
+                             short_version().replace(" ", "&nbsp;"))
                     .replace("__APP_BETA__",
-                             'VERSION <b class="vnum">%s</b>' % APP_VERSION)
+                             'VERSION <b class="vnum">%s</b>' % short_version())
                     .replace("__TIER_ROWS__", build_tier_rows())
                     .replace("__CHIP__", chip_name())
                     .replace("__WIN_WIPE__",
                              "1" if (HAS_WEBVIEW and IS_MAC) else "0")
                     .replace("__SKY_N__", str(len(SKY_SOURCES)))
                     .replace("__SKY_DARK__", json.dumps(SKY_DARK))
-                    .replace("__APP_VER__", APP_VERSION))
+                    .replace("__APP_VER__", short_version()))
             body = html.encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -6818,7 +6824,7 @@ def maybe_version_splash():
         if last is None or not (HAS_WEBVIEW and IS_MAC):
             return          # fresh install gets the boot wipe, not this
         w = webview.create_window(
-            "", html=SPLASH_HTML.replace("__V__", APP_VERSION),
+            "", html=SPLASH_HTML.replace("__V__", short_version()),
             frameless=True, transparent=True, on_top=True,
             width=1100, height=420, focus=False)
 
@@ -6864,7 +6870,7 @@ def reap_orphan_engines():
 
 if __name__ == "__main__":
     threading.Thread(target=start_backend, daemon=True).start()
-    print(f"\n  MillenAI {APP_VERSION}")
+    print(f"\n  MillenAI {short_version()}")
     print(f"  running on http://127.0.0.1:{PORT}")
     reap_orphan_engines()
     maybe_version_splash()
@@ -6975,7 +6981,7 @@ if __name__ == "__main__":
     elif HAS_WEBVIEW:
         # Native macOS window (WKWebView). Blocks until the window closes.
         window = webview.create_window(
-            f"MillenAI {APP_VERSION}",
+            f"MillenAI {short_version()}",
             url,
             width=1320,
             height=860,
