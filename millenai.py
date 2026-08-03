@@ -6145,10 +6145,15 @@ function buildTiles(vw,vh){
   tileMeta={tw:tw,th:th,stw:stw,sth:sth};
 }
 
+let qLev=0,qAvg=8,qFrame=0;
 function starTick(ts){
   requestAnimationFrame(starTick);
   if(perf){warpLast=0;return;}
   const dt=Math.min(0.05,warpLast?(ts-warpLast)/1000:0.016);
+  // rolling frame-time average drives the quality level (EMA, ~20 frames)
+  qAvg+=((ts-warpLast||16)-qAvg)*.05;qFrame++;
+  if(qAvg>15&&qLev<2)      {qLev++;qAvg=12;}   // dropping frames: shed load
+  else if(qAvg<9.5&&qLev>0&&qFrame%90===0){qLev--;}  // headroom: restore
   warpLast=ts||0;
   warpT=Math.max(0,Math.min(1,warpT+(generating?dt/WARP_UP:-dt/WARP_DOWN)));
   // TURBO LAG: attack is ^2.8 (a beat of nothing, then it GRABS);
@@ -6192,7 +6197,8 @@ function starTick(ts){
   if(snapCv.width!==sw2||snapCv.height!==sh2){
     snapCv.width=sw2;snapCv.height=sh2;tiles=[];tileMeta=null;
   }
-  snapCtx.drawImage(vid,0,0,sw2,sh2);   // the one video read per frame
+  if(qLev===0||qFrame%2===0)
+    snapCtx.drawImage(vid,0,0,sw2,sh2);  // 30Hz sampling under load
   if(!tiles.length)buildTiles(sw2,sh2);
   // the vanishing point is the MAIN PANEL's centre, not the window's —
   // with a sidebar on the left the two differ, and a burst centred on
@@ -6209,7 +6215,12 @@ function starTick(ts){
   sctx.globalCompositeOperation="source-over";
   sctx.globalAlpha=Math.min(1,e*3);
   const rate=dt*(.45+2.8*e+skyCreep);
-  for(const t of tiles){
+  const stride=qLev+1;
+  for(let ti=0;ti<tiles.length;ti++){
+    const t=tiles[ti];
+    // decimated tiles still MOVE (z updates below are the animation
+    // state) — they just skip their draw call this frame
+    const skipDraw=stride>1&&(ti+qFrame)%stride!==0;
     const zPrev=t.z;
     if(generating){
       // SPLIT + ZOOM: every slat at its own depth speed — the frame
@@ -6231,6 +6242,7 @@ function starTick(ts){
       if(generating)t.z=1+Math.random()*.5;
       continue;
     }
+    if(skipDraw)continue;
     // STARBURST: each chip rotates to point along its own radius and
     // stretches with speed — a field of image-slivers racing outward.
     // Chips stay SMALL (size capped at 1.8x) and spend closeness on
@@ -6273,7 +6285,7 @@ if(matchMedia("(pointer:fine)").matches){
   },{passive:true});
   (function paraTick(){
     requestAnimationFrame(paraTick);
-    if(document.body.classList.contains("perf"))return;
+    if(document.body.classList.contains("perf")||generating)return;
     pxN+=(pxT-pxN)*.04;pyN+=(pyT-pyN)*.04;
     skv.style.transform="scale(1.05) translate("+(-pxN*16).toFixed(1)+"px,"+(-pyN*11).toFixed(1)+"px)";
   })();
