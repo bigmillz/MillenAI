@@ -1709,6 +1709,27 @@ _results_cache = {}        # query -> (fetched_at, [result dicts])
 _RESULTS_TTL = 300.0
 
 
+def _page_text(url: str, cap: int = 2600) -> str:
+    """The readable text of a page, or "" — research quality lives and
+    dies on this: models writing briefs from 200-char snippets invent the
+    rest, so the top sources get actually READ."""
+    try:
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0 (Macintosh) MillenAI"})
+        with urllib.request.urlopen(req, timeout=7) as r:
+            if "text/html" not in (r.headers.get("Content-Type") or ""):
+                return ""
+            raw = r.read(400_000).decode("utf-8", "replace")
+        raw = re.sub(r"(?is)<(script|style|nav|header|footer|aside)[^>]*>"
+                     r".*?</\1>", " ", raw)
+        raw = re.sub(r"(?s)<[^>]+>", " ", raw)
+        raw = re.sub(r"&[a-z]+;", " ", raw)
+        raw = re.sub(r"\s+", " ", raw).strip()
+        return raw[:cap]
+    except Exception:
+        return ""
+
+
 def search_results(query: str, limit: int = 5) -> list:
     """Structured DuckDuckGo hits — title, snippet and URL. Never raises.
 
@@ -2329,8 +2350,22 @@ def run_research(labels: list, messages: list, emit, status) -> None:
             "the searches came back empty — check the network connection")
     sources = sources[:12]
 
+    # READ the top pages, don't just skim their snippets — fetched in
+    # parallel, snippet kept whenever a page won't give up its text
+    status("reading the top sources")
+    def _enrich(s):
+        text = _page_text(s["url"])
+        if len(text) > 300:
+            s["body"] = text
+    threads = [threading.Thread(target=_enrich, args=(s,))
+               for s in sources[:5]]
+    for t_ in threads:
+        t_.start()
+    for t_ in threads:
+        t_.join(timeout=9)
+
     block = "\n\n".join(
-        f"[{n}] {s['title']}\n{s['body'][:600]}"
+        f"[{n}] {s['title']}\n{s['body'][:2200]}"
         for n, s in enumerate(sources, 1))
     brief = [messages[0],
              {"role": "user",
