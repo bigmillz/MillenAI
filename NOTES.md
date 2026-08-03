@@ -884,3 +884,11 @@ that found all three: re-execute the page's own script text via
   dead code — the prefix router ate it. Seen live.) Legacy shared-key
   workers still work. Hub URL defaults to FLEET_HOME; advanced fold
   keeps the override.
+- 2.8 NO LIMITS: models-up arrow on the MODELS bar opens the plan panel;
+  "No limits" checkbox (prefs no_limits, cached in _no_limits) makes
+  model_fits_machine offer everything SUPPORTED and model_fits_memory
+  stand down entirely (a 70B on 48GB swaps hard — explicit ask). The
+  unlocked Max flagship is capped at <= physical RAM (70B yes, 120B no).
+  GOTCHA: docstring-anchored inserts — model_fits_memory has NO
+  docstring; the gate landed in weather_snippets and would have returned
+  True for every forecast. Anchor on the def line, always.

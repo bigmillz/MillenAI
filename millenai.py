@@ -236,7 +236,23 @@ def machine_budget_bytes():
     return int(psutil.virtual_memory().total * 0.75)
 
 
+_no_limits = {"v": None}
+
+
+def no_limits() -> bool:
+    if _no_limits["v"] is None:
+        try:
+            _no_limits["v"] = bool(load_prefs(None).get("no_limits"))
+        except Exception:
+            _no_limits["v"] = False
+    return bool(_no_limits["v"])
+
+
 def model_fits_machine(label: str) -> bool:
+    if no_limits():
+        # Patrick's "disobey the limits" switch: every supported model is
+        # offered. The runtime admission check still referees actual RAM.
+        return SUPPORTED.get(label, False)
     budget = machine_budget_bytes()
     need = MODEL_MEM_BYTES.get(label)
     if budget is None or need is None:
@@ -654,6 +670,13 @@ def _starter_labels() -> list:
             picks.append(label)
 
     by_size = sorted(fits, key=lambda l: -MODEL_INFO[l]["gb"])
+    if no_limits() and HAS_PSUTIL:
+        # unlocked, not unhinged: the flagship stays within what RAM can
+        # plausibly page (~1.6x memory = a 70B on 48GB, never the 235B)
+        cap = psutil.virtual_memory().total
+        sized = [l for l in by_size
+                 if MODEL_MEM_BYTES.get(l, 0) <= cap]
+        by_size = sized or by_size
     add(next((l for l in by_size), None))                      # flagship
     add(next((l for l in by_size if l.startswith("Gemma 4")), None))
     add(next((l for l in by_size if MODEL_INFO[l]["gb"] <= 8.5
@@ -685,7 +708,7 @@ def plan_labels(plan: str) -> list:
             if extra in fits and extra not in picks:
                 picks.append(extra)
         return picks
-    return list(STARTER_LABELS)
+    return _starter_labels()
 
 # who merges in combine mode — strongest first
 MERGE_RANK = sorted((l for l in MODEL_ROUTES),
@@ -771,6 +794,10 @@ def _mem_available():
 
 
 def model_fits_memory(label: str) -> bool:
+    if no_limits():
+        # "disobey the limits": admission stands down entirely — a 70B on
+        # a 48GB Mac swaps hard, and that is the explicit ask
+        return True
     # `available` on macOS omits reclaimable file cache — right after an
     # 18.5 GB model download the cache ATE the headroom and the freshly
     # installed flagship was refused admission (seen live). What the OS
@@ -1832,6 +1859,7 @@ def setup_status() -> dict:
 
     # fit-filtered like the sidebar: the add-models panel never offers a
     # model this machine cannot hold resident
+    stars_now = set(_starter_labels())
     for label in [l for l in MODEL_INFO
                   if SUPPORTED.get(l) and model_fits_machine(l)]:
         kind, _target = MODEL_ROUTES[label]
@@ -1849,7 +1877,7 @@ def setup_status() -> dict:
                 pct = job.get("pct", 0)
         models.append({"label": label, "est_gb": round(est / 1e9, 1),
                        "status": status, "pct": pct,
-                       "star": label in STARTER_LABELS,
+                       "star": label in stars_now,
                        "supported": SUPPORTED.get(label, True),
                        "note": job.get("note", "")})
 
@@ -3807,6 +3835,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 base = self._data_base()
                 cur = load_prefs(base)
                 cur.update(d)
+                if base is None and "no_limits" in d:
+                    _no_limits["v"] = bool(d.get("no_limits"))
                 if base is None and any(k.startswith("contrib_") for k in d):
                     threading.Thread(target=contrib_apply, args=(cur,),
                                      daemon=True).start()
@@ -4478,6 +4508,10 @@ body.resizing{cursor:col-resize;user-select:none}
   margin-bottom:10px;gap:10px;
 }
 #telemetry .t-head span{white-space:nowrap}
+#models-up{cursor:pointer;color:var(--dim);font-weight:700;
+  padding:0 4px;border:1px solid var(--line);border-radius:6px;
+  font-size:11px;line-height:1.5}
+#models-up:hover{color:var(--text);border-color:var(--accent-hot)}
 #telemetry .t-head .live{color:var(--text);white-space:nowrap}
 .meter-row{margin-bottom:9px}
 .meter-row:last-child{margin-bottom:0}
@@ -5091,6 +5125,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   color:var(--faint)}
 .plan:hover{border-color:var(--accent-hot)}
 .plan.on{border-color:var(--accent-hot);background:var(--accent-dim)}
+#nolimits-row{display:flex;gap:8px;align-items:flex-start;
+  font-size:11px;color:var(--faint);margin:10px 2px 0;cursor:pointer;
+  line-height:1.5;text-align:left}
+#nolimits-row input{margin-top:2px;accent-color:var(--accent)}
 #setup-go{background:var(--accent);color:#1a1a1a;border:none}
 #setup-go:hover{background:var(--accent-hot);color:#000}
 #setup-go:disabled{opacity:.55;cursor:default}
@@ -5183,7 +5221,8 @@ __AGENT_ROWS__
       <div class="meter" id="gpu-meter"></div>
     </div>
     <div class="meter-row">
-      <div class="meter-label"><span>MODELS</span></div>
+      <div class="meter-label"><span>MODELS</span>
+        <b id="models-up" title="Get more models">&uarr;</b></div>
       <div class="meter" id="models-meter"></div>
     </div>
   </div>
@@ -5295,6 +5334,9 @@ __AGENT_ROWS__
       experience — private, and entirely on this Mac. Start chatting the
       moment the first piece lands.</p>
     <div id="setup-list"></div>
+    <label id="nolimits-row"><input type="checkbox" id="nolimits">
+      No limits — offer models beyond this machine&rsquo;s memory
+      (can swap hard)</label>
     <div id="setup-note"></div>
     <div id="setup-foot">
       <button id="setup-later">Later</button>
@@ -6829,6 +6871,16 @@ setupGo.addEventListener("click",async()=>{
   setupTick();
 });
 $("#open-setup").addEventListener("click",()=>{aboutVeil.hidden=true;openSetup();});
+$("#models-up").addEventListener("click",openSetup);
+(async()=>{try{
+  $("#nolimits").checked=!!(await(await fetch("/api/prefs")).json()).no_limits;
+}catch(e){}})();
+$("#nolimits").addEventListener("change",async()=>{
+  await fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({no_limits:$("#nolimits").checked})});
+  setupTick();   // the plans + GB re-price under the new rules
+});
 $("#models-flag").addEventListener("click",()=>{openSetup();});
 function paintModelsFlag(st){
   const f=$("#models-flag");
