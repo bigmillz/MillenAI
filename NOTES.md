@@ -936,3 +936,15 @@ that found all three: re-execute the page's own script text via
   provider "tests fine in turbo.sh but says unavailable in-app", that is
   the fingerprint. Also: the revise pass had to be told not to open with
   "Here's a rewritten version".
+
+## 2.14
+- THE WARP IS RETIRED (Patrick: "too much GPU and too laggy"). starTick
+  is a no-op that hides #stars; no canvas, no per-frame video reads. The
+  moment is carried by CSS only: body.gen dims #skyline, and the
+  streaming answer wears a bottom mask so the newest line emerges from
+  transparency (.msg.ai.live). paintBrandFromSky now samples the VIDEO
+  directly — it used to read the warp's snapshot canvas, which no longer
+  exists.
+- Backdrop rotates per launch again (loading bar is the point) and the
+  New backdrop button is gone.
+- Greetings got a New York accent.

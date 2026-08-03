@@ -5223,6 +5223,20 @@ body:not(.perf) .caret{animation:blink .9s step-end infinite}
 body.perf #composer-wrap{background:var(--bg);border-top:1px solid var(--line-soft);padding-top:14px}
 #skyline video{transition:transform 1.1s cubic-bezier(.22,.61,.36,1);
   will-change:transform}
+/* thinking: the city steps back so the words own the screen */
+#skyline{transition:filter .9s ease,opacity .9s ease}
+body.gen #skyline{filter:brightness(.62) saturate(.9)}
+/* streaming: the newest line emerges from nothing instead of snapping in */
+.msg.ai.live .body{
+  -webkit-mask-image:linear-gradient(to bottom,#000 calc(100% - 2.4em),
+    rgba(0,0,0,.35) calc(100% - .8em),transparent 100%);
+          mask-image:linear-gradient(to bottom,#000 calc(100% - 2.4em),
+    rgba(0,0,0,.35) calc(100% - .8em),transparent 100%);
+}
+.msg.ai .body{animation:answerIn .5s ease both}
+@keyframes answerIn{from{opacity:0;transform:translateY(3px)}
+                    to{opacity:1;transform:none}}
+body.perf .msg.ai .body{animation:none}
 #composer:focus-within{border-color:rgba(255,255,255,.28);
   box-shadow:0 0 0 1px var(--accent-dim),
              0 10px 34px -14px var(--bwglow,rgba(150,160,255,.4))}
@@ -5790,7 +5804,6 @@ __AGENT_ROWS__
       </details>
     </div>
     <div id="adv-grid">
-      <button class="about-btn" id="about-sky">New backdrop</button>
       <button class="about-btn" id="open-setup">Download models&hellip;</button>
       <button class="about-btn" id="about-check">Check for updates</button>
     </div>
@@ -6304,6 +6317,7 @@ async function send(){
   generating=true; document.body.classList.add("gen");
   sendBtn.textContent="■"; sendBtn.classList.add("stop"); sendBtn.title="Stop";
   const aiDiv=addMsg("assistant",""); const body=aiDiv.querySelector(".body");
+  aiDiv.classList.add("live");     // soft mask on the newest line
   body.innerHTML='<span class="caret"></span>';
 
   abortCtl=new AbortController();
@@ -6363,6 +6377,7 @@ async function send(){
     }
   }
 
+  aiDiv.classList.remove("live");
   paintDrafts(aiDiv,drafts,false);   // merge done: collapse (or clear bar)
   // the stream died but good drafts exist — the best one IS the answer;
   // never show "engine returned nothing" over a usable draft
@@ -6445,6 +6460,15 @@ const GREETINGS=[
   "What are we solving first?","Your move.","What's it gonna be?",
   "Feed me a problem.","Where can I earn my keep?",
   "What's worth a long answer?","Let's go deep.",
+  // a little NYC, per Patrick
+  "What's up?","Let's fucking go.","Yo.","What's good?",
+  "Talk to me, Goose.","Whaddaya need?","Let's get it.",
+  "What are we doing today?","Hit me.","I'm listening.",
+  "What's the move?","Say less.","Let's cook.","Bet — what's up?",
+  "Alright, what've you got?","Lay it on me.","What's the word?",
+  "Ready when you are, chief.","Let's run it.","What's the play?",
+  "Go ahead, I got time.","Shoot.","What're we getting into?",
+  "Let's make it happen.","Straight up — what do you need?",
 ];
 function greeting(){return GREETINGS[Math.floor(Math.random()*GREETINGS.length)];}
 (function(){const g=$(".greet");if(g)g.textContent=greeting();})();
@@ -6680,12 +6704,7 @@ async function bootSkyline(){
   // reads best over them — and any clip is fair game after that.
   const mood=x=>darkSet.has(x)||!firstEver;
   let i;
-  if(last>=0&&last<SKY_N&&mood(last)){
-    // THE HOUSE BACKDROP, per Patrick: the same clip every launch,
-    // looping forever — Apple authored these to repeat. Random happens
-    // exactly once, on the first run ever.
-    i=last;
-  }else if(cached.length){
+  if(cached.length){
     let pool=cached.filter(x=>mood(x));
     if(!pool.length)pool=cached.slice();
     const pick=pool.length?pool:cached;
@@ -6805,7 +6824,7 @@ function harvestLights(ts){
   if(!generating||ts-lastHarvest<420||lightMotes.length>140)return;
   lastHarvest=ts;
   try{
-    probeCtx.drawImage(snapCv,0,0,160,90);
+    probeCtx.drawImage(c,0,0,160,90);
     const d=probeCtx.getImageData(0,0,160,90).data;
     const found=[];
     for(let i=0;i<d.length;i+=16){          // stride: every 4th pixel
@@ -6935,134 +6954,13 @@ function buildTiles(vw,vh){
 }
 
 let qLev=0,qAvg=8,qFrame=0;
-function starTick(ts){
-  requestAnimationFrame(starTick);
-  if(perf){warpLast=0;return;}
-  const dt=Math.min(0.05,warpLast?(ts-warpLast)/1000:0.016);
-  // rolling frame-time average drives the quality level (EMA, ~20 frames)
-  qAvg+=((ts-warpLast||16)-qAvg)*.05;qFrame++;
-  if(qAvg>15&&qLev<2)      {qLev++;qAvg=12;}   // dropping frames: shed load
-  else if(qAvg<9.5&&qLev>0&&qFrame%90===0){qLev--;}  // headroom: restore
-  warpLast=ts||0;
-  warpT=Math.max(0,Math.min(1,warpT+(generating?dt/WARP_UP:-dt/WARP_DOWN)));
-  // TURBO LAG: attack is ^2.8 (a beat of nothing, then it GRABS);
-  // release is ^1.5 over a longer window (fat, gentle tail)
-  const e=generating?Math.pow(warpT,2.8):Math.pow(warpT,1.5);
-  warpSpeed=WARP_IDLE+(WARP_FULL-WARP_IDLE)*e;
-
-  const vid=(skyline&&!skyline.hidden)?$("#sky-color"):null;
-  const ready=vid&&vid.videoWidth>0;
-  // HYPERLAPSE THINKING: while a model works, the city itself races —
-  // playback ramps to ~6x with the warp and eases home with the settle
-  if(ready){try{vid.playbackRate=1+e*5;}catch(err){}}
-  if(!ready||e<=0.015){             // calm, or nothing to tear
-    sctx.clearRect(0,0,sw,sh);
-    if(skyline){skyline.style.opacity="";skyline.style.transform="";
-      skyline.style.filter="";}
-    starCv.style.transform="";
-    if(tiles.length){tiles=[];tileMeta=null;}
-    lightMotes.length=0;
-    return;
-  }
-
-  if(generating&&warpT>=1)skyCreep=Math.min(.6,skyCreep+dt*.028);
-  else skyCreep=Math.max(0,skyCreep-dt*.3);
-  // LAUNCH RECOIL: during the turbo spool the whole backdrop pulls BACK
-  // a touch — "we're ready to launch" — then the streaks fire through it.
-  // recoil rises with the spool and collapses as the boost takes over
-  const recoil=Math.min(warpT/.35,1)*(1-e);
-  const rescale="scale("+(1-.055*recoil).toFixed(4)+")";
-  skyline.style.transform=rescale;
-  starCv.style.transform=rescale;
-  // ...and the colour DRAINS as it's sucked away: the visible world goes
-  // black & white while the streaks (sampling the colourful frame) fire
-  // through it in full colour — grey city, colour rocket
-  skyline.style.filter="grayscale("+recoil.toFixed(3)+") brightness("
-    +((1-.12*recoil)*.82).toFixed(3)+")";
-  skyline.style.opacity=Math.max(0,1-e*3).toFixed(3);
-
-  const sw2=Math.min(1280,vid.videoWidth);
-  const sh2=Math.round(vid.videoHeight*sw2/vid.videoWidth);
-  if(snapCv.width!==sw2||snapCv.height!==sh2){
-    snapCv.width=sw2;snapCv.height=sh2;tiles=[];tileMeta=null;
-  }
-  if(qLev===0||qFrame%2===0)
-    snapCtx.drawImage(vid,0,0,sw2,sh2);  // 30Hz sampling under load
-  if(!tiles.length)buildTiles(sw2,sh2);
-  // the vanishing point is the MAIN PANEL's centre, not the window's —
-  // with a sidebar on the left the two differ, and a burst centred on
-  // the window reads visibly off-axis in the chat area
-  const mainEl=document.getElementById("main");
-  const scale=sw/Math.max(1,starCv.offsetWidth);
-  const cx=mainEl?(mainEl.offsetLeft+mainEl.offsetWidth/2)*scale:sw/2;
-  const m=tileMeta,cy=sh/2;
-  // LONG-EXPOSURE TRAILS: instead of wiping the frame, fade it — every
-  // streak leaves phosphor behind, night-photography style
-  sctx.globalCompositeOperation="destination-out";
-  sctx.fillStyle="rgba(0,0,0,.28)";
-  sctx.fillRect(0,0,sw,sh);
-  sctx.globalCompositeOperation="source-over";
-  sctx.globalAlpha=Math.min(1,e*3);
-  const rate=dt*(.45+2.8*e+skyCreep);
-  const stride=qLev+1;
-  for(let ti=0;ti<tiles.length;ti++){
-    const t=tiles[ti];
-    // decimated tiles still MOVE (z updates below are the animation
-    // state) — they just skip their draw call this frame
-    const skipDraw=stride>1&&(ti+qFrame)%stride!==0;
-    const zPrev=t.z;
-    if(generating){
-      // SPLIT + ZOOM: every slat at its own depth speed — the frame
-      // visibly separates into vertical lines as they rush the viewer
-      t.z*=1-rate*t.zj;
-      if(t.z<.18){t.z=1+Math.random()*.5;continue;}
-    }else{
-      // SETTLE: z pulls home; scatter is proportional to (1-z) so it
-      // collapses to exactly zero — every slat lands back in its grid
-      // slot as the intact video fades up beneath it
-      t.z+=(1-t.z)*Math.min(1,dt*5);
-    }
-    const inv=1/t.z;
-    const scat=(1-Math.min(t.z,1));       // 0 at rest, grows toward viewer
-    const px=cx+(t.ax-cx)*inv+t.jx*scat*sw*.05;
-    const py=cy+(t.ay-cy)*inv+t.jy*scat*sh*.05;
-    const w=m.tw*inv, h=m.th*inv;
-    if(px<-w*2||px>sw+w*2||py<-h*2||py>sh+h*2){
-      if(generating)t.z=1+Math.random()*.5;
-      continue;
-    }
-    if(skipDraw)continue;
-    // STARBURST: each chip rotates to point along its own radius and
-    // stretches with speed — a field of image-slivers racing outward.
-    // Chips stay SMALL (size capped at 1.8x) and spend closeness on
-    // streak LENGTH instead: a star gets longer as it nears you, never
-    // fatter — that cap is what separates "stars" from "flying blocks".
-    // At rest cap=1, len=1, rotation cancels against the intact frame —
-    // the settle still reconstructs the picture exactly.
-    const dxv=px-cx,dyv=py-cy,dd=Math.hypot(dxv,dyv);
-    let co=1,si=0;if(dd>1){co=dxv/dd;si=dyv/dd;}
-    sctx.setTransform(co,si,-si,co,px,py);
-    // Tesla-launch fine: streaks are needle-thin (32% of the cell across)
-    // and longer, and they thin FURTHER with speed — length comes from
-    // velocity and closeness, thickness never does
-    const stretch=1+Math.max(0,(zPrev-t.z)/t.z)*13;
-    const cap=Math.min(inv,1.6);
-    const ww=m.tw*cap,hh=m.th*cap;
-    const len=stretch*(1+(inv-1)*1.4);
-    // DISINTEGRATION: a fragment leaves at FULL cell size (the mosaic
-    // still reads as the picture) and erodes into a needle as it
-    // accelerates — the image visibly crumbles into shooting stars, and
-    // the settle reverses it: needles fatten back into the frame
-    const needle=.055/Math.sqrt(Math.max(1,len*.5));
-    const base=1-.6*Math.min(1,e*1.6);
-    const thin=(1-(1-needle)*Math.min(1,scat*4))*base;
-    sctx.drawImage(snapCv,t.sx,t.sy,m.stw,m.sth,
-      -ww*len*.35,-hh*thin/2,ww*len*.7,hh*thin);
-  }
-  sctx.setTransform(1,0,0,1,0,0);
-  sctx.globalAlpha=1;
-  harvestLights(ts);
-  drawMotes(dt);
+function starTick(){
+  // THE WARP IS RETIRED, per Patrick: gorgeous, but it fought the model
+  // for the GPU on every query. The backdrop now carries the moment on
+  // its own (a gentle CSS dim while generating) and the answer fades in
+  // as it streams — all compositor work, zero canvas.
+  if(starCv){starCv.style.display="none";
+    try{sctx.clearRect(0,0,starCv.width,starCv.height);}catch(e){}}
 }
 starTick();
 // PARALLAX: the city leans a few px toward the cursor — barely there,
@@ -7765,19 +7663,6 @@ $("#contrib-toggle").addEventListener("click",async()=>{
 });
 $("#about-close").addEventListener("click",()=>{aboutVeil.hidden=true;});
 aboutVeil.addEventListener("click",e=>{if(e.target===aboutVeil)aboutVeil.hidden=true;});
-$("#about-sky").addEventListener("click",async()=>{
-  // pick a different clip, warm it, then swap it in — one deliberate
-  // change, and it becomes the new permanent backdrop
-  const btn=$("#about-sky");btn.textContent="Finding one\u2026";
-  try{
-    const cur=parseInt(localStorage.getItem("millen.sky")||"-1",10);
-    let n=cur;
-    for(let i=0;i<40&&n===cur;i++)n=Math.floor(Math.random()*SKY_N);
-    localStorage.setItem("millen.sky",n);
-    await fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{});
-    location.reload();
-  }catch(e){btn.textContent="New backdrop";}
-});
 $("#about-check").addEventListener("click",async ev=>{
   const b=ev.currentTarget,was=b.textContent;
   b.disabled=true;b.textContent="Checking\u2026";
