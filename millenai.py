@@ -2207,8 +2207,16 @@ def _detruncate(text: str) -> str:
     return t.strip()
 
 
+PEER_INSTRUCTION = (
+    "Below are several draft answers to the same question, plus the "
+    "question itself. Write YOUR OWN single best answer: take the "
+    "strongest material from every draft, correct anything wrong, fill "
+    "the gaps the drafts missed, and write it as one coherent reply. "
+    "Never mention the drafts or this process.\n\n")
+
+
 def run_council(labels: list, messages: list, emit, status,
-                reflect: bool = False) -> None:
+                reflect: bool = False, peer: bool = False) -> None:
     """Ask each selected model in turn, then stream a merged answer.
 
     Sequential on purpose: only one MLX engine can be resident at a time
@@ -2274,6 +2282,39 @@ def run_council(labels: list, messages: list, emit, status,
     if len(good) == 1:
         emit(good[0][1])  # only one survived — nothing to merge
         return
+
+    # PEER REVIEW (Power mode, per Patrick): every contributor reads ALL
+    # the drafts and rewrites its own best answer from them; Gemma then
+    # merges the rewrites. Twice the engine passes — the mode that says
+    # "take as long as you need, give me your best".
+    if peer and len(good) >= 2:
+        question0 = messages[-1]["content"] if messages else ""
+        block = "\n\n".join(f"[draft {n}]\n{t[:1200]}"
+                             for n, (_l, t) in enumerate(good[:5], 1))
+        reviews = []
+        for i, (label, _t) in enumerate(good, 1):
+            if not model_fits_memory(label):
+                continue
+            status(f"peer review: {label} rewriting · {i} of {len(good)}")
+            parts = []
+            try:
+                run_model(label, [messages[0],
+                                  {"role": "user",
+                                   "content": PEER_INSTRUCTION
+                                   + "QUESTION: " + question0
+                                   + "\n\n" + block}], parts.append)
+            except Exception:
+                continue
+            text = strip_think("".join(parts))
+            if text and not _looks_degenerate(text) and len(text) > 200:
+                reviews.append((label, text))
+                try:
+                    emit(NUL + "DRAFT:" + json.dumps(
+                        {"m": label + " (rewrite)", "t": text[:1200]}) + NUL)
+                except Exception:
+                    pass
+        if len(reviews) >= 2:
+            good = reviews
 
     # Gemma writes the final answer whenever it's on this machine and fits;
     # otherwise fall back to the strongest answering model that fits
@@ -3768,7 +3809,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 run_research(council, full_messages, emit, status)
             elif len(council) > 1:
                 run_council(council, full_messages, emit, status,
-                            reflect=(tier == "Thinking"))
+                            reflect=(tier == "Thinking"),
+                            peer=(tier == "Power"))
             else:
                 # guarded like every other path now: a lone model that
                 # collapses into repetition gets cut back to its coherent
@@ -4168,7 +4210,6 @@ body.perf #brand .name{animation:none;filter:none}
 @keyframes blink{50%{opacity:.25}}
 /* performance mode: telemetry goes dark AND stops polling (the GPU probe
    and meter repaints are the expensive part) */
-body.perf #telemetry{opacity:.13;filter:grayscale(1);pointer-events:none}
 
 /* ------------------------------------------------------------------ main */
 #main{flex:1;height:100%;display:flex;flex-direction:column;position:relative}
@@ -6618,7 +6659,10 @@ function paintModelsFlag(st){
   if(st.busy){
     f.hidden=!veil.hidden?true:false;
     f.textContent="DOWNLOADING \u00b7 "+st.overall_pct+"%";
+    f.style.background="linear-gradient(90deg,#4a7fd4 "+st.overall_pct
+      +"%,rgba(74,127,212,.22) "+st.overall_pct+"%)";
   }else{
+    f.style.background="";
     f.textContent="MODELS AVAILABLE";
     f.hidden=!(st.mlx_ok&&!st.needs_setup&&
       st.models.some(m=>m.star&&m.status!=="ready"));
