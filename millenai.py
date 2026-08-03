@@ -3992,7 +3992,7 @@ body.resizing{cursor:col-resize;user-select:none}
    contrast of open line-work against a filled chameleon block is the
    mark. One element, two voices. */
 #brand .name{
-  font-size:44px;letter-spacing:.02em;line-height:1.1;
+  font-size:53px;letter-spacing:.02em;line-height:1.1;
   display:inline-flex;align-items:baseline;
   filter:drop-shadow(0 0 1.5px rgba(255,255,255,.30))
          drop-shadow(0 2px 16px var(--bwglow,rgba(150,160,255,.38)));
@@ -4352,19 +4352,6 @@ body.perf #hero h1 .halo span,body.perf #hero h1::after{
 /* the wordmark centres on its own; LIVE is pulled out of the flow so it
    sits further right without dragging the title off-centre */
 #hero .h1row{display:flex;align-items:center;justify-content:center;position:relative}
-/* LIVE sits in the flow: as it expands the centred row grows, sliding
-   "MillenAI" to the left. Same face and size as the wordmark, dark grey. */
-#hero .live-big{
-  font-size:92px;font-weight:700;letter-spacing:-.015em;line-height:1;
-  color:rgba(85,85,85,.75);white-space:nowrap;overflow:hidden;
-  -webkit-text-stroke:2px #d4d6da;
-  text-shadow:0 2px 14px rgba(0,0,0,.5);
-  max-width:0;opacity:0;margin-left:0;
-  transition:max-width .55s cubic-bezier(.4,0,.2,1),
-             opacity .45s ease,margin-left .55s cubic-bezier(.4,0,.2,1);
-}
-body.live #hero .live-big{max-width:5ch;opacity:1;margin-left:.26em}
-body.perf #hero .live-big{transition:none}
 /* subdued deep-blue accents — deliberately quiet next to the wordmark */
 #hero .beta-tag{
   font-family:var(--helv);font-weight:600;color:#8e8e8e;
@@ -4822,7 +4809,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
     -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
   }
   #hero h1{font-size:10.5vw}
-  #hero .live-big{font-size:10.5vw;-webkit-text-stroke:1.2px #d4d6da}
   #hero .greet{font-size:28px}
   #skyload{left:50%;width:min(340px,78vw)}
   #composer-wrap{padding:0 10px 12px}
@@ -4876,10 +4862,6 @@ __AGENT_ROWS__
   </div>
 
   <div id="settings">
-    <div class="toggle-row" id="web-toggle" title="Looks up live snippets when a question needs current info">
-      <div class="switch"></div>
-      Live web search
-    </div>
     <div class="toggle-row" id="perf-toggle" style="margin-top:14px">
       <div class="switch"></div>
       Performance mode
@@ -4913,7 +4895,7 @@ __AGENT_ROWS__
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
-      <div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1><span class="live-big">LIVE</span></div>
+      <div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1></div>
       <div class="beta-tag">__APP_BETA__</div>
       <p class="greet">What's going on today?</p>
     </div>
@@ -5015,7 +4997,7 @@ const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
 let messages=[], generating=false, abortCtl=null;
 let model=localStorage.getItem("millen.model")||"Llama 3.2 3B";
 let perf=localStorage.getItem("millen.perf")==="1";
-let autoWeb=localStorage.getItem("millen.web")!=="0";  // on unless turned off
+const autoWeb=true;   // live web is ALWAYS on now — no switch
 let combine=false;   // superseded by tiers
 let voiceChat=localStorage.getItem("millen.voice")==="1";
 let statsTimer=null;   // telemetry poll handle; perf mode clears it
@@ -5071,17 +5053,6 @@ function setPerf(on){
 $("#perf-toggle").addEventListener("click",()=>setPerf(!perf));
 setPerf(perf);
 
-/* --------------------------------------------------- live web search */
-function paintLive(){
-  document.body.classList.toggle("live",!!autoWeb);
-}
-function setWeb(on){
-  autoWeb=on; $("#web-toggle").classList.toggle("on",on);
-  localStorage.setItem("millen.web",on?"1":"0");
-  paintLive();
-}
-$("#web-toggle").addEventListener("click",()=>setWeb(!autoWeb));
-setWeb(autoWeb);
 
 /* ------------------------------------------------------- voice chat */
 function setVoice(on){
@@ -5608,8 +5579,7 @@ async function pushChatsToDisk(){
 }
 
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet"><span class="spark">✳</span>'+esc(greeting())+'</p></div>';
-  paintLive();
+  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1></div><div class="beta-tag">__APP_BETA__</div><p class="greet"><span class="spark">✳</span>'+esc(greeting())+'</p></div>';
 }
 function saveChats(){
   // write through to disk, coalesced so a burst of messages is one write
@@ -6554,9 +6524,9 @@ function paintModelsFlag(st){
   const f=$("#models-flag");
   if(st.busy){
     f.hidden=!veil.hidden?true:false;
-    f.textContent="DOWNLOADING \u00b7 "+st.overall_pct+"%";
+    f.textContent="MODELS DOWNLOADING \u00b7 "+st.overall_pct+"%";
     f.style.background="linear-gradient(90deg,#4a7fd4 "+st.overall_pct
-      +"%,rgba(74,127,212,.22) "+st.overall_pct+"%)";
+      +"%,#1c2f5e "+st.overall_pct+"%)";
   }else{
     f.style.background="";
     f.textContent="MODELS AVAILABLE";
