@@ -4479,7 +4479,7 @@ body.perf #chat-scroll{scroll-behavior:auto}
    same diagonal mask that rides with the band, so glow and colour arrive
    together under it. */
 #hero h1{
-  font-size:92px;font-weight:700;letter-spacing:-.015em;
+  font-size:132px;font-weight:700;letter-spacing:-.012em;
   position:relative;z-index:0;color:#9a9a9a;-webkit-text-fill-color:#9a9a9a;
 }
 /* The halo is a REAL child element (.halo > span), not ::before: Blink
@@ -5015,7 +5015,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
     font-size:19px;cursor:pointer;
     -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
   }
-  #hero h1{font-size:10.5vw}
+  #hero h1{font-size:14vw}
   #hero .greet{font-size:28px}
   #skyload{left:50%;width:min(340px,78vw)}
   #composer-wrap{padding:0 10px 12px}
@@ -5073,14 +5073,13 @@ __AGENT_ROWS__
   </div>
 
   <div id="telemetry">
-    <div class="t-head"><span>__CHIP__</span><span class="live" id="model-count">&nbsp;</span></div>
+    <div class="t-head"><span>__CHIP__</span></div>
     <div class="meter-row">
-      <div class="meter-label"><span>UNIFIED MEMORY</span><b id="mem-label">—</b></div>
-      <div class="meter" id="mem-meter"></div>
+      <div class="meter" id="gpu-meter"></div>
     </div>
     <div class="meter-row">
-      <div class="meter-label"><span>GPU COMPUTE</span><b id="gpu-label">—</b></div>
-      <div class="meter" id="gpu-meter"></div>
+      <div class="meter-label"><span>MODELS</span></div>
+      <div class="meter" id="models-meter"></div>
     </div>
   </div>
 </aside>
@@ -5861,39 +5860,25 @@ $("#newchat").addEventListener("click",()=>{
 /* ---------------------------------------------------------- telemetry */
 function buildMeter(el){const f=document.createElement("div");
   f.className="mfill";el.appendChild(f);}
-buildMeter($("#mem-meter"));buildMeter($("#gpu-meter"));
+buildMeter($("#gpu-meter"));buildMeter($("#models-meter"));
 function paintMeter(el,pct){
   const f=el.firstChild;if(!f)return;
   f.style.width=Math.max(0,Math.min(100,pct))+"%";
   f.classList.toggle("hot",pct>=80);
 }
-let simMem=58,simGpu=12;
-function paintGpu(pct){
-  if(pct==null){$("#gpu-label").textContent="—";paintMeter($("#gpu-meter"),0);return;}
-  $("#gpu-label").textContent=pct.toFixed(0)+"%";
-  paintMeter($("#gpu-meter"),pct);
-}
+let simGpu=12;
 async function pollStats(){
   let gpu;
   try{
-    const r=await fetch("/api/stats"),st=await r.json();
+    const st=await(await fetch("/api/stats")).json();
     gpu=st.gpu_pct;
-    if(st.users_total!=null)
-    if(st.real){
-      $("#mem-label").textContent=st.mem_used_gb+" / "+st.mem_total_gb+" GB";
-      paintMeter($("#mem-meter"),st.mem_pct);
-      paintGpu(gpu);
-      return;
-    }
   }catch(e){}
-  // ambient fallback — clearly approximate
-  simMem=Math.max(35,Math.min(88,simMem+(Math.random()-0.5)*4+(generating?1.5:-0.8)));
-  $("#mem-label").textContent="~"+(simMem*0.48).toFixed(0)+" / 48 GB";
-  paintMeter($("#mem-meter"),simMem);
-  if(gpu!=null){paintGpu(gpu);return;}  // ioreg is real even without psutil
-  simGpu=Math.max(2,Math.min(97,simGpu+(Math.random()-0.5)*8+(generating?22:-16)));
-  $("#gpu-label").textContent="~"+simGpu.toFixed(0)+"%";
-  paintMeter($("#gpu-meter"),simGpu);
+  if(gpu==null){
+    // ambient fallback — clearly approximate
+    simGpu=Math.max(2,Math.min(97,simGpu+(Math.random()-0.5)*8+(generating?22:-16)));
+    gpu=simGpu;
+  }
+  paintMeter($("#gpu-meter"),gpu);
 }
 // polling is owned by applyStatsPolling so perf mode can shut it off
 // (statsTimer is declared with the rest of the state — re-declaring it here
@@ -5953,11 +5938,12 @@ async function pollEngines(){
 
     });
     // headline tally: how many models are actually usable right now
-    const cnt=$("#model-count");
-    if(cnt){
+    {
       const all=Object.entries(st).filter(([,v])=>v.supported!==false);
       const up=all.filter(([,v])=>v.up).length;
-      cnt.textContent=up+"/"+all.length+" MODELS AVAILABLE";
+      const mm=$("#models-meter");
+      if(mm&&mm.firstChild&&all.length)
+        mm.firstChild.style.width=Math.round(up/all.length*100)+"%";
     }
     // engine states just arrived — prune hand-picked rosters of models
     // that can't run (red dots showing council ranks was a lie), then
