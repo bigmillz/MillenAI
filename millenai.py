@@ -1276,6 +1276,37 @@ def _build_from_tag(tag):
     return int(nums[-1]) if nums else 0
 
 
+_dl_cache = {"ts": 0, "data": {}}
+
+
+def download_links() -> dict:
+    """Latest installer URLs per platform, cached for an hour."""
+    if time.time() - _dl_cache["ts"] < 3600 and _dl_cache["data"]:
+        return _dl_cache["data"]
+    out = {}
+    try:
+        req = urllib.request.Request(
+            "https://api.github.com/repos/%s/releases/latest" % UPDATE_REPO,
+            headers={"Accept": "application/vnd.github+json",
+                     "User-Agent": "MillenAI"})
+        with urllib.request.urlopen(req, timeout=8) as r:
+            rel = json.loads(r.read().decode("utf-8"))
+        for a in rel.get("assets", []):
+            n = a.get("name", "")
+            u = a.get("browser_download_url", "")
+            if n.endswith(".dmg"):
+                out["mac"] = u
+            elif n.endswith(".msi"):
+                out["win"] = u
+            elif n.endswith("-Windows.zip"):
+                out.setdefault("win_zip", u)
+        out["version"] = (rel.get("name") or "").strip()
+        _dl_cache.update({"ts": time.time(), "data": out})
+    except Exception:
+        pass
+    return out
+
+
 def check_update():
     if not UPDATE_REPO:
         return {"configured": False, "available": False}
@@ -3467,6 +3498,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                           "busy": v.get("busy", False),
                                           "models": len(v.get("models", []))}
                                          for v in alive.values()]})
+        elif self.path == "/api/downloads":
+            self._send_json(download_links())
         elif self.path == "/api/stats":
             self._send_stats()
         elif self.path == "/api/engines":
@@ -4335,6 +4368,22 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 #models-flag:hover{text-decoration:underline}
 #models-flag[hidden]{display:none}
+/* web visitors only: a quiet outline chip pointing at the real app */
+#get-app{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+  color:rgba(255,255,255,.82);background:none;text-decoration:none;
+  border:1px solid rgba(255,255,255,.42);border-radius:8px;
+  padding:5px 9px;font-weight:700;flex:1 0 100%;
+  display:flex;align-items:center;gap:6px;margin-top:4px;
+}
+#get-app:hover{border-color:#fff;color:#fff}
+#get-app[hidden]{display:none}
+#get-app i{
+  font-style:normal;width:13px;height:13px;flex:none;cursor:help;
+  border:1px solid rgba(255,255,255,.45);border-radius:50%;
+  font-size:9px;line-height:11px;text-align:center;
+  font-family:var(--helv);margin-left:auto;
+}
 #update-flag:hover{text-decoration:underline}
 #update-flag[hidden]{display:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
@@ -5201,6 +5250,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
     <div id="update-flag" hidden title="Install the update">UPDATE</div>
     <div id="models-flag" hidden
          title="More models fit this machine">MODELS AVAILABLE</div>
+    <a id="get-app" hidden target="_blank" rel="noopener">DOWNLOAD NOW<i
+      title="The desktop version runs on your own computer — faster, private, and it works offline.">i</i></a>
     </div>
   </div>
 
@@ -6917,6 +6968,23 @@ setupGo.addEventListener("click",async()=>{
 });
 $("#open-setup").addEventListener("click",()=>{aboutVeil.hidden=true;openSetup();});
 $("#models-up").addEventListener("click",openSetup);
+// WEB ONLY: a browser visitor is borrowing someone else's GPU — offer
+// them the real app for their own platform
+(async()=>{
+  if(location.hostname==="127.0.0.1"||location.hostname==="localhost")return;
+  try{
+    const d=await(await fetch("/api/downloads")).json();
+    const ua=navigator.userAgent||"";
+    const win=/Windows|Win64|WOW64/i.test(ua);
+    const mac=/Mac OS X|Macintosh/i.test(ua);
+    const mobile=/iPhone|iPad|Android/i.test(ua);
+    const url=win?(d.win||d.win_zip):(mac?d.mac:null);
+    if(mobile||!url)return;
+    const a=$("#get-app");
+    a.href=url;a.hidden=false;
+    a.firstChild.textContent="DOWNLOAD "+(win?"FOR WINDOWS":"FOR MAC");
+  }catch(e){}
+})();
 (async()=>{try{
   $("#nolimits").checked=!!(await(await fetch("/api/prefs")).json()).no_limits;
 }catch(e){}})();
