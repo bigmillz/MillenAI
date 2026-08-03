@@ -3862,25 +3862,16 @@ body.resizing{cursor:col-resize;user-select:none}
    backdrop footage (see paintBrandFromSky) — an SF dusk turns it amber
    and umber, the aurora turns it green-violet. The rainbow is only the
    pre-video fallback. */
-/* HOLLOW wordmark, per Patrick: the LIVE treatment — a muted glassy fill
-   with the chameleon gradient living in the OUTLINE. The trick: clip the
-   gradient to text+stroke, then paint the fill back on top with a solid
-   -webkit-text-fill-color, leaving the gradient visible only in the
-   stroke ring. Drift is deliberately glacial. */
+/* PURE OUTLINE wordmark, per Patrick: no fill at all — the backdrop
+   shows through the letters. The stroke wears ONE color, the average of
+   the sampled backdrop palette (--bwavg, set by paintBrandFromSky), and
+   morphs with the footage via the color transition. */
 #brand .name{
   font-weight:800;font-size:44px;letter-spacing:.01em;line-height:1.1;
-  background:linear-gradient(90deg,
-             var(--bw1,#ff8f8f),var(--bw2,#ffc46e),var(--bw3,#f5e663),
-             var(--bw1,#7ef0a6),var(--bw2,#6ec7ff),var(--bw3,#8f9dff),
-             var(--bw1,#ff8f8f));
-  background-size:200% 100%;
-  -webkit-background-clip:text;background-clip:text;
-  color:transparent;
-  -webkit-text-fill-color:rgba(30,32,40,.42);
-  -webkit-text-stroke:2.4px transparent;
-  animation:rainbow 52s linear infinite;
+  color:transparent;-webkit-text-fill-color:transparent;
+  -webkit-text-stroke:2.4px var(--bwavg,#9aa3c0);
   filter:drop-shadow(0 1px 9px var(--bwglow,rgba(150,160,255,.30)));
-  transition:filter 1.2s ease;
+  transition:-webkit-text-stroke-color 2.5s ease,filter 1.2s ease;
 }
 body.perf #brand .name{animation:none;filter:none}
 #brand-row .tag{font-family:var(--mono);font-size:10px;color:var(--accent);
@@ -5935,6 +5926,8 @@ function paintBrandFromSky(ts){
     const rgb=c=>"rgb("+c[0]+","+c[1]+","+c[2]+")";
     const b1=band(.45),b2=band(.68),b3=band(.86);
     const root=document.documentElement.style;
+    root.setProperty("--bwavg",rgb([0,1,2].map(i=>
+      Math.round((b1[i]+b2[i]+b3[i])/3))));
     root.setProperty("--bw1",rgb(b1));
     root.setProperty("--bw2",rgb(b2));
     root.setProperty("--bw3",rgb(b3));
