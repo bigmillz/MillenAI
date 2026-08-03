@@ -6140,6 +6140,17 @@ function renderSetup(st){
       (st.speed_mbs>0?st.speed_mbs+' MB/s':'starting\u2026')+
       (st.eta_min?' \u00b7 about '+st.eta_min+' min left':'')+'</div>':'');
 
+  // WHILE DOWNLOADING (first run or updates): one bar, bandwidth,
+  // percent — never a wall of per-model rows
+  if(anyDl){
+    const n=st.models.filter(m=>m.status==="downloading"||m.status==="queued").length;
+    html+='<div class="setup-head">downloading '+n+' model'+(n===1?"":"s")
+      +' — you can start chatting as soon as the first lands</div>';
+    setupList.innerHTML=html;
+    finishSetupChrome(st,stars,anyDl);
+    return;
+  }
+
   // FIRST RUN stays simple: the machine already picked its best brains —
   // show what it chose and one number, never the catalog. The full list
   // only exists behind "Add models…" for people who go looking.
@@ -6178,19 +6189,16 @@ function renderSetup(st){
   const have=st.models.filter(m=>m.status==="ready");
   const recs=missing.filter(m=>m.star);
   const others=missing.filter(m=>!m.star);
-  const busy=st.models.filter(m=>m.status==="downloading"||m.status==="queued");
-  if(busy.length)
-    html+='<div class="setup-head">Downloading</div>'+busy.map(row).join("");
   if(recs.length)
     html+='<div class="setup-head">Recommended for this machine</div>'
-         +recs.filter(m=>!busy.includes(m)).map(row).join("");
-  else if(!busy.length)
+         +recs.map(row).join("");
+  else
     html+='<div class="setup-head">Everything recommended is installed'
          +' \u2713</div>';
   if(others.length)
     html+='<details class="setup-fold"><summary>More models \u00b7 '
          +others.length+'</summary>'
-         +others.filter(m=>!busy.includes(m)).map(row).join("")+'</details>';
+         +others.map(row).join("")+'</details>';
   if(have.length)
     html+='<details class="setup-fold"><summary>Installed \u00b7 '
          +have.length+'</summary>'+have.map(row).join("")+'</details>';
