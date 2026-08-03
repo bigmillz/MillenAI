@@ -6480,7 +6480,7 @@ function renderSetup(st){
   if(anyDl){
     setupGo.disabled=true;setupGo.textContent="Downloading\u2026";
   }else if(setupAllReady){
-    setupGo.disabled=false;setupGo.textContent="LFG";
+    setupGo.disabled=false;setupGo.textContent="Let\u2019s run it";
   }else{
     setupGo.disabled=!st.mlx_ok;
     setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Send it")+
@@ -6506,7 +6506,7 @@ function finishSetupChrome(st,stars,anyDl){
   if(anyDl){
     setupGo.disabled=true;setupGo.textContent="Downloading\u2026";
   }else if(setupAllReady){
-    setupGo.disabled=false;setupGo.textContent="LFG";
+    setupGo.disabled=false;setupGo.textContent="Let\u2019s run it";
   }else{
     setupGo.disabled=!st.mlx_ok;
     setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Send it")+
