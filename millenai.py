@@ -5268,17 +5268,22 @@ body.perf #composer{box-shadow:none}
   padding:6px 4px;
 }
 #input::placeholder{color:var(--faint)}
+#cbtns{display:flex;align-items:center;gap:2px;flex-shrink:0;
+  margin-left:auto;padding-left:4px}
 .cbtn{
-  width:36px;height:36px;border-radius:9px;border:none;cursor:pointer;
+  width:34px;height:34px;border-radius:9px;border:none;cursor:pointer;
   display:flex;align-items:center;justify-content:center;font-size:15px;
-  background:none;color:var(--dim);transition:all .13s;flex-shrink:0;
+  background:none;color:rgba(255,255,255,.78);transition:all .13s;
+  flex-shrink:0;
 }
-.cbtn:hover{color:var(--text);background:var(--line-soft)}
+.cbtn svg{width:18px;height:18px;display:block}
+.cbtn:hover{color:#fff;background:rgba(255,255,255,.10)}
 #send{background:var(--accent);color:#1a1a1a;font-weight:700;font-size:16px}
+#send svg{width:17px;height:17px}
 #send:hover{background:var(--accent-hot);color:#000}
 #send:disabled{background:var(--line);color:var(--faint);cursor:default}
 #send.stop{background:var(--red);color:#fff;font-size:11px}
-#mic.rec{color:var(--red)}
+#mic.rec{color:var(--red);background:rgba(226,109,90,.14)}
 #voicebtn svg{width:17px;height:17px}
 #voicebtn.on{color:var(--accent-hot);background:var(--accent-dim)}
 body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
@@ -5731,11 +5736,25 @@ __AGENT_ROWS__
     <div id="model-chip">engine <b id="chip-model">Llama 3.2 3B</b></div>
     <div id="imgchips" hidden></div>
     <div id="composer">
-      <button class="cbtn" id="attach" title="Attach files">📎</button>
+
       <input type="file" id="fpick" multiple hidden
         accept="image/*,.txt,.md,.markdown,.csv,.json,.js,.ts,.py,.html,.css,.log,.sh,.yaml,.yml,.xml,.toml,.rtf">
-      <button class="cbtn" id="mic" title="Voice input">🎙️</button>
       <textarea id="input" rows="1" placeholder="How can I help you today?"></textarea>
+      <div id="cbtns">
+      <button class="cbtn" id="attach" title="Attach a file">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21.4 11.05 12.2 20.2a5.5 5.5 0 0 1-7.78-7.78l9.2-9.19a3.67 3.67 0 0 1 5.18 5.18l-9.2 9.2a1.83 1.83 0 0 1-2.6-2.6l8.5-8.48"/>
+        </svg>
+      </button>
+      <button class="cbtn" id="mic" title="Dictate — speak your message">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="9" y="2.5" width="6" height="11.5" rx="3"/>
+          <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0"/>
+          <path d="M12 18v3.2"/><path d="M8.6 21.4h6.8"/>
+        </svg>
+      </button>
       <button class="cbtn" id="voicebtn" title="Voice chat — replies are read aloud">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
              stroke-linecap="round" stroke-linejoin="round">
@@ -5743,7 +5762,13 @@ __AGENT_ROWS__
           <path d="M15 7v10"/><path d="M19 10v4"/>
         </svg>
       </button>
-      <button class="cbtn" id="send" title="Send">↑</button>
+      <button class="cbtn" id="send" title="Send">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
+             stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 19V5.5"/><path d="M5.8 11.7 12 5.4l6.2 6.3"/>
+        </svg>
+      </button>
+      </div>
     </div>
   </div>
 </main>
