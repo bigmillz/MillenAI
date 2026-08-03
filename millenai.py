@@ -289,7 +289,30 @@ def fleet_key() -> str:
         return k
 
 
+FLEET_HOME = "https://ai.millertechnology.net"   # one-click default hub
+FLEET_APPROVED_FILE = os.path.join(app_dir(), "fleet_workers.json")
+
+
+def _fleet_approved() -> dict:
+    try:
+        with open(FLEET_APPROVED_FILE) as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def _fleet_save_approved(d: dict):
+    try:
+        with open(FLEET_APPROVED_FILE, "w") as f:
+            json.dump(d, f)
+        os.chmod(FLEET_APPROVED_FILE, 0o600)
+    except OSError:
+        pass
+
+
 _fleet_lock = threading.Lock()
+_fleet_pending = {}   # wid -> {name, models, ts} awaiting owner approval
 _fleet_workers = {}   # wid -> {name, models, last_seen, busy}
 _fleet_jobs = {}      # jid -> {label, messages, done(Event), text, err, wid}
 _fleet_queue = []     # jids waiting for a worker
@@ -341,13 +364,19 @@ def fleet_run(label: str, messages: list, status) -> str:
 
 
 _contrib_stop = threading.Event()
+_contrib_state = ["off"]
 _contrib_thread = None
 
 
 def _contrib_loop(url: str, key: str):
-    """Friend mode: long-poll the hub, run jobs on this machine's engines,
-    post the answers back. Outbound-only; dies quietly with the toggle."""
-    wid = ""
+    """Friend mode, ONE CLICK: knock on the hub, wait to be approved,
+    then long-poll for jobs and run them here. Outbound-only."""
+    p = load_prefs(None)
+    wid = str(p.get("contrib_wid") or secrets.token_hex(8))
+    token = str(p.get("contrib_token") or "")
+    if p.get("contrib_wid") != wid:
+        p["contrib_wid"] = wid
+        store_prefs(p)
 
     def post(path, data):
         req = urllib.request.Request(
@@ -363,24 +392,37 @@ def _contrib_loop(url: str, key: str):
             models = [l for l in MODEL_INFO
                       if model_cached(l, pulled) and model_fits_memory(l)]
             out = post("/api/fleet/register",
-                       {"id": wid, "name": platform.node().split(".")[0][:20],
+                       {"id": wid, "token": token,
+                        "name": platform.node().split(".")[0][:20],
                         "models": models})
+            if out.get("pending"):
+                _contrib_state[0] = "waiting for approval"
+                _contrib_stop.wait(20)
+                continue
             if out.get("err"):
+                _contrib_state[0] = "not approved"
                 _contrib_stop.wait(30)
                 continue
-            wid = out.get("id", wid)
-            job = post("/api/fleet/poll", {"id": wid})
+            if out.get("token") and out["token"] != token:
+                token = out["token"]
+                p2 = load_prefs(None)
+                p2["contrib_token"] = token
+                store_prefs(p2)
+            _contrib_state[0] = "contributing"
+            job = post("/api/fleet/poll", {"id": wid, "token": token})
             if job.get("job"):
                 parts = []
                 try:
                     run_model(job["label"], job["messages"], parts.append)
                     post("/api/fleet/submit",
-                         {"job": job["job"],
+                         {"id": wid, "token": token, "job": job["job"],
                           "text": strip_think("".join(parts))})
                 except Exception as exc:
                     post("/api/fleet/submit",
-                         {"job": job["job"], "err": str(exc)[:100]})
+                         {"id": wid, "token": token, "job": job["job"],
+                          "err": str(exc)[:100]})
         except Exception:
+            _contrib_state[0] = "reconnecting"
             _contrib_stop.wait(8)
 
 
@@ -391,8 +433,7 @@ def contrib_apply(p=None):
     empty-key loop kept retrying forever after the key was fixed)."""
     global _contrib_thread
     p = p or load_prefs(None)
-    on = (p.get("contrib_on") and p.get("contrib_url")
-          and p.get("contrib_key"))
+    on = bool(p.get("contrib_on"))
     _contrib_stop.set()
     if _contrib_thread is not None and _contrib_thread.is_alive():
         _contrib_thread.join(timeout=3)
@@ -400,7 +441,8 @@ def contrib_apply(p=None):
         _contrib_stop.clear()
         _contrib_thread = threading.Thread(
             target=_contrib_loop,
-            args=(str(p["contrib_url"]), str(p["contrib_key"])),
+            args=(str(p.get("contrib_url") or FLEET_HOME),
+                  str(p.get("contrib_key") or "")),
             daemon=True)
         _contrib_thread.start()
 
@@ -3373,12 +3415,22 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                        warm="warm=1" in self.path))
         elif self.path.startswith("/sky/"):
             self._send_sky()
+        elif self.path == "/api/fleet/mine":
+            if self._remote():
+                self._send_json({"err": "owner only"})
+                return
+            self._send_json({"on": bool(load_prefs(None).get("contrib_on")),
+                             "state": _contrib_state[0]})
         elif self.path == "/api/fleet/status":
             if self._remote():
                 self._send_json({"err": "owner only"})
                 return
             alive = _fleet_alive()
+            with _fleet_lock:
+                pend = [{"id": w, "name": v["name"]}
+                        for w, v in _fleet_pending.items()]
             self._send_json({"key": fleet_key(),
+                             "pending": pend,
                              "workers": [{"name": v["name"],
                                           "busy": v.get("busy", False),
                                           "models": len(v.get("models", []))}
@@ -3635,21 +3687,65 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 d = json.loads(self.rfile.read(n)) if n else {}
             except (ValueError, json.JSONDecodeError):
                 d = {}
-            key = self.headers.get("X-Fleet-Key", "")
-            if not secrets.compare_digest(key, fleet_key()):
-                self._send_json({"err": "bad key"})
-                return
-            if self.path == "/api/fleet/register":
-                wid = str(d.get("id") or secrets.token_hex(8))
+            if self.path == "/api/fleet/approve":
+                # the OWNER approving a knock — no fleet key involved
+                if self._remote():
+                    self._send_json({"err": "owner only"})
+                    return
+                wid0 = str(d.get("id", ""))
                 with _fleet_lock:
-                    _fleet_workers[wid] = {
-                        "name": str(d.get("name", "worker"))[:40],
-                        "models": [m for m in (d.get("models") or [])
-                                   if isinstance(m, str)][:40],
-                        "last_seen": time.time(),
-                        "busy": _fleet_workers.get(wid, {}).get("busy",
-                                                                False)}
-                self._send_json({"id": wid})
+                    pend = _fleet_pending.pop(wid0, None)
+                if pend:
+                    appr = _fleet_approved()
+                    appr[wid0] = {"name": pend["name"],
+                                  "token": secrets.token_urlsafe(18)}
+                    _fleet_save_approved(appr)
+                self._send_json({"ok": bool(pend)})
+                return
+            key = self.headers.get("X-Fleet-Key", "")
+            keyed = secrets.compare_digest(key, fleet_key())
+            wid = str(d.get("id") or "")
+            approved = _fleet_approved()
+            token_ok = (wid in approved and secrets.compare_digest(
+                str(d.get("token", "")), approved[wid].get("token", "?")))
+            if self.path == "/api/fleet/register":
+                # ONE-CLICK flow: no key typed anywhere. A new worker
+                # lands in the pending list until the owner approves it
+                # in Settings; then a token rides every request.
+                name = str(d.get("name", "worker"))[:40]
+                models = [m for m in (d.get("models") or [])
+                          if isinstance(m, str)][:40]
+                if not wid:
+                    wid = secrets.token_hex(8)
+                claim = approved.get(wid)
+                if keyed or token_ok or (claim and not claim.get("claimed")):
+                    if claim and not claim.get("claimed"):
+                        # ONE-TIME token handover right after approval —
+                        # a lost token means the owner approves again
+                        claim["claimed"] = True
+                        approved[wid] = claim
+                        _fleet_save_approved(approved)
+                    with _fleet_lock:
+                        _fleet_workers[wid] = {
+                            "name": name, "models": models,
+                            "last_seen": time.time(),
+                            "busy": _fleet_workers.get(wid, {}).get(
+                                "busy", False)}
+                        _fleet_pending.pop(wid, None)
+                    tok = approved.get(wid, {}).get("token", "")
+                    self._send_json({"id": wid, "token": tok})
+                    return
+                with _fleet_lock:
+                    _fleet_pending[wid] = {"name": name, "models": models,
+                                           "ts": time.time()}
+                    # forgotten knocks expire
+                    for w in [w for w, v in _fleet_pending.items()
+                              if time.time() - v["ts"] > 900]:
+                        _fleet_pending.pop(w, None)
+                self._send_json({"id": wid, "pending": True})
+                return
+            if not (keyed or token_ok):
+                self._send_json({"err": "not approved"})
                 return
             if self.path == "/api/fleet/poll":
                 wid = str(d.get("id", ""))
@@ -4802,7 +4898,16 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #fleet-box{margin:14px 0 4px;text-align:left}
 #fleet-own{font-family:var(--mono);font-size:10.5px;color:var(--dim);
   margin-bottom:8px;line-height:1.6}
-#fleet-own code{color:var(--text);user-select:all}
+#contrib-state{font-family:var(--mono);font-size:10px;color:var(--faint);
+  margin:4px 0 6px;min-height:12px}
+#fleet-pending .preq{display:flex;align-items:center;gap:8px;
+  font-size:12.5px;color:var(--text);margin-bottom:6px}
+#fleet-pending .preq button{margin-left:auto;padding:5px 12px;
+  border-radius:8px;border:none;background:var(--accent);color:#1a1a1a;
+  font-weight:600;cursor:pointer}
+#fleet-adv{margin-top:6px}
+#fleet-adv summary{font-family:var(--mono);font-size:9.5px;
+  color:var(--faint);cursor:pointer;letter-spacing:.1em}
 #fleet-box input{
   width:100%;box-sizing:border-box;margin-bottom:6px;padding:8px 10px;
   background:var(--panel2);border:1px solid var(--line);border-radius:8px;
@@ -5167,11 +5272,13 @@ __AGENT_ROWS__
       placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
     <button class="about-btn" id="persona-save">Save preferences</button>
     <div id="fleet-box">
-      <div id="fleet-own" hidden>Your fleet — key <code id="fleet-key"></code>
-        &middot; <span id="fleet-n"></span></div>
-      <input id="contrib-url" placeholder="Friend&rsquo;s MillenAI URL">
-      <input id="contrib-key" placeholder="Their contribute key">
-      <button class="about-btn" id="contrib-toggle">Contribute my GPU</button>
+      <div id="fleet-own" hidden><span id="fleet-n"></span></div>
+      <div id="fleet-pending"></div>
+      <button class="about-btn" id="contrib-toggle">&#9889; Contribute GPU power</button>
+      <div id="contrib-state"></div>
+      <details id="fleet-adv"><summary>advanced</summary>
+        <input id="contrib-url" placeholder="Hub URL (blank = default)">
+      </details>
     </div>
     <button class="about-btn" id="open-setup">Download models&hellip;</button>
     <button class="about-btn" id="about-check">Check for updates</button>
@@ -6842,21 +6949,33 @@ async function openAbout(){
     if(st.plat)$("#about-name").innerHTML="MillenAI <em>"+esc(st.plat)+"</em>";
     try{
       const fs=await(await fetch("/api/fleet/status")).json();
-      if(fs.key){
+      if(fs.key!==undefined){
         $("#fleet-own").hidden=false;
-        $("#fleet-key").textContent=fs.key;
-        $("#fleet-n").textContent=fs.workers.length+" friend"
+        $("#fleet-n").textContent="Your fleet: "+fs.workers.length+" friend"
           +(fs.workers.length===1?"":"s")+" online"
           +(fs.workers.some(w=>w.busy)?" \u00b7 working":"");
+        $("#fleet-pending").innerHTML=(fs.pending||[]).map(p=>
+          '<div class="preq">\u26a1 '+esc(p.name)
+          +' wants to contribute<button data-id="'+esc(p.id)
+          +'">Approve</button></div>').join("");
+        $("#fleet-pending").querySelectorAll("button").forEach(b=>
+          b.addEventListener("click",async()=>{
+            await fetch("/api/fleet/approve",{method:"POST",
+              headers:{"Content-Type":"application/json"},
+              body:JSON.stringify({id:b.dataset.id})});
+            b.closest(".preq").remove();
+          }));
       }
     }catch(e){}
     try{
       const pr2=await(await fetch("/api/prefs")).json();
+      const mine=await(await fetch("/api/fleet/mine")).json();
       $("#contrib-url").value=pr2.contrib_url||"";
-      $("#contrib-key").value=pr2.contrib_key||"";
       $("#contrib-toggle").classList.toggle("on",!!pr2.contrib_on);
-      $("#contrib-toggle").textContent=
-        pr2.contrib_on?"Contributing \u2713 (tap to stop)":"Contribute my GPU";
+      $("#contrib-toggle").innerHTML=pr2.contrib_on
+        ?"Contributing \u2713 (tap to stop)":"\u26a1 Contribute GPU power";
+      $("#contrib-state").textContent=
+        pr2.contrib_on&&mine.state!=="off"?mine.state:"";
     }catch(e){}
     const ready=st.models.filter(x=>x.status==="ready").length;
     $("#about-facts").textContent=
@@ -6949,11 +7068,11 @@ $("#contrib-toggle").addEventListener("click",async()=>{
   await fetch("/api/prefs",{method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contrib_on:on,
-      contrib_url:$("#contrib-url").value.trim(),
-      contrib_key:$("#contrib-key").value.trim()})});
+      contrib_url:$("#contrib-url").value.trim()})});
   $("#contrib-toggle").classList.toggle("on",on);
-  $("#contrib-toggle").textContent=
-    on?"Contributing \u2713 (tap to stop)":"Contribute my GPU";
+  $("#contrib-toggle").innerHTML=
+    on?"Contributing \u2713 (tap to stop)":"\u26a1 Contribute GPU power";
+  $("#contrib-state").textContent=on?"connecting\u2026":"";
 });
 $("#about-close").addEventListener("click",()=>{aboutVeil.hidden=true;});
 aboutVeil.addEventListener("click",e=>{if(e.target===aboutVeil)aboutVeil.hidden=true;});

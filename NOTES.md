@@ -876,3 +876,11 @@ that found all three: re-execute the page's own script text via
   system message). Friends only. UI: Settings › Contribute my GPU.
 - Verified: two local instances, hub routed "why is the sky blue" to a
   registered worker, 377 chars in 5s, status line names the friend.
+- 2.7.2 ONE-CLICK CONTRIBUTE: no URLs, no keys for friends. Worker knocks
+  keyless (persistent wid in prefs) -> owner sees "X wants to contribute
+  [Approve]" in Settings -> approval mints a token handed over in a
+  ONE-TIME claim window (lost token = approve again). approve lives
+  INSIDE the /api/fleet/ prefix branch (a standalone route after it was
+  dead code — the prefix router ate it. Seen live.) Legacy shared-key
+  workers still work. Hub URL defaults to FLEET_HOME; advanced fold
+  keeps the override.
