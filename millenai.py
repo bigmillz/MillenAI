@@ -5314,11 +5314,26 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 #new-veil[hidden],#update-veil[hidden],#about-veil[hidden]{display:none}
 #about-card{
-  width:330px;background:var(--panel2);border:1px solid var(--line);
-  border-radius:16px;padding:30px 26px 22px;text-align:center;
+  width:340px;max-height:min(86vh,760px);
+  background:var(--panel2);border:1px solid var(--line);
+  border-radius:16px;text-align:center;
   box-shadow:0 24px 80px rgba(0,0,0,.6);
+  display:flex;flex-direction:column;overflow:hidden;
 }
-#about-icon{width:96px;height:96px;margin-bottom:16px}
+#about-head{padding:22px 24px 12px;flex:none}
+#about-body{
+  padding:0 24px;overflow-y:auto;flex:1 1 auto;min-height:0;
+  scrollbar-width:thin;
+}
+#about-body::-webkit-scrollbar{width:8px}
+#about-body::-webkit-scrollbar-thumb{
+  background:rgba(255,255,255,.14);border-radius:4px}
+#about-foot{
+  padding:12px 24px 18px;flex:none;
+  border-top:1px solid var(--line-soft);background:var(--panel2);
+}
+#about-foot .about-btn{margin-top:0}
+#about-icon{width:54px;height:54px;margin-bottom:8px}
 #persona-label{
   font-family:var(--mono);font-size:10px;letter-spacing:.12em;
   text-transform:uppercase;color:var(--faint);text-align:left;
@@ -5377,6 +5392,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #fleet-pending .preq button{margin-left:auto;padding:5px 12px;
   border-radius:8px;border:none;background:var(--accent);color:#1a1a1a;
   font-weight:600;cursor:pointer}
+#adv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#adv-grid .about-btn{margin-top:0}
 #fleet-adv{margin-top:6px}
 #fleet-adv summary{font-family:var(--mono);font-size:9.5px;
   color:var(--faint);cursor:pointer;letter-spacing:.1em}
@@ -5392,7 +5409,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   color:var(--dim);margin-top:10px;line-height:1.6;
 }
 .about-btn{
-  display:block;width:100%;margin-top:9px;padding:10px 14px;
+  display:block;width:100%;margin-top:8px;padding:9px 12px;
   font:500 13.5px var(--helv);cursor:pointer;color:var(--text);
   background:none;border:1px solid var(--line);border-radius:10px;
   transition:background .13s,border-color .13s;
@@ -5738,6 +5755,7 @@ __AGENT_ROWS__
 
 <div id="about-veil" hidden>
   <div id="about-card">
+    <div id="about-head">
     <svg id="about-icon" viewBox="0 0 120 120" aria-hidden="true">
       <defs><linearGradient id="ag" x1="0" y1="0" x2="1" y2="0">
         <stop offset="0" stop-color="#8b5cf6"/><stop offset=".5" stop-color="#7d8fff"/>
@@ -5751,6 +5769,8 @@ __AGENT_ROWS__
     <div id="about-name">MillenAI</div>
     <div id="about-ver">Version __APP_VER__</div>
     <div id="about-facts"></div>
+    </div>
+    <div id="about-body">
     <div id="persona-label">How should MillenAI reply?</div>
     <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
       placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
@@ -5769,10 +5789,14 @@ __AGENT_ROWS__
         <input id="contrib-url" placeholder="Hub URL (blank = default)">
       </details>
     </div>
-    <button class="about-btn" id="about-sky">New backdrop</button>
-    <button class="about-btn" id="open-setup">Download models&hellip;</button>
-    <button class="about-btn" id="about-check">Check for updates</button>
+    <div id="adv-grid">
+      <button class="about-btn" id="about-sky">New backdrop</button>
+      <button class="about-btn" id="open-setup">Download models&hellip;</button>
+      <button class="about-btn" id="about-check">Check for updates</button>
+    </div>
     <button class="about-btn" id="about-forget">Forget what you know about me</button>
+    </div>
+    <div id="about-foot">
     <button class="about-btn primary" id="about-close">Close</button>
   </div>
 </div>
