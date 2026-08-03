@@ -4389,6 +4389,8 @@ body.perf .msg{animation:none}
 
 /* the blend progress bar — replaces live draft output entirely */
 .blendprog{margin:4px 0 16px;max-width:640px}
+.blendprog .lbl{animation:loadPulse 1.6s ease-in-out infinite}
+@keyframes loadPulse{0%,100%{opacity:.85}50%{opacity:.35}}
 .blendprog .lbl{font-family:var(--mono);font-size:13px;letter-spacing:.12em;
   text-transform:uppercase;color:var(--dim);margin-bottom:9px}
 .blendprog .track{height:9px;border-radius:5px;overflow:hidden;
@@ -5171,29 +5173,12 @@ function paintDrafts(div,drafts,live,statusText){
   if(live){
     if(d)d.remove();
     if(!drafts.length&&!statusText)return;
+    // one word, no bar, no play-by-play — per Patrick
     if(!p){
       p=document.createElement("div");p.className="blendprog";
-      p.innerHTML='<div class="lbl"></div>'
-        +'<div class="track"><div class="fill"></div></div>';
+      p.innerHTML='<div class="lbl">Loading</div>';
       div.insertBefore(p,div.querySelector(".body"));
     }
-    const mm=/(\d+)\s*of\s*(\d+)/.exec(statusText||"");
-    const total=mm?+mm[2]:Math.max(drafts.length+1,2);
-    const done=Math.min(drafts.length,total);
-    // PREDICTIVE creep: time the finished steps, estimate the pace, and
-    // glide toward the next step instead of jumping once a model lands
-    const now=performance.now();
-    if(!p.dataset.start)p.dataset.start=now;
-    if(p.dataset.done!==String(done)){
-      if(done>0)p.dataset.per=(now-(+p.dataset.start))/done;
-      p.dataset.done=done;p.dataset.t0=now;
-    }
-    const per=+p.dataset.per||28000;      // first model: assume ~28s
-    const frac=Math.min(.93,(now-(+p.dataset.t0||now))/per);
-    p.querySelector(".lbl").textContent=
-      statusText||("asking "+total+" models\u2026");
-    p.querySelector(".fill").style.width=
-      Math.min(97,((done+frac)/total*100)).toFixed(1)+"%";
     return p;
   }
   if(p)p.remove();
