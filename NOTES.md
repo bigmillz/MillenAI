@@ -848,3 +848,9 @@ that found all three: re-execute the page's own script text via
 - Context: ~/.cache/huggingface was manually deleted (Finder, 03:33) —
   five stale 70B ollama pulls freed 194GB; ladder re-downloaded via
   snapshot_download. NOT app code — nothing in MillenAI deletes that dir.
+- 2.0.1 HOTFIX: audio removal left `audioCtx.resume()` inside send() —
+  ReferenceError on EVERY send, silently (2.0.0, ~15 min in the wild).
+  `x&&x.y` does NOT guard an undeclared identifier — same family as the
+  TDZ rule: grep for EVERY identifier a removal deletes, including uses
+  inside guards. send() is now wrapped (sendSafe): any exception paints
+  "send failed — <msg>" into the composer instead of eating the click.

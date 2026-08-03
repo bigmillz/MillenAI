@@ -5211,10 +5211,22 @@ function setToks(){}
 /* --------------------------------------------------------------- send */
 const input=$("#input"),sendBtn=$("#send");
 input.addEventListener("input",()=>{input.style.height="auto";input.style.height=Math.min(input.scrollHeight,180)+"px";});
+// NEVER a silent dead send button: a runtime error inside send() (a
+// dangling identifier killed every send in 2.0.0, seen live) surfaces in
+// the composer instead of eating the click.
+function sendSafe(){
+  try{
+    const r=send();
+    if(r&&r.catch)r.catch(e=>{
+      input.placeholder="send failed — "+(e&&e.message||e);});
+  }catch(e){
+    input.placeholder="send failed — "+(e&&e.message||e);
+  }
+}
 input.addEventListener("keydown",e=>{
-  if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}
+  if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendSafe();}
 });
-sendBtn.addEventListener("click",()=>{ generating?abortCtl.abort():send(); });
+sendBtn.addEventListener("click",()=>{ generating?abortCtl.abort():sendSafe(); });
 
 /* ------------------------------------------------------ image paste */
 // paste a screenshot/photo straight into the composer: it becomes a chip,
@@ -5381,7 +5393,6 @@ async function send(){
 
   fetch("/api/speak",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({stop:true})});
-  if(audioCtx&&audioCtx.state==="suspended")audioCtx.resume();
   input.value="";input.style.height="auto";
   const sentImages=pendingImages.slice();
   const sentDocs=pendingDocs.slice();
