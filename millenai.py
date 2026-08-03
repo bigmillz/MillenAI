@@ -4667,7 +4667,7 @@ body.resizing{cursor:col-resize;user-select:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
    sitting it on the wordmark's baseline hangs it low against the taller type */
 .vghost{
-  font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+  font-family:var(--mono);font-size:16.5px;letter-spacing:.06em;
   color:rgba(255,255,255,.30);user-select:none;cursor:pointer;
   padding-top:6px;margin-right:auto;
 }
