@@ -4609,7 +4609,7 @@ html.winwipe.winwipe-run body{
   -webkit-backdrop-filter:blur(18px) saturate(1.4);
           backdrop-filter:blur(18px) saturate(1.4);
   border-right:1px solid var(--line-soft);
-  display:flex;flex-direction:column;padding:22px 18px 18px;gap:6px;
+  display:flex;flex-direction:column;padding:14px 18px 18px;gap:6px;
 }
 body.perf #sidebar{
   background:var(--panel);
@@ -4669,12 +4669,15 @@ body.resizing{cursor:col-resize;user-select:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
    sitting it on the wordmark's baseline hangs it low against the taller type */
 .vghost{
-  font-family:var(--mono);font-size:16.5px;letter-spacing:.06em;
-  font-weight:700;
-  color:rgba(255,255,255,.30);user-select:none;cursor:pointer;
-  padding-top:6px;margin-right:auto;
+  font-family:var(--mono);font-size:21.5px;letter-spacing:.04em;
+  color:rgba(255,255,255,.62);user-select:none;cursor:pointer;
+  padding-top:0;margin-right:auto;line-height:1.1;
+  display:flex;align-items:baseline;gap:8px;
 }
-.vghost:hover{color:rgba(255,255,255,.55)}
+.vghost b{font-weight:700}
+.vghost i{font-style:normal;font-weight:400;font-size:.82em;
+  color:rgba(255,255,255,.42)}
+.vghost:hover{color:rgba(255,255,255,.85)}
 
 #newchat,#settings-btn{
   width:28px;height:28px;flex-shrink:0;
@@ -5650,7 +5653,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
     <div id="brand-row">
-    <span class="vghost" title="About MillenAI">MillenAI __APP_VER__</span>
+    <span class="vghost" title="About MillenAI"><b>MillenAI</b><i>__APP_VER__</i></span>
 <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
@@ -6708,15 +6711,12 @@ async function bootSkyline(){
   // reads best over them — and any clip is fair game after that.
   const mood=x=>darkSet.has(x)||!firstEver;
   let i;
-  // NEW BLOOD: the picker used to choose only from cache, so the same six
-  // clips cycled forever. Every few launches it now reaches for one it has
-  // never played — that is what the loading bar is for.
+  // INSTANT START, per Patrick: never make a launch wait on a download —
+  // play something already on disk, and pull exactly ONE new clip in the
+  // background so tomorrow's rotation is wider than today's.
   const fresh=[];
   for(let n=0;n<SKY_N;n++)if(!cached.includes(n)&&mood(n))fresh.push(n);
-  const reach=fresh.length&&(cached.length<8||Math.random()<0.45);
-  if(reach){
-    i=fresh[Math.floor(Math.random()*fresh.length)];
-  }else if(cached.length){
+  if(cached.length){
     let pool=cached.filter(x=>mood(x)&&x!==last);
     if(!pool.length)pool=cached.filter(x=>x!==last);
     if(!pool.length)pool=cached.slice();
@@ -6729,12 +6729,11 @@ async function bootSkyline(){
     if(i===last)i=(i+1)%SKY_N;
   }
   localStorage.setItem("millen.sky",i);
-  // grow the pool for next time, quietly, one clip per launch
-  if(fresh.length>1){
-    const n=fresh.filter(x=>x!==i)[
-      Math.floor(Math.random()*Math.max(1,fresh.length-1))];
-    if(n!=null)setTimeout(()=>{
-      fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{});},12000);
+  // exactly one new clip per load, after the backdrop is already playing
+  if(fresh.length){
+    const n=fresh[Math.floor(Math.random()*fresh.length)];
+    setTimeout(()=>{
+      fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{});},9000);
   }
   const c=$("#sky-color");
   const bar=$("#skyload"),fill=$("#skyload .fill"),lbl=$("#skyload .lbl");
