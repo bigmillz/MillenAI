@@ -2033,7 +2033,7 @@ def run_model(label: str, messages: list, emit, thinking: bool = False) -> None:
     kind, target = MODEL_ROUTES.get(label, (None, None))
     if kind is None:
         raise RuntimeError("no downloaded model can take this request — "
-                           "grab one under Add models…")
+                           "grab one in Settings › Download models…")
     if kind == "mlx":
         global _mlx_last_use
         _mlx_last_use = time.time()
@@ -3807,7 +3807,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 start_model_downloads(["LLaVA Vision 7B"])
                 emit("Getting the vision engine ready (LLaVA, ~4.7 GB) — "
                      "the download just started. Progress is under "
-                     "**Add models…**; paste the image again once it "
+                     "**Settings › Download models…**; paste the image again once it "
                      "shows the check mark.")
             except (BrokenPipeError, ConnectionResetError):
                 pass
@@ -4884,9 +4884,6 @@ __AGENT_ROWS__
       <div class="switch"></div>
       Performance mode
     </div>
-    <div class="model" id="open-setup" title="Download more models"
-         style="margin-top:10px">
-      <span class="ico">⬇</span>Add models…</div>
   </div>
 
   <div id="telemetry">
@@ -4985,6 +4982,7 @@ __AGENT_ROWS__
     <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
       placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
     <button class="about-btn" id="persona-save">Save preferences</button>
+    <button class="about-btn" id="open-setup">Download models&hellip;</button>
     <button class="about-btn" id="about-check">Check for updates</button>
     <button class="about-btn" id="about-logs">Open logs folder</button>
     <button class="about-btn" id="about-forget">Forget what you know about me</button>
@@ -6383,18 +6381,36 @@ function renderSetup(st){
         +'<div class="bar"><i style="width:'+(m.pct||0)+'%"></i></div></div>';
   // CONSOLIDATED "Update Models" view: recommended picks up front,
   // everything else counted and folded — never a wall of every model
-  // SUPER simple, per Patrick: no memory talk, no catalog, no folds —
-  // one sentence, the bar above, one button below
+  // manual = the same three choices as first run, plus the sentence
   const missing=st.models.filter(m=>m.status!=="ready");
   const recs=missing.filter(m=>m.star);
-  if(recs.length)
-    html+='<div class="setup-head">More brainpower is available for '
-         +'MillenAI \u2014 one tap downloads it in the background while '
-         +'you keep chatting.</div>';
-  else
+  if(recs.length){
+    html+='<div class="setup-head">More brainpower is available \u2014 '
+         +'pick a size, downloads run in the background while you chat.'
+         +'</div>'
+      +'<div class="plans">'
+      +'<div class="plan" data-plan="basic"><b>Basic</b>'
+      +'<span>Fast answers, tiny download</span><em>~1 GB</em></div>'
+      +'<div class="plan" data-plan="pro"><b>Pro</b>'
+      +'<span>Great everyday quality</span><em>~10 GB</em></div>'
+      +'<div class="plan" data-plan="max"><b>Max</b>'
+      +'<span>The best this machine can run</span><em>'
+      +Math.round(st.want_gb)+' GB</em></div>'
+      +'</div>';
+  }else{
     html+='<div class="setup-head">You\u2019re fully loaded \u2713 '
          +'Nothing more to download.</div>';
+  }
   setupList.innerHTML=html;
+  setupList.querySelectorAll(".plan").forEach(el=>{
+    el.classList.toggle("on",el.dataset.plan===setupPlan);
+    el.addEventListener("click",()=>{
+      setupPlan=el.dataset.plan;
+      setupList.querySelectorAll(".plan").forEach(x=>
+        x.classList.toggle("on",x===el));
+      setupGo.textContent="Send it \u00b7 "+planGB(st)+" GB";
+    });
+  });
 
   if(!st.mlx_ok){
     setupNote.textContent="engine not installed — reopen the app to finish setup";
@@ -6417,7 +6433,7 @@ function renderSetup(st){
 }
 // the button quotes the CHOSEN plan, not the whole catalog
 function planGB(st){
-  if(setupManual||setupPlan==="max")
+  if(setupPlan==="max")
     return Math.max(0,Math.round(st.want_gb-st.have_gb));
   return setupPlan==="basic"?1:10;
 }
@@ -6524,18 +6540,18 @@ setupGo.addEventListener("click",async()=>{
   if(setupAllReady){closeSetup();return;}
   await fetch("/api/setup/install",{method:"POST",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({plan:setupManual?"max":setupPlan})});
+    body:JSON.stringify({plan:setupPlan})});
   setupTick();
 });
-$("#open-setup").addEventListener("click",openSetup);
+$("#open-setup").addEventListener("click",()=>{aboutVeil.hidden=true;openSetup();});
 $("#models-flag").addEventListener("click",()=>{openSetup();});
 function paintModelsFlag(st){
   const f=$("#models-flag");
   if(st.busy){
     f.hidden=!veil.hidden?true:false;
-    f.textContent="MODELS DOWNLOADING \u00b7 "+st.overall_pct+"%";
-    f.style.background="linear-gradient(90deg,#4a7fd4 "+st.overall_pct
-      +"%,#1c2f5e "+st.overall_pct+"%)";
+    f.textContent="DOWNLOADING MODELS \u00b7 "+st.overall_pct+"%";
+    f.style.background="linear-gradient(90deg,#e26d5a "+st.overall_pct
+      +"%,#4b1f18 "+st.overall_pct+"%)";
   }else{
     f.style.background="";
     f.textContent="MODELS AVAILABLE";
