@@ -4345,10 +4345,6 @@ body.perf #hero h1 .halo span,body.perf #hero h1::after{
   font-size:44px;font-weight:400;letter-spacing:-.01em;
   color:#eceade;margin-top:22px;
 }
-#hero .greet .spark{
-  color:#df7356;font-family:var(--helv);font-size:34px;
-  vertical-align:2px;margin-right:6px;display:inline-block;
-}
 /* the wordmark centres on its own; LIVE is pulled out of the flow so it
    sits further right without dragging the title off-centre */
 #hero .h1row{display:flex;align-items:center;justify-content:center;position:relative}
@@ -5552,7 +5548,7 @@ const GREETINGS=[
   "What's worth a long answer?","Let's go deep.",
 ];
 function greeting(){return GREETINGS[Math.floor(Math.random()*GREETINGS.length)];}
-(function(){const g=$(".greet");if(g)g.innerHTML='<span class="spark">✳</span>'+esc(greeting());})();
+(function(){const g=$(".greet");if(g)g.textContent=greeting();})();
 
 /* ------------------------------------------------- chats: list + store */
 // Chats are owned by the backend (survives app updates); localStorage is
@@ -5579,7 +5575,7 @@ async function pushChatsToDisk(){
 }
 
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1></div><div class="beta-tag">__APP_BETA__</div><p class="greet"><span class="spark">✳</span>'+esc(greeting())+'</p></div>';
+  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
 }
 function saveChats(){
   // write through to disk, coalesced so a burst of messages is one write
@@ -5782,9 +5778,6 @@ async function bootSkyline(){
   let cached=[];
   try{cached=(await(await fetch("/api/sky/cached")).json()).cached||[];}
   catch(e){}
-  // TIME OF DAY drives the mood: after 7pm the picker prefers the dark
-  // clips (night city passes, aurora, deep ocean); in daylight it avoids
-  // them. Falls back to whatever exists rather than showing nothing.
   const darkSet=new Set(JSON.parse('__SKY_DARK__'));
   // CURATED, for now: only the light-field clips — night city passes,
   // aurora, deep-ocean glow. Dense bright points on dark are what make
@@ -5792,22 +5785,16 @@ async function bootSkyline(){
   // time-of-day switch is parked until the pool reopens.
   const mood=x=>darkSet.has(x);
   let i;
-  if(cached.length){
-    let pool=cached.filter(x=>x!==last&&mood(x));
-    if(!pool.length)pool=cached.filter(x=>x!==last);
+  if(last>=0&&last<SKY_N&&mood(last)){
+    // THE HOUSE BACKDROP, per Patrick: the same clip every launch,
+    // looping forever — Apple authored these to repeat. Random happens
+    // exactly once, on the first run ever.
+    i=last;
+  }else if(cached.length){
+    let pool=cached.filter(x=>mood(x));
+    if(!pool.length)pool=cached.slice();
     const pick=pool.length?pool:cached;
     i=pick[Math.floor(Math.random()*pick.length)];
-    if(cached.length<SKY_N){
-      // warm a clip of the CURRENT mood first, so tonight's rotation
-      // grows tonight-appropriate variety
-      const want=[];
-      for(let n=0;n<SKY_N;n++)if(!cached.includes(n)&&mood(n))want.push(n);
-      const all=[];
-      for(let n=0;n<SKY_N;n++)if(!cached.includes(n))all.push(n);
-      const src=(want.length?want:all);
-      const n=src[Math.floor(Math.random()*src.length)];
-      fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{}); // silent prewarm
-    }
   }else{
     const moody=[];
     for(let n=0;n<SKY_N;n++)if(mood(n))moody.push(n);
