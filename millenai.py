@@ -129,7 +129,10 @@ SYSTEM_PROMPT = {
         "more depth than feels minimal — a rich, essay-quality reply is "
         "the default; only truly trivial questions get one-liners. "
         "Use a list only for truly enumerable things, and when you don't know "
-        "something, say so plainly."
+        "something, say so plainly. Hold yourself to the bar of the very "
+        "best assistants: precise facts, concrete examples, short clear "
+        "paragraphs, a confident direct voice — and when the stakes are "
+        "real (health, money, code), be rigorous about the details."
     ),
 }
 
@@ -1843,7 +1846,7 @@ def stream_openai_compat(port: int, model_label: str, messages: list, emit,
         "messages": messages,
         # a reasoning model spends most of its budget thinking before it
         # writes a word — 2048 ran out mid-thought and produced nothing
-        "max_tokens": 4096,
+        "max_tokens": 8192,
         "temperature": 0.75,
         "stream": True,
         # Native reasoning is OFF by default. Gemma 4 26B does not converge:
@@ -2212,7 +2215,8 @@ def run_council(labels: list, messages: list, emit, status,
         status(f"asking {label} · {i} of {len(labels)}")
         parts = []
         try:
-            run_model(label, messages, parts.append)
+            run_model(label, messages, parts.append,
+                      thinking=(reflect and label.startswith("Qwen")))
         except Exception as exc:
             took_part(label, f"(no answer — {type(exc).__name__})")
             continue
@@ -3902,17 +3906,29 @@ body.resizing{cursor:col-resize;user-select:none}
    shows through the letters. The stroke wears ONE color, the average of
    the sampled backdrop palette (--bwavg, set by paintBrandFromSky), and
    morphs with the footage via the color transition. */
+/* the LOCKUP, per Patrick ("think design aesthetic"): "Millen" is lit
+   hollow glass, "AI" lands solid in the backdrop's own gradient — the
+   contrast of open line-work against a filled chameleon block is the
+   mark. One element, two voices. */
 #brand .name{
-  font-weight:800;font-size:44px;letter-spacing:.01em;line-height:1.1;
-  color:transparent;-webkit-text-fill-color:transparent;
-  letter-spacing:.02em;
-  /* the line lifts toward white so it reads as lit glass, and the glow
-     is layered: a hair of specular right at the stroke, a wide soft
-     halo in the backdrop's colour underneath */
-  -webkit-text-stroke:1.5px color-mix(in srgb,var(--bwavg,#9aa3c0) 70%,#fff);
+  font-size:44px;letter-spacing:.02em;line-height:1.1;
+  display:inline-flex;align-items:baseline;
   filter:drop-shadow(0 0 1.5px rgba(255,255,255,.30))
          drop-shadow(0 2px 16px var(--bwglow,rgba(150,160,255,.38)));
-  transition:-webkit-text-stroke-color 2.5s ease,filter 1.2s ease;
+  transition:filter 1.2s ease;
+}
+#brand .name i{font-style:normal}
+#brand .name .nm1{
+  font-weight:700;color:transparent;-webkit-text-fill-color:transparent;
+  -webkit-text-stroke:1.5px color-mix(in srgb,var(--bwavg,#9aa3c0) 70%,#fff);
+  transition:-webkit-text-stroke-color 2.5s ease;
+}
+#brand .name .nm2{
+  font-weight:800;margin-left:2px;
+  background:linear-gradient(135deg,
+             var(--bw1,#ffc46e),var(--bwavg,#9aa3c0),var(--bw3,#8f9dff));
+  -webkit-background-clip:text;background-clip:text;
+  color:transparent;-webkit-text-fill-color:transparent;
 }
 body.perf #brand .name{animation:none;filter:none}
 
@@ -4731,7 +4747,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div id="brand-wrap">
     <div id="brand-row">
     <div id="brand" title="About MillenAI">
-      <span class="name">MillenAI</span>
+      <span class="name"><i class="nm1">Millen</i><i class="nm2">AI</i></span>
     </div>
     <div id="update-flag" hidden title="Install the update">UPDATE</div>
     <button id="newchat" title="New chat">
@@ -5531,6 +5547,46 @@ const GREETINGS=[
   "What are you working on?","What can I help with?","What's up today?",
   "Ask me anything.","What are you curious about?",
   "What shall we get into?","How can I help right now?",
+  "What are we building today?","Give me something hard.",
+  "What's the plan?","Talk to me.","What needs solving?",
+  "Where's your head at?","What's cooking?","Let's figure something out.",
+  "What's the big idea?","Drop a question.","What are we chasing today?",
+  "What's puzzling you?","Fire away.","What should we untangle?",
+  "What's next on the list?","Let's make something.","What's the mission?",
+  "Got a problem? Bring it.","What deserves an answer?",
+  "What would help right now?","Pick my brain.","What's rattling around?",
+  "Let's get after it.","What's worth knowing today?",
+  "What can we knock out?","Start anywhere.","What's the question?",
+  "Something on your plate?","Let's dig in.","What's bugging you?",
+  "Where do we begin?","Hit me with it.","What are we learning today?",
+  "What's the goal tonight?","Bring me a challenge.",
+  "What's one thing you want done?","Let's move the needle.",
+  "What's unclear?","I'm all ears.","What do you want to know?",
+  "Sketch me the problem.","What's brewing?","Ready when you are.",
+  "What matters most right now?","Give me the messy version.",
+  "What are you stuck on?","Let's sort it out.","What's the itch?",
+  "Ideas welcome.","What should exist that doesn't?",
+  "What's today's rabbit hole?","Ask the thing.","What's half-finished?",
+  "Let's close a loop.","What would make today a win?",
+  "What's the story?","Curious about anything?","Let's think it through.",
+  "What needs a second brain?","Throw me a curveball.",
+  "What's on the whiteboard?","Where's the friction?",
+  "What do you want to understand?","Let's break it down.",
+  "What's the dream?","Name the target.","What's blocking you?",
+  "Big question or small — go.","What should we explore?",
+  "What's worth doing well?","Let's write something great.",
+  "What's the puzzle?","Give me the details.","What's your angle?",
+  "What can I take off your plate?","Let's crack this.",
+  "What are you wondering?","Set the scene.","What's the ask?",
+  "Anything keeping you up?","Let's get specific.",
+  "What deserves a deep dive?","Point me at it.",
+  "What's the first move?","Make it interesting.",
+  "What's on deck?","Let's ship something.","What's the vision?",
+  "Questions, plans, wild ideas — go.","What needs fixing?",
+  "Tell me everything.","What's the endgame?","Let's find out.",
+  "What are we solving first?","Your move.","What's it gonna be?",
+  "Feed me a problem.","Where can I earn my keep?",
+  "What's worth a long answer?","Let's go deep.",
 ];
 function greeting(){return GREETINGS[Math.floor(Math.random()*GREETINGS.length)];}
 (function(){const g=$(".greet");if(g)g.textContent=greeting();})();
