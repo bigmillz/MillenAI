@@ -106,7 +106,6 @@ check("halo element present", 'class="halo"' in page)
 check("mobile drawer present", 'id="mburger"' in page)
 check("tier dropdown js present", "tierRows.classList" in page)
 check("arena present", 'id="arena-toggle"' in page and "sendArena" in page)
-check("user count present", 'id="user-label"' in page)
 check("blend progress bar css", ".blendprog" in page)
 check("serene entrance css", "heroIn 2.6s" in page and "shockOut" not in page)
 

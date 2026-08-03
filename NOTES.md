@@ -836,3 +836,15 @@ that found all three: re-execute the page's own script text via
   handler re-sends the last STATUS marker after >20s quiet (writes behind
   a lock, hb_stop.set() on every exit path). Verified by measuring
   inter-byte gaps through a full Thinking run: max 22.2s.
+
+## 2.0.0
+- ZERO-CLICK FIRST RUN: needs_setup now auto-POSTs /api/setup/install —
+  the machine-sized starter set downloads with no button press; headline
+  reads "NN GB memory detected". Endpoint stays owner-only, so remote
+  guests can't trigger host downloads (their POST 403s silently).
+- setup_status() gained mem_gb (psutil total, rounded).
+- USERS row removed from telemetry; box is rgba(47,47,47,.5) + 14px
+  backdrop blur (sidebar's frosted material).
+- Context: ~/.cache/huggingface was manually deleted (Finder, 03:33) —
+  five stale 70B ollama pulls freed 194GB; ladder re-downloaded via
+  snapshot_download. NOT app code — nothing in MillenAI deletes that dir.

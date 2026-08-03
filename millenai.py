@@ -1624,6 +1624,7 @@ def setup_status() -> dict:
         # nag on first run only: once a couple of models work, the welcome
         # screen is opt-in via "Add models…"
         "needs_setup": ready_n < 2,
+        "mem_gb": round(psutil.virtual_memory().total / 1e9),
         "ready_n": ready_n,
         "mlx_ok": _has_mlx() if IS_ARM else True,
         "ollama": _ollama_bin() is not None,
@@ -4062,7 +4063,8 @@ body.perf #brand .name{animation:none;filter:none}
 
 /* telemetry — the instrument cluster */
 #telemetry{
-  margin-top:12px;background:var(--panel2);border:1px solid var(--line-soft);
+  margin-top:12px;background:rgba(47,47,47,.5);border:1px solid var(--line-soft);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
   border-radius:var(--radius);padding:12px 12px 11px;
   font-family:var(--mono);
 }
@@ -4769,9 +4771,6 @@ __AGENT_ROWS__
     <div class="meter-row">
       <div class="meter-label"><span>GPU COMPUTE</span><b id="gpu-label">—</b></div>
       <div class="meter" id="gpu-meter"></div>
-    </div>
-    <div class="meter-row" id="user-row">
-      <div class="meter-label"><span>USERS</span><b id="user-label">—</b></div>
     </div>
   </div>
 </aside>
@@ -5625,8 +5624,6 @@ async function pollStats(){
     const r=await fetch("/api/stats"),st=await r.json();
     gpu=st.gpu_pct;
     if(st.users_total!=null)
-      $("#user-label").textContent=
-        st.users_online+" online · "+st.users_total+" total";
     if(st.real){
       $("#mem-label").textContent=st.mem_used_gb+" / "+st.mem_total_gb+" GB";
       paintMeter($("#mem-meter"),st.mem_pct);
@@ -6283,7 +6280,8 @@ function renderSetup(st){
   const recs=missing.filter(m=>m.star);
   const others=missing.filter(m=>!m.star);
   if(recs.length)
-    html+='<div class="setup-head">Recommended for this machine</div>'
+    html+='<div class="setup-head">'+(st.mem_gb?st.mem_gb+" GB memory detected — ":"")
+         +'these models fit your machine</div>'
          +recs.map(row).join("");
   else
     html+='<div class="setup-head">Everything recommended is installed'
@@ -6466,7 +6464,17 @@ setTimeout(kickWipe,450);
   try{
     const st=await(await fetch("/api/setup")).json();
     // auto-open only when the app can't hold a conversation yet
-    if(st.needs_setup){openSetup();setupManual=false;}
+    if(st.needs_setup){
+      openSetup();setupManual=false;
+      // zero-click, per Patrick: detect the memory, download the right
+      // models for it — no button press. (Server rejects this for remote
+      // guests; their host owns the models.)
+      try{
+        setupGo.disabled=true;setupGo.textContent="Downloading\u2026";
+        await fetch("/api/setup/install",{method:"POST"});
+      }catch(e){}
+      setupTick();
+    }
   }catch(e){}
 })();
 
