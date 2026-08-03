@@ -3040,7 +3040,6 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 self.wfile.write(body)
                 return
             html = (HTML_CONTENT
-                    .replace("__MODEL_ROWS__", build_model_rows())
                     .replace("__AGENT_ROWS__", build_agent_rows())
                     .replace("__APP_VER_TAG__",
                              APP_VERSION.replace(" ", "&nbsp;"))
@@ -3898,7 +3897,7 @@ body.resizing{cursor:col-resize;user-select:none}
 #brand .name{
   font-weight:800;font-size:44px;letter-spacing:.01em;line-height:1.1;
   color:transparent;-webkit-text-fill-color:transparent;
-  -webkit-text-stroke:2.4px var(--bwavg,#9aa3c0);
+  -webkit-text-stroke:1.4px var(--bwavg,#9aa3c0);
   filter:drop-shadow(0 1px 9px var(--bwglow,rgba(150,160,255,.30)));
   transition:-webkit-text-stroke-color 2.5s ease,filter 1.2s ease;
 }
@@ -3972,9 +3971,6 @@ body.perf #brand .name{animation:none;filter:none}
   box-shadow:inset 0 0 0 3.5px var(--accent-hot)}
 
 /* model-group dropdowns: carets on the hardware-class headers */
-#adv-wrap .group-label{cursor:pointer;user-select:none}
-#adv-wrap .group-label::after{content:"▾";float:right;color:var(--faint);font-size:11px}
-#adv-wrap .group-label.folded::after{content:"▸"}
 
 /* dropdown behaviour: collapsed shows only the active tier + caret */
 #tier-rows.closed .tier:not(.active){display:none}
@@ -4743,10 +4739,6 @@ __AGENT_ROWS__
   <div class="group-label chats">Chats</div>
   <div id="chat-list"></div>
 
-  <div class="group-label adv" id="adv-toggle"><span id="adv-caret">▸</span> All models</div>
-  <div id="adv-wrap" hidden>
-__MODEL_ROWS__
-  </div>
   </div>
 
   <div id="settings">
@@ -4762,11 +4754,6 @@ __MODEL_ROWS__
          title="Two models answer the same prompt side by side">
       <div class="switch"></div>
       Arena mode
-    </div>
-    <div class="toggle-row" id="sound-toggle" style="margin-top:9px"
-         title="The warp makes its own engine sound">
-      <div class="switch"></div>
-      Audio Effects
     </div>
     <div class="model" id="open-setup" title="Download more models"
          style="margin-top:10px">
@@ -4900,7 +4887,6 @@ const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
 
 /* ------------------------------------------------------------- state */
 let messages=[], generating=false, abortCtl=null;
-let sndOn=localStorage.getItem("millen.sound")!=="0"; // TOP of script: the toggle block runs before everything else that touches it
 let model=localStorage.getItem("millen.model")||"Llama 3.2 3B";
 let perf=localStorage.getItem("millen.perf")==="1";
 let autoWeb=localStorage.getItem("millen.web")!=="0";  // on unless turned off
@@ -4967,13 +4953,6 @@ function setArena(on){
 }
 $("#arena-toggle").addEventListener("click",()=>setArena(!arenaMode));
 setArena(arenaMode);
-
-function setSound(on){
-  sndOn=on;$("#sound-toggle").classList.toggle("on",on);
-  localStorage.setItem("millen.sound",on?"1":"0");
-}
-$("#sound-toggle").addEventListener("click",()=>setSound(!sndOn));
-setSound(sndOn);
 
 /* --------------------------------------------------- live web search */
 function paintLive(){
@@ -5073,10 +5052,6 @@ function modeShow(which){
 }
 $$("#mode-tabs .ltab").forEach(t=>
   t.addEventListener("click",()=>modeShow(t.dataset.m)));
-$("#adv-toggle").addEventListener("click",()=>{
-  const w=$("#adv-wrap");w.hidden=!w.hidden;
-  $("#adv-caret").textContent=w.hidden?"▸":"▾";
-});
 
 /* ------------------------------------------------------------ agents */
 // radio choice: a task specialist (Coding, Resumes…) or the standard
@@ -5108,19 +5083,6 @@ modeShow("ai");
 
 // each hardware-class group inside is its own dropdown, folded by default —
 // open one tier of the ladder at a time instead of a wall of models
-$$("#adv-wrap .group-label").forEach(gl=>{
-  const fold=on=>{
-    gl.classList.toggle("folded",on);
-    let n=gl.nextElementSibling;
-    while(n&&!n.classList.contains("group-label")){
-      n.style.display=on?"none":"";
-      n=n.nextElementSibling;
-    }
-  };
-  fold(true);
-  gl.addEventListener("click",()=>fold(!gl.classList.contains("folded")));
-});
-
 /* ------------------------------------------------------ markdown-lite */
 function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
 function renderMD(raw){
@@ -5420,7 +5382,6 @@ async function send(){
 
   fetch("/api/speak",{method:"POST",headers:{"Content-Type":"application/json"},
     body:JSON.stringify({stop:true})});
-  ensureWarpAudio();
   if(audioCtx&&audioCtx.state==="suspended")audioCtx.resume();
   input.value="";input.style.height="auto";
   const sentImages=pendingImages.slice();
@@ -5829,6 +5790,7 @@ async function bootSkyline(){
     c.addEventListener("error",()=>{hideBar();skyline.hidden=true;},{once:true});
     function buf(){
       if(shown)return;
+      if(bar){bar.hidden=false;}   // visible from the FIRST moment
       try{
         const d=c.duration,e=c.buffered.length?c.buffered.end(0):0;
         // STREAM as it loads: ~6s of runway is enough cushion to play
@@ -5992,59 +5954,6 @@ function drawMotes(dt){
 // A synthesized engine, no audio files: two detuned saws through a
 // resonant lowpass (the drone) + looped noise through a bandpass (the
 // wind), both enveloped by the SAME e/recoil that drive the visuals —
-// spool, suck, ignition and tail all sound like they look. Created
-// lazily on send() because browsers demand a user gesture for audio.
-let audioCtx=null,sndNodes=null;
-function ensureWarpAudio(){
-  if(!sndOn||audioCtx)return;
-  try{
-    audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-    const master=audioCtx.createGain();
-    master.gain.value=0;master.connect(audioCtx.destination);
-    // no whine (retired as annoying): a whisper of wind on the master,
-    // and a dedicated bus for the sub-heartbeat thumps
-    const thump=audioCtx.createGain();
-    thump.gain.value=.9;thump.connect(audioCtx.destination);
-    const buf=audioCtx.createBuffer(1,audioCtx.sampleRate*2,audioCtx.sampleRate);
-    const ch=buf.getChannelData(0);
-    for(let i=0;i<ch.length;i++)ch[i]=Math.random()*2-1;
-    const noise=audioCtx.createBufferSource();
-    noise.buffer=buf;noise.loop=true;
-    const bp=audioCtx.createBiquadFilter();
-    bp.type="bandpass";bp.frequency.value=500;bp.Q.value=.8;
-    const ng=audioCtx.createGain();ng.gain.value=.55;
-    noise.connect(bp);bp.connect(ng);ng.connect(master);
-    noise.start();
-    sndNodes={master,bp,thump};
-  }catch(err){audioCtx=null;sndNodes=null;}
-}
-let nextThump=0;
-function driveWarpAudio(e,recoil){
-  if(!sndNodes||!audioCtx)return;
-  const t=audioCtx.currentTime;
-  sndNodes.master.gain.setTargetAtTime(
-    sndOn?(e*.05+recoil*.02):0,t,.12);
-  sndNodes.bp.frequency.setTargetAtTime(420+e*2600,t,.15);
-  // SUB HEARTBEAT: ~120bpm, a 48Hz sine hit that pitches down and dies
-  // in ~0.2s — felt in the chest more than heard
-  if(sndOn&&e>.12){
-    if(nextThump<t)nextThump=t+.05;
-    while(nextThump<t+.35){
-      const o=audioCtx.createOscillator(),g=audioCtx.createGain();
-      o.type="sine";
-      o.frequency.setValueAtTime(48,nextThump);
-      o.frequency.exponentialRampToValueAtTime(34,nextThump+.16);
-      g.gain.setValueAtTime(.0001,nextThump);
-      g.gain.exponentialRampToValueAtTime(.22*e,nextThump+.018);
-      g.gain.exponentialRampToValueAtTime(.001,nextThump+.2);
-      o.connect(g);g.connect(sndNodes.thump);
-      o.start(nextThump);o.stop(nextThump+.25);
-      nextThump+=.5;                     // 120 bpm
-    }
-  }else{
-    nextThump=0;
-  }
-}
 
 const WARP_UP=1.35, WARP_DOWN=2.3;  // turbo: readable spool, long tail
 // Per-frame snapshot of the video at capped resolution: every slat then
@@ -6108,7 +6017,6 @@ function starTick(ts){
     if(skyline){skyline.style.opacity="";skyline.style.transform="";
       skyline.style.filter="";}
     starCv.style.transform="";
-    driveWarpAudio(0,0);
     if(tiles.length){tiles=[];tileMeta=null;}
     lightMotes.length=0;
     return;
@@ -6204,7 +6112,6 @@ function starTick(ts){
   sctx.globalAlpha=1;
   harvestLights(ts);
   drawMotes(dt);
-  driveWarpAudio(e,recoil);
 }
 starTick();
 // the brand chameleon runs on its own gentle clock — the warp loop only
