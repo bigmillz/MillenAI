@@ -305,19 +305,6 @@ TIERS = {
         # no quality filtering — if it can run, it takes part
         "all": True,
     },
-    "Research": {
-        "icon": "\U0001f50e", "desc": "searches the web, writes a cited brief",
-        # One capable model does the whole run: it plans the searches and
-        # writes the brief, so there is only ever one engine load. Order
-        # matters — count is 1, so the first installed pick is the agent.
-        # Hermes leads because it is tuned for instruction-following and
-        # structured output, which is most of what planning queries is.
-        "picks": ["Hermes 3 8B", "Qwen 3.6 35B MoE", "Gemma 4 12B",
-                  "Mistral Nemo 12B", "Qwen 2.5 7B", "Llama 3.1 8B",
-                  "Gemma 2 9B IT", "Gemma 4 26B", "Llama 3.2 3B"],
-        "count": 1,
-        "research": True,
-    },
 }
 
 # ------------------------------------------------------------- agents
@@ -3211,6 +3198,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if not (p and os.path.exists(p)):
             self.send_error(404)
             return
+        try:
+            os.utime(p, None)   # LRU keys on mtime = "recently played"
+        except OSError:
+            pass
         size = os.path.getsize(p)
         start, end = 0, size - 1
         rng = self.headers.get("Range", "")
@@ -3867,8 +3858,8 @@ html.winwipe.winwipe-run body{
   /* real frosted glass, per Patrick: ~30% panel, heavy blur carrying the
      legibility instead of the tint */
   background:rgba(21,23,29,.24);
-  -webkit-backdrop-filter:blur(26px) saturate(1.4);
-          backdrop-filter:blur(26px) saturate(1.4);
+  -webkit-backdrop-filter:blur(18px) saturate(1.4);
+          backdrop-filter:blur(18px) saturate(1.4);
   border-right:1px solid var(--line-soft);
   display:flex;flex-direction:column;padding:20px 16px 14px;gap:4px;
 }
@@ -3914,8 +3905,13 @@ body.resizing{cursor:col-resize;user-select:none}
 #brand .name{
   font-weight:800;font-size:44px;letter-spacing:.01em;line-height:1.1;
   color:transparent;-webkit-text-fill-color:transparent;
-  -webkit-text-stroke:1.4px var(--bwavg,#9aa3c0);
-  filter:drop-shadow(0 1px 9px var(--bwglow,rgba(150,160,255,.30)));
+  letter-spacing:.02em;
+  /* the line lifts toward white so it reads as lit glass, and the glow
+     is layered: a hair of specular right at the stroke, a wide soft
+     halo in the backdrop's colour underneath */
+  -webkit-text-stroke:1.5px color-mix(in srgb,var(--bwavg,#9aa3c0) 70%,#fff);
+  filter:drop-shadow(0 0 1.5px rgba(255,255,255,.30))
+         drop-shadow(0 2px 16px var(--bwglow,rgba(150,160,255,.38)));
   transition:-webkit-text-stroke-color 2.5s ease,filter 1.2s ease;
 }
 body.perf #brand .name{animation:none;filter:none}
@@ -3971,18 +3967,19 @@ body.perf #brand .name{animation:none;filter:none}
 #mode-tabs .ltab:hover{color:var(--dim)}
 #mode-tabs .ltab.on{color:var(--text);background:var(--panel2);
   border-color:var(--line)}
+#agents-wrap{margin:6px 0 4px}
 .agent{
-  display:flex;align-items:center;gap:9px;padding:8px 10px;
-  border-radius:9px;color:var(--dim);font-size:14px;cursor:pointer;
+  display:flex;align-items:center;gap:9px;padding:6px 10px;margin-bottom:2px;
+  border-radius:9px;color:var(--dim);font-size:13.5px;cursor:pointer;
+  border:1px solid transparent;transition:all .13s;user-select:none;
 }
 .agent:hover{color:var(--text);background:var(--panel2)}
-.agent .radio{
-  width:13px;height:13px;border-radius:50%;flex:none;
-  border:1.5px solid var(--faint);
+.agent .radio{display:none}
+.agent .aname,.agent b{font-weight:600}
+.agent.on{
+  color:var(--text);background:var(--accent-dim);
+  border-color:rgba(255,255,255,.26);
 }
-.agent.on{color:var(--text)}
-.agent.on .radio{border-color:var(--accent-hot);
-  box-shadow:inset 0 0 0 3.5px var(--accent-hot)}
 
 /* model-group dropdowns: carets on the hardware-class headers */
 
@@ -4095,12 +4092,13 @@ body.perf #brand .name{animation:none;filter:none}
   color:var(--dim);margin-bottom:4px;
 }
 .meter-label b{color:var(--text);font-weight:500}
-.meter{display:flex;gap:2px;height:2px}
-.meter i{
-  flex:1;background:var(--line);border-radius:1px;transition:background .3s;
-}
-.meter i.lit{background:var(--accent)}
-.meter i.hot{background:var(--accent-hot)}
+.meter{height:3px;border-radius:2px;background:rgba(255,255,255,.10);
+  overflow:hidden}
+.meter .mfill{height:100%;width:0;border-radius:2px;
+  background:linear-gradient(90deg,var(--accent),var(--accent-hot));
+  box-shadow:0 0 10px var(--accent-dim);
+  transition:width .6s cubic-bezier(.4,0,.2,1),background .4s}
+.meter .mfill.hot{background:linear-gradient(90deg,var(--accent-hot),#e26d5a)}
 @keyframes blink{50%{opacity:.25}}
 /* performance mode: telemetry goes dark AND stops polling (the GPU probe
    and meter repaints are the expensive part) */
@@ -4433,6 +4431,14 @@ body:not(.perf) .caret{animation:blink .9s step-end infinite}
   background:linear-gradient(transparent,var(--bg) 55%);
 }
 body.perf #composer-wrap{background:var(--bg);border-top:1px solid var(--line-soft);padding-top:14px}
+#skyline video{transition:transform 1.1s cubic-bezier(.22,.61,.36,1);
+  will-change:transform}
+#composer:focus-within{border-color:rgba(255,255,255,.28);
+  box-shadow:0 0 0 1px var(--accent-dim),
+             0 10px 34px -14px var(--bwglow,rgba(150,160,255,.4))}
+#send{transition:transform .18s ease,box-shadow .25s ease}
+#send:hover{transform:translateY(-1px);
+  box-shadow:0 4px 16px -6px var(--accent-hot)}
 #composer{
   max-width:780px;margin:0 auto;pointer-events:auto;
   background:var(--panel2);border:1px solid var(--line);
@@ -5627,13 +5633,13 @@ $("#newchat").addEventListener("click",()=>{
 });
 
 /* ---------------------------------------------------------- telemetry */
-function buildMeter(el,n){for(let i=0;i<n;i++)el.appendChild(document.createElement("i"));}
-buildMeter($("#mem-meter"),18);buildMeter($("#gpu-meter"),18);
+function buildMeter(el){const f=document.createElement("div");
+  f.className="mfill";el.appendChild(f);}
+buildMeter($("#mem-meter"));buildMeter($("#gpu-meter"));
 function paintMeter(el,pct){
-  const segs=el.children,lit=Math.round(pct/100*segs.length);
-  for(let i=0;i<segs.length;i++){
-    segs[i].className=i<lit?(i>=segs.length*0.8?"hot":"lit"):"";
-  }
+  const f=el.firstChild;if(!f)return;
+  f.style.width=Math.max(0,Math.min(100,pct))+"%";
+  f.classList.toggle("hot",pct>=80);
 }
 let simMem=58,simGpu=12;
 function paintGpu(pct){
@@ -5807,7 +5813,19 @@ async function bootSkyline(){
       hideBar();skyline.hidden=false;
     }
     c.addEventListener("canplaythrough",reveal,{once:true});
-    c.addEventListener("error",()=>{hideBar();skyline.hidden=true;},{once:true});
+    c.addEventListener("error",()=>{
+      // evicted or hiccuped mid-session: re-warm THIS clip and resume —
+      // the backdrop only changes on reload, never on its own
+      hideBar();
+      fetch("/api/sky/status?i="+i+"&warm=1").then(()=>{
+        const re=setInterval(async()=>{
+          const st=await(await fetch("/api/sky/status?i="+i)).json();
+          if(st.status==="ready"){clearInterval(re);c.src="/sky/"+i+".mov";
+            const p2=c.play();if(p2&&p2.catch)p2.catch(()=>{});}
+          if(st.status==="error"){clearInterval(re);skyline.hidden=true;}
+        },1500);
+      }).catch(()=>{skyline.hidden=true;});
+    },{once:true});
     function buf(){
       if(shown)return;
       if(bar){bar.hidden=false;}   // visible from the FIRST moment
@@ -6135,6 +6153,20 @@ function starTick(ts){
   drawMotes(dt);
 }
 starTick();
+// PARALLAX: the city leans a few px toward the cursor — barely there,
+// endlessly alive. Desktop pointers only, and never in perf mode.
+if(matchMedia("(pointer:fine)").matches){
+  const skv=$("#sky-color");let pxT=0,pyT=0,pxN=0,pyN=0;
+  document.addEventListener("mousemove",e=>{
+    pxT=(e.clientX/innerWidth-.5);pyT=(e.clientY/innerHeight-.5);
+  },{passive:true});
+  (function paraTick(){
+    requestAnimationFrame(paraTick);
+    if(document.body.classList.contains("perf"))return;
+    pxN+=(pxT-pxN)*.04;pyN+=(pyT-pyN)*.04;
+    skv.style.transform="scale(1.05) translate("+(-pxN*16).toFixed(1)+"px,"+(-pyN*11).toFixed(1)+"px)";
+  })();
+}
 // the brand chameleon runs on its own gentle clock — the warp loop only
 // draws while a query runs, but the wordmark should match the city always
 (function brandTick(ts){
