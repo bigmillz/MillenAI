@@ -922,3 +922,11 @@ that found all three: re-execute the page's own script text via
   Settings > Privacy & Security > Open Anyway; win: SmartScreen "More
   info" > "Run anyway"). The DMG background already carries the same
   three steps.
+- 2.12 TURBO (optional free cloud GPU): ~/…/MillenAI/cloud.json
+  {"name","base","key","model"} enables an OpenAI-compatible endpoint
+  (Groq / Cloudflare Workers AI / OpenRouter / Together all fit, all have
+  free tiers). Switch in Settings appears ONLY when the file exists, and
+  prompts leave the machine only while it is on; any failure falls back
+  to local silently. The key is never entered through the UI or chat.
+  NOT usable: Colab/Kaggle notebooks — their terms forbid using them as
+  a remote inference server.

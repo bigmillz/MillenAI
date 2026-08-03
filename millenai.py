@@ -281,6 +281,63 @@ MLX_EST_BYTES = {l: int(i["gb"] * 1e9) for l, i in MODEL_INFO.items()}
 MODEL_MEM_BYTES = {l: i["mem"] for l, i in MODEL_INFO.items()}
 OLLAMA_TAGS = {l: i["ollama"] for l, i in MODEL_INFO.items() if i["ollama"]}
 
+# ------------------------------------------------------------------ turbo
+# FREE CLOUD GPU, opt-in: Groq, Cloudflare Workers AI, OpenRouter and
+# Together all speak the OpenAI chat-completions dialect and all have a
+# free tier. Drop a JSON file at ~/…/MillenAI/cloud.json:
+#   {"name":"Groq 70B","base":"https://api.groq.com/openai/v1",
+#    "key":"YOUR_KEY","model":"llama-3.3-70b-versatile"}
+# Nothing is sent anywhere until the Turbo switch in Settings is on.
+CLOUD_FILE = os.path.join(app_dir(), "cloud.json")
+
+
+def cloud_conf():
+    try:
+        with open(CLOUD_FILE) as f:
+            c = json.load(f)
+        if c.get("base") and c.get("key") and c.get("model"):
+            return c
+    except Exception:
+        pass
+    return None
+
+
+def cloud_stream(messages: list, emit) -> bool:
+    """Stream from the configured cloud endpoint. False = fall back local."""
+    c = cloud_conf()
+    if not c:
+        return False
+    payload = json.dumps({"model": c["model"], "messages": messages,
+                          "max_tokens": 4096, "temperature": 0.75,
+                          "stream": True}).encode()
+    req = urllib.request.Request(
+        c["base"].rstrip("/") + "/chat/completions", data=payload,
+        headers={"Content-Type": "application/json",
+                 "Authorization": "Bearer " + c["key"]})
+    got = False
+    try:
+        with urllib.request.urlopen(req, timeout=90) as r:
+            for raw in r:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                blob = line[5:].strip()
+                if blob == "[DONE]":
+                    break
+                try:
+                    d = json.loads(blob)
+                    tok = (d.get("choices") or [{}])[0].get(
+                        "delta", {}).get("content") or ""
+                except Exception:
+                    tok = ""
+                if tok:
+                    got = True
+                    emit(tok)
+    except Exception:
+        return got
+    return got
+
+
 # ------------------------------------------------------------------ fleet
 # CONTRIBUTE, per Patrick: friends flip a switch and their idle GPUs
 # answer the hub's queries. Workers connect OUTBOUND (long-poll HTTP, so
@@ -3663,6 +3720,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                           "busy": v.get("busy", False),
                                           "models": len(v.get("models", []))}
                                          for v in alive.values()]})
+        elif self.path == "/api/cloud":
+            if self._remote():
+                self._send_json({"err": "owner only"})
+                return
+            c = cloud_conf()
+            self._send_json({"configured": bool(c),
+                             "name": (c or {}).get("name", "")})
         elif self.path == "/api/downloads":
             self._send_json(download_links())
         elif self.path == "/api/stats":
@@ -4358,6 +4422,14 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                             peer=(tier == "Power"))
             else:
                 lbl = route_label or model_name
+                turbo = (load_prefs(None).get("turbo") and cloud_conf()
+                         and not images)
+                if turbo:
+                    status(f"turbo \u2014 {cloud_conf().get('name','cloud')}")
+                    if cloud_stream(full_messages, emit):
+                        hb_stop.set()
+                        return
+                    status("turbo unavailable — running locally")
                 ftext = fleet_run(lbl, full_messages, status) \
                     if not images else ""
                 polish = (load_prefs(None).get("polish", True)
@@ -5263,6 +5335,11 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   font-family:var(--mono);font-size:11.5px;color:var(--accent-hot);
   margin:12px 0 4px;line-height:1.7;text-align:left;
 }
+#turbo-row[hidden]{display:none}
+#turbo-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
+  color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
+  text-align:left}
+#turbo-row input{margin-top:2px;accent-color:var(--accent)}
 #polish-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
   color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
   text-align:left}
@@ -5656,6 +5733,9 @@ __AGENT_ROWS__
     <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
       placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
     <button class="about-btn" id="persona-save">Save preferences</button>
+    <label id="turbo-row" hidden><input type="checkbox" id="turbo">
+      Turbo — use the cloud endpoint you configured (prompts leave this
+      computer)</label>
     <label id="polish-row"><input type="checkbox" id="polish" checked>
       Best quality — answers are drafted, then rewritten (slower)</label>
     <div id="fleet-box">
@@ -7516,6 +7596,13 @@ async function openAbout(){
       const pr2=await(await fetch("/api/prefs")).json();
       const mine=await(await fetch("/api/fleet/mine")).json();
       $("#polish").checked=pr2.polish!==false;
+      $("#turbo").checked=!!pr2.turbo;
+      try{
+        const cs=await(await fetch("/api/cloud")).json();
+        $("#turbo-row").hidden=!cs.configured;
+        if(cs.name)$("#turbo-row").lastChild.textContent=
+          " Turbo \u2014 "+cs.name+" (prompts leave this computer)";
+      }catch(e){}
       $("#contrib-url").value=pr2.contrib_url||"";
       $("#contrib-toggle").classList.toggle("on",!!pr2.contrib_on);
       $("#contrib-toggle").innerHTML=pr2.contrib_on
@@ -7608,6 +7695,11 @@ $("#persona-save").addEventListener("click",async ev=>{
     b.textContent="Saved \u2713";
   }catch(e){b.textContent="Couldn\u2019t save";}
   setTimeout(()=>{b.textContent="Save preferences";},1800);
+});
+$("#turbo").addEventListener("change",()=>{
+  fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({turbo:$("#turbo").checked})});
 });
 $("#polish").addEventListener("change",()=>{
   fetch("/api/prefs",{method:"POST",
