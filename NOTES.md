@@ -914,3 +914,11 @@ that found all three: re-execute the page's own script text via
   leaves engines alone when a sibling MillenAI is listening on 8889/9889.
   Verified by killing the live engine pid mid-session: next query
   recovered with no user-visible error.
+- 2.10.4 GATEKEEPER: the app is only AD-HOC signed (runs, but every
+  download is quarantined) — the real fix is a $99/yr Apple Developer ID
+  + notarization, which needs Patrick's enrollment. Until then: a help
+  card fires WITH the download click on the web page, in the OS's own
+  words (mac: "cannot be opened"/"Apple could not verify" -> System
+  Settings > Privacy & Security > Open Anyway; win: SmartScreen "More
+  info" > "Run anyway"). The DMG background already carries the same
+  three steps.

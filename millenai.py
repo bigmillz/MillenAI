@@ -5154,6 +5154,23 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #model-chip b{color:var(--dim);font-weight:500}
 
 /* -------------------------------------------------------------- about */
+#dlhelp-veil{position:fixed;inset:0;z-index:61;display:flex;
+  align-items:center;justify-content:center;background:rgba(6,7,10,.72);
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+#dlhelp-veil[hidden]{display:none}
+#dlhelp-card{max-width:430px;margin:24px;padding:26px 26px 20px;
+  background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--radius);text-align:center;
+  animation:doorPop .5s cubic-bezier(.16,1,.3,1) both}
+#dlhelp-card .sh-icon{font-size:30px;margin-bottom:4px}
+#dlhelp-card h2{margin:0 0 10px;font-size:20px}
+#dlhelp-card p{color:var(--dim);font-size:13.5px;line-height:1.75;
+  margin:0;text-align:left}
+#dlhelp-card b{color:var(--text)}
+#dlhelp-card .sh-foot{display:flex;gap:10px;margin-top:20px}
+#dlhelp-card button{flex:1;padding:11px 14px;border-radius:10px;
+  border:none;background:var(--accent);color:#1a1a1a;font-weight:700;
+  font-size:13.5px;cursor:pointer}
 #share-veil{position:fixed;inset:0;z-index:60;display:flex;
   align-items:center;justify-content:center;background:rgba(6,7,10,.72);
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
@@ -5617,6 +5634,17 @@ __AGENT_ROWS__
     <button class="about-btn" id="about-logs">Open logs folder</button>
     <button class="about-btn" id="about-forget">Forget what you know about me</button>
     <button class="about-btn primary" id="about-close">Close</button>
+  </div>
+</div>
+
+<div id="dlhelp-veil" hidden>
+  <div id="dlhelp-card">
+    <div class="sh-icon">&#11015;</div>
+    <h2>Downloading&hellip;</h2>
+    <p id="dlhelp-body"></p>
+    <div class="sh-foot">
+      <button id="dlhelp-ok" class="primary">Got it</button>
+    </div>
   </div>
 </div>
 
@@ -7239,6 +7267,8 @@ function shareDone(on){
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contrib_on:true})});
 }
+$("#dlhelp-ok").addEventListener("click",()=>{
+  $("#dlhelp-veil").hidden=true;});
 $("#share-no").addEventListener("click",()=>shareDone(false));
 $("#share-yes").addEventListener("click",()=>shareDone(true));
 // WEB ONLY: a browser visitor is borrowing someone else's GPU — offer
@@ -7256,6 +7286,28 @@ $("#share-yes").addEventListener("click",()=>shareDone(true));
     const a=$("#get-app");
     a.href=url;a.hidden=false;
     a.firstChild.textContent="DOWNLOAD "+(win?"FOR WINDOWS":"FOR MAC");
+    // FIRST-OPEN HELP: MillenAI is free and unsigned by Apple/Microsoft,
+    // so the OS blocks the first launch. Say so plainly, at the moment
+    // of the download, in the words the dialogs actually use.
+    a.addEventListener("click",()=>{
+      $("#dlhelp-body").innerHTML=win
+        ? "Windows may say <b>&ldquo;Windows protected your PC&rdquo;</b>."
+          +"<br><br>1. Open the downloaded file<br>"
+          +"2. Click <b>More info</b><br>"
+          +"3. Click <b>Run anyway</b><br><br>"
+          +"That happens because MillenAI is free and independent \u2014 "
+          +"it only ever runs on your own computer."
+        : "Mac will say it <b>&ldquo;cannot be opened&rdquo;</b> or "
+          +"<b>&ldquo;Apple could not verify&rdquo;</b> the first time. "
+          +"That is normal for a free app.<br><br>"
+          +"1. Open the downloaded file and drag <b>MillenAI</b> into "
+          +"<b>Applications</b><br>"
+          +"2. Open it once \u2014 Mac will refuse<br>"
+          +"3. Go to <b>System Settings \u25b8 Privacy &amp; Security</b>, "
+          +"scroll down and click <b>Open Anyway</b><br><br>"
+          +"You only do this once.";
+      $("#dlhelp-veil").hidden=false;
+    });
   }catch(e){}
 })();
 (async()=>{try{
