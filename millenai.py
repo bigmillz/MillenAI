@@ -4668,6 +4668,7 @@ body.resizing{cursor:col-resize;user-select:none}
    sitting it on the wordmark's baseline hangs it low against the taller type */
 .vghost{
   font-family:var(--mono);font-size:16.5px;letter-spacing:.06em;
+  font-weight:700;
   color:rgba(255,255,255,.30);user-select:none;cursor:pointer;
   padding-top:6px;margin-right:auto;
 }
@@ -5804,10 +5805,11 @@ __AGENT_ROWS__
       </details>
     </div>
     <div id="adv-grid">
+      <button class="about-btn" id="about-preload">Preload backdrops</button>
       <button class="about-btn" id="open-setup">Download models&hellip;</button>
       <button class="about-btn" id="about-check">Check for updates</button>
+      <button class="about-btn" id="about-forget">Forget me</button>
     </div>
-    <button class="about-btn" id="about-forget">Forget what you know about me</button>
     </div>
     <div id="about-foot">
     <button class="about-btn primary" id="about-close">Close</button>
@@ -7314,6 +7316,38 @@ setupGo.addEventListener("click",async()=>{
   setupTick();
 });
 $("#open-setup").addEventListener("click",()=>{aboutVeil.hidden=true;openSetup();});
+// PRELOAD: warm a handful of uncached clips so later launches open fast
+// — the loading bar stays, it just has far less to do
+$("#about-preload").addEventListener("click",async()=>{
+  const btn=$("#about-preload");
+  if(btn.dataset.busy)return;
+  btn.dataset.busy="1";
+  try{
+    const have=new Set(((await(await fetch("/api/sky/cached")).json())
+      .cached)||[]);
+    const want=[];
+    for(let n=0;n<SKY_N&&want.length<6;n++)if(!have.has(n))want.push(n);
+    if(!want.length){
+      btn.textContent="All cached \u2713";
+    }else{
+      for(let k=0;k<want.length;k++){
+        btn.textContent="Preloading "+(k+1)+"/"+want.length+"\u2026";
+        // one download lane server-side: queue it, then wait for it
+        await fetch("/api/sky/status?i="+want[k]+"&warm=1").catch(()=>{});
+        for(let t=0;t<200;t++){
+          let st={status:"error"};
+          try{st=await(await fetch("/api/sky/status?i="+want[k])).json();}
+          catch(e){}
+          if(st.status==="ready"||st.status==="error")break;
+          await new Promise(r=>setTimeout(r,1500));
+        }
+      }
+      btn.textContent="Done \u2713";
+    }
+  }catch(e){btn.textContent="Preload backdrops";}
+  setTimeout(()=>{btn.textContent="Preload backdrops";
+    delete btn.dataset.busy;},3000);
+});
 $("#models-up").addEventListener("click",openSetup);
 // ONE-TIME invitation, and never during the show: it waits for the
 // rainbow wipe to LAND (body.painted, wipeBusy clear) so the card never
@@ -7689,7 +7723,7 @@ $("#about-forget").addEventListener("click",async ev=>{
   await fetch("/api/memory/clear",{method:"POST"});
   b.dataset.sure="";b.textContent="Memory cleared";
   openAbout();
-  setTimeout(()=>{b.textContent="Forget what you know about me";},2500);
+  setTimeout(()=>{b.textContent="Forget me";},2500);
 });
 
 /* --------------------------------------------------------- self-update */
