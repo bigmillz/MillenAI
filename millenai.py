@@ -3144,38 +3144,92 @@ WELCOME_PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>MillenAI — sign in</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet">
 <style>
-html,body{height:100%;margin:0}
-body{background:#0f1117;color:#ececec;display:flex;align-items:center;
-  justify-content:center;font-family:'Helvetica Neue',system-ui,sans-serif}
-.door{text-align:center;padding:24px;max-width:420px}
-h1{font-size:clamp(38px,8vw,60px);letter-spacing:.06em;margin:0 0 6px;
-  font-weight:700;
+html,body{height:100%;margin:0;overflow:hidden}
+body{background:#07080c;color:#ececec;display:flex;align-items:center;
+  justify-content:center;
+  font-family:'Space Grotesk','Helvetica Neue',system-ui,sans-serif}
+/* the same living backdrop the app runs, behind the door */
+#sky{position:fixed;inset:0;z-index:0;overflow:hidden;opacity:0;
+  transition:opacity 2.4s ease}
+#sky.on{opacity:1}
+#sky video{width:100%;height:100%;object-fit:cover;
+  transform:scale(1.06);filter:brightness(.5) saturate(1.1)}
+#veil{position:fixed;inset:0;z-index:1;pointer-events:none;
+  background:radial-gradient(120% 90% at 50% 40%,
+    rgba(7,8,12,.15) 0%,rgba(7,8,12,.72) 60%,rgba(7,8,12,.94) 100%)}
+#motes{position:fixed;inset:0;z-index:2;pointer-events:none}
+.door{position:relative;z-index:3;text-align:center;padding:24px;
+  max-width:430px;width:100%;
+  animation:doorIn 1.5s cubic-bezier(.16,1,.3,1) both}
+@keyframes doorIn{
+  from{opacity:0;transform:translateY(26px) scale(.97);filter:blur(9px)}
+  to{opacity:1;transform:none;filter:blur(0)}}
+.wrap{position:relative;display:inline-block;margin:0 0 10px}
+h1{font-size:clamp(44px,9vw,74px);letter-spacing:.01em;margin:0;
+  font-weight:700;line-height:1.05;
   background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff,#ff8fd8);
+             #6ec7ff,#8f9dff,#c98fff,#ff8fd8,#ff8f8f);
+  background-size:200% 100%;
   -webkit-background-clip:text;background-clip:text;color:transparent;
-  filter:drop-shadow(0 0 22px rgba(140,150,255,.25))}
-p{color:#8e8e8e;margin:0 0 24px;font-size:14.5px;line-height:1.5}
-.err{color:#e26d5a;min-height:20px;margin:10px 0 0;font-size:14px}
-input{background:#171717;border:1px solid #3d3d3d;border-radius:12px;
-  color:#ececec;font-size:16px;padding:13px 16px;width:100%;
-  box-sizing:border-box;outline:none;text-align:center;margin-bottom:10px;
-  letter-spacing:.04em}
-input:focus{border-color:#8f9dff}
-button{background:#ececec;color:#111;border:0;border-radius:12px;
-  font-size:15px;font-weight:600;padding:13px 22px;cursor:pointer;
-  width:100%}
-button:hover{background:#fff}
-.gbtn{display:__GOOGLE_DISPLAY__;margin-top:14px;background:#171717;
-  color:#ececec;border:1px solid #3d3d3d;text-decoration:none;
-  border-radius:12px;font-size:15px;font-weight:600;padding:13px 22px}
-.gbtn:hover{border-color:#8f9dff}
-.small{margin-top:18px;font-size:12px;color:#6e6e6e}
+  -webkit-text-fill-color:transparent;
+  animation:rainbow 16s linear infinite}
+/* the tube's halo — a blurred twin behind the letters */
+.halo{position:absolute;left:0;top:0;z-index:-1;pointer-events:none;
+  filter:blur(20px) saturate(1.5);opacity:.9}
+.halo h1{animation:rainbow 16s linear infinite}
+@keyframes rainbow{from{background-position:0% 50%}
+                   to{background-position:200% 50%}}
+p.tag{font-family:ui-serif,Georgia,serif;font-size:19px;font-weight:400;
+  color:#d9d6cc;margin:6px 0 26px;line-height:1.5}
+.err{color:#e26d5a;min-height:20px;margin:12px 0 0;font-size:13.5px}
+input{background:rgba(18,20,26,.55);border:1px solid rgba(255,255,255,.14);
+  border-radius:14px;color:#ececec;font-size:16px;padding:14px 16px;
+  width:100%;box-sizing:border-box;outline:none;text-align:center;
+  margin-bottom:11px;letter-spacing:.04em;
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  transition:border-color .25s,box-shadow .25s,background .25s}
+input::placeholder{color:#7e8390}
+input:focus{border-color:rgba(143,157,255,.75);background:rgba(18,20,26,.75);
+  box-shadow:0 0 0 4px rgba(143,157,255,.12),
+             0 10px 40px -12px rgba(143,157,255,.5)}
+button{position:relative;overflow:hidden;background:#ececec;color:#111;
+  border:0;border-radius:14px;font-size:15px;font-weight:700;
+  padding:14px 22px;cursor:pointer;width:100%;letter-spacing:.02em;
+  transition:transform .16s ease,box-shadow .25s ease}
+button:hover{transform:translateY(-1px);
+  box-shadow:0 12px 34px -14px rgba(255,255,255,.75)}
+button:active{transform:translateY(0)}
+/* light sweeps across the button, endlessly */
+button::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(105deg,transparent 38%,
+    rgba(255,255,255,.75) 50%,transparent 62%);
+  transform:translateX(-120%);animation:sweep 4.5s ease-in-out infinite}
+@keyframes sweep{0%,55%{transform:translateX(-120%)}
+                 85%,100%{transform:translateX(120%)}}
+.gbtn{display:__GOOGLE_DISPLAY__;margin-top:13px;
+  background:rgba(18,20,26,.55);color:#ececec;
+  border:1px solid rgba(255,255,255,.14);text-decoration:none;
+  border-radius:14px;font-size:15px;font-weight:600;padding:14px 22px;
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  transition:border-color .25s,background .25s}
+.gbtn:hover{border-color:rgba(143,157,255,.7);background:rgba(24,27,36,.8)}
+.small{margin-top:20px;font-family:'IBM Plex Mono',monospace;
+  font-size:11px;color:#6e727c;line-height:1.7;letter-spacing:.02em}
+@media(prefers-reduced-motion:reduce){
+  *{animation:none!important;transition:none!important}}
 </style></head><body>
+<div id="sky"><video id="skyv" muted loop playsinline></video></div>
+<div id="veil"></div>
+<canvas id="motes"></canvas>
 <div class="door">
-  <h1>MillenAI</h1>
-  <p>pick a name and a PIN — your chats stay yours,<br>
-     invisible to everyone else on this server</p>
+  <div class="wrap">
+    <div class="halo" aria-hidden="true"><h1>MillenAI</h1></div>
+    <h1>MillenAI</h1>
+  </div>
+  <p class="tag">Pick a name and a PIN.<br>Your chats stay yours.</p>
   <form onsubmit="go();return false">
     <input id="n" autocomplete="off" maxlength="24" placeholder="your name"
            autofocus>
@@ -3189,6 +3243,55 @@ button:hover{background:#fff}
        a different PIN opens a different, empty profile.</div>
 </div>
 <script>
+// DRIFTING MOTES: slow points of light rising through the scene — the
+// calm cousin of the app's warp
+(function(){
+  const c=document.getElementById("motes"),x=c.getContext("2d");
+  let w,h,ps=[];
+  function size(){
+    const d=Math.min(devicePixelRatio||1,2);
+    w=c.width=innerWidth*d;h=c.height=innerHeight*d;
+    c.style.width=innerWidth+"px";c.style.height=innerHeight+"px";
+    ps=Array.from({length:64},()=>({
+      x:Math.random()*w,y:Math.random()*h,
+      r:(Math.random()*1.6+.4)*d,
+      v:(Math.random()*.22+.05)*d,a:Math.random()*.5+.15,
+      t:Math.random()*6.28}));
+  }
+  size();addEventListener("resize",size);
+  (function tick(){
+    requestAnimationFrame(tick);
+    x.clearRect(0,0,w,h);
+    for(const p of ps){
+      p.y-=p.v;p.t+=.008;
+      if(p.y<-6){p.y=h+6;p.x=Math.random()*w;}
+      const tw=p.a*(0.65+0.35*Math.sin(p.t));
+      x.beginPath();x.arc(p.x+Math.sin(p.t)*6,p.y,p.r,0,6.283);
+      x.fillStyle="rgba(200,214,255,"+tw.toFixed(3)+")";x.fill();
+    }
+  })();
+})();
+// the backdrop: whatever clip is already cached, so the door opens on a
+// living scene without ever making a visitor wait for a download
+(async function(){
+  try{
+    const c=await(await fetch("/api/sky/cached")).json();
+    const list=c.cached||[];
+    if(!list.length)return;
+    const i=list[Math.floor(Math.random()*list.length)];
+    const v=document.getElementById("skyv");
+    const start=()=>{const pr=v.play();if(pr&&pr.catch)pr.catch(()=>{});};
+    v.addEventListener("canplaythrough",()=>{
+      document.getElementById("sky").classList.add("on");
+      start();
+      // some browsers refuse muted autoplay until the visitor touches
+      // something — the first interaction starts the motion
+      ["pointerdown","keydown"].forEach(ev=>
+        addEventListener(ev,start,{once:true}));
+    },{once:true});
+    v.src="/sky/"+i+".mov";
+  }catch(e){}
+})();
 function go(){
   const n=document.getElementById("n").value.trim();
   const p=document.getElementById("p").value.trim();
@@ -3199,11 +3302,11 @@ function go(){
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({name:n,pin:p})})
     .then(r=>r.json())
-    .then(d=>{if(d.ok)location.href="/";else e.textContent=d.err||"try again";})
-    .catch(()=>{e.textContent="connection hiccup — try again";});
+    .then(d=>{if(d.ok)location.reload();
+              else e.textContent=d.err||"try again";})
+    .catch(()=>{e.textContent="network error — try again";});
 }
-</script>
-</body></html>"""
+</script></body></html>"""
 
 
 # The DOOR: what the bare public URL shows a browser with no cookie. Kept
