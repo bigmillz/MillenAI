@@ -556,7 +556,14 @@ def _mem_available():
 
 
 def model_fits_memory(label: str) -> bool:
+    # `available` on macOS omits reclaimable file cache — right after an
+    # 18.5 GB model download the cache ATE the headroom and the freshly
+    # installed flagship was refused admission (seen live). What the OS
+    # will actually hand a wiring allocation is closer to total - used.
     avail = _mem_available()
+    if HAS_PSUTIL:
+        vm = psutil.virtual_memory()
+        avail = max(avail or 0, vm.total - vm.used)
     need = MODEL_MEM_BYTES.get(label)
     if avail is None or need is None:
         return True  # unknown — don't cry wolf
@@ -572,7 +579,10 @@ def model_fits_memory(label: str) -> bool:
     # 1.5x, not 1.25x: the KV cache and activations grow DURING generation,
     # and a 26B admitted at 1.25x OOM'd 97s into its answer on a busy
     # machine. Admission must survive the whole reply, not just the load.
-    return need * 1.5 < avail
+    # MoE models get 1.3x — only a few billion parameters activate per
+    # token, so their runtime overhead is a fraction of a dense model's.
+    factor = 1.3 if "MoE" in label else 1.5
+    return need * factor < avail
 
 def weather_snippets(q: str):
     """Real numbers for weather questions. Generic web snippets for
@@ -902,6 +912,15 @@ def _download_model(label: str):
     try:
         from huggingface_hub import snapshot_download  # ships with mlx-lm
         snapshot_download(repo)
+        # sweep carcasses: a KILLED earlier attempt leaves *.incomplete
+        # blobs that poison the completeness check forever — a finished
+        # 35B sat uncrowned behind eight of them (seen live)
+        for p in glob.glob(os.path.join(
+                _hf_model_dir(repo), "blobs", "*.incomplete")):
+            try:
+                os.remove(p)
+            except Exception:
+                pass
         with _setup_lock:
             _setup_jobs[label] = {"status": "done", "note": ""}
         _spawn_mlx_engine(label)
