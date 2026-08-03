@@ -77,7 +77,7 @@ git fetch --tags --force --quiet
 NEW=\$(git tag -l 'v*' --sort=-v:refname | head -1)
 CUR=\$(git describe --tags --exact-match 2>/dev/null || echo none)
 if [ "\$NEW" != "\$CUR" ]; then
-  git checkout --quiet "\$NEW"
+  git checkout --force --quiet "\$NEW"
   launchctl kickstart -k "gui/\$(id -u)/$LABEL" || true
   echo "\$(date '+%F %T') updated \$CUR -> \$NEW" >> "$LIVE/update.log"
 fi
