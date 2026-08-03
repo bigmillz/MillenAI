@@ -265,6 +265,146 @@ MLX_EST_BYTES = {l: int(i["gb"] * 1e9) for l, i in MODEL_INFO.items()}
 MODEL_MEM_BYTES = {l: i["mem"] for l, i in MODEL_INFO.items()}
 OLLAMA_TAGS = {l: i["ollama"] for l, i in MODEL_INFO.items() if i["ollama"]}
 
+# ------------------------------------------------------------------ fleet
+# CONTRIBUTE, per Patrick: friends flip a switch and their idle GPUs
+# answer the hub's queries. Workers connect OUTBOUND (long-poll HTTP, so
+# no router config, and every request fits inside Cloudflare's window);
+# the router only offloads single-model jobs, and ANY failure falls back
+# to running locally — the fleet can only ever make things faster.
+# Trust model: workers see the prompts they serve. Friends only.
+FLEET_KEY_FILE = os.path.join(app_dir(), "fleet_key")
+
+
+def fleet_key() -> str:
+    try:
+        return open(FLEET_KEY_FILE).read().strip()
+    except OSError:
+        k = secrets.token_urlsafe(18)
+        try:
+            with open(FLEET_KEY_FILE, "w") as f:
+                f.write(k)
+            os.chmod(FLEET_KEY_FILE, 0o600)
+        except OSError:
+            pass
+        return k
+
+
+_fleet_lock = threading.Lock()
+_fleet_workers = {}   # wid -> {name, models, last_seen, busy}
+_fleet_jobs = {}      # jid -> {label, messages, done(Event), text, err, wid}
+_fleet_queue = []     # jids waiting for a worker
+
+
+def _fleet_alive() -> dict:
+    now = time.time()
+    with _fleet_lock:
+        return {w: dict(v) for w, v in _fleet_workers.items()
+                if now - v["last_seen"] < 45}
+
+
+def fleet_pick(label: str):
+    """An idle live worker that has the model, or None."""
+    for wid, v in _fleet_alive().items():
+        if label in v.get("models", []) and not v.get("busy"):
+            return wid
+    return None
+
+
+def fleet_run(label: str, messages: list, status) -> str:
+    """Offload one generation; empty string means 'do it locally'."""
+    wid = fleet_pick(label)
+    if not wid:
+        return ""
+    jid = secrets.token_hex(8)
+    done = threading.Event()
+    with _fleet_lock:
+        name = _fleet_workers.get(wid, {}).get("name", "a friend")
+        _fleet_jobs[jid] = {"label": label, "messages": messages,
+                            "done": done, "text": "", "err": "",
+                            "wid": wid}
+        _fleet_workers[wid]["busy"] = True
+        _fleet_queue.append(jid)
+    status(f"{name}'s GPU is on it — {label}")
+    ok = done.wait(150)          # heartbeat keeps the client stream alive
+    with _fleet_lock:
+        job = _fleet_jobs.pop(jid, {})
+        try:
+            _fleet_queue.remove(jid)
+        except ValueError:
+            pass
+        if wid in _fleet_workers:
+            _fleet_workers[wid]["busy"] = False
+    text = (job.get("text") or "") if ok else ""
+    if text and not _looks_degenerate(text):
+        return text
+    return ""
+
+
+_contrib_stop = threading.Event()
+_contrib_thread = None
+
+
+def _contrib_loop(url: str, key: str):
+    """Friend mode: long-poll the hub, run jobs on this machine's engines,
+    post the answers back. Outbound-only; dies quietly with the toggle."""
+    wid = ""
+
+    def post(path, data):
+        req = urllib.request.Request(
+            url.rstrip("/") + path, data=json.dumps(data).encode(),
+            headers={"Content-Type": "application/json",
+                     "X-Fleet-Key": key})
+        with urllib.request.urlopen(req, timeout=40) as r:
+            return json.loads(r.read())
+
+    while not _contrib_stop.is_set():
+        try:
+            pulled = ollama_pulled_tags() or set()
+            models = [l for l in MODEL_INFO
+                      if model_cached(l, pulled) and model_fits_memory(l)]
+            out = post("/api/fleet/register",
+                       {"id": wid, "name": platform.node().split(".")[0][:20],
+                        "models": models})
+            if out.get("err"):
+                _contrib_stop.wait(30)
+                continue
+            wid = out.get("id", wid)
+            job = post("/api/fleet/poll", {"id": wid})
+            if job.get("job"):
+                parts = []
+                try:
+                    run_model(job["label"], job["messages"], parts.append)
+                    post("/api/fleet/submit",
+                         {"job": job["job"],
+                          "text": strip_think("".join(parts))})
+                except Exception as exc:
+                    post("/api/fleet/submit",
+                         {"job": job["job"], "err": str(exc)[:100]})
+        except Exception:
+            _contrib_stop.wait(8)
+
+
+def contrib_apply(p=None):
+    """Match the contribute thread to prefs. The old loop is retired
+    FIRST — a running thread's url/key are baked in at start, so a
+    settings change must always mean a fresh thread (seen live: an
+    empty-key loop kept retrying forever after the key was fixed)."""
+    global _contrib_thread
+    p = p or load_prefs(None)
+    on = (p.get("contrib_on") and p.get("contrib_url")
+          and p.get("contrib_key"))
+    _contrib_stop.set()
+    if _contrib_thread is not None and _contrib_thread.is_alive():
+        _contrib_thread.join(timeout=3)
+    if on:
+        _contrib_stop.clear()
+        _contrib_thread = threading.Thread(
+            target=_contrib_loop,
+            args=(str(p["contrib_url"]), str(p["contrib_key"])),
+            daemon=True)
+        _contrib_thread.start()
+
+
 # ------------------------------------------------------------------ tiers
 # Three plain-English modes instead of a wall of model names. Each lists
 # candidates strongest-first; whatever is downloaded and fits RAM is used,
@@ -3233,6 +3373,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                        warm="warm=1" in self.path))
         elif self.path.startswith("/sky/"):
             self._send_sky()
+        elif self.path == "/api/fleet/status":
+            if self._remote():
+                self._send_json({"err": "owner only"})
+                return
+            alive = _fleet_alive()
+            self._send_json({"key": fleet_key(),
+                             "workers": [{"name": v["name"],
+                                          "busy": v.get("busy", False),
+                                          "models": len(v.get("models", []))}
+                                         for v in alive.values()]})
         elif self.path == "/api/stats":
             self._send_stats()
         elif self.path == "/api/engines":
@@ -3479,6 +3629,58 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path.startswith("/api/fleet/"):
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                d = json.loads(self.rfile.read(n)) if n else {}
+            except (ValueError, json.JSONDecodeError):
+                d = {}
+            key = self.headers.get("X-Fleet-Key", "")
+            if not secrets.compare_digest(key, fleet_key()):
+                self._send_json({"err": "bad key"})
+                return
+            if self.path == "/api/fleet/register":
+                wid = str(d.get("id") or secrets.token_hex(8))
+                with _fleet_lock:
+                    _fleet_workers[wid] = {
+                        "name": str(d.get("name", "worker"))[:40],
+                        "models": [m for m in (d.get("models") or [])
+                                   if isinstance(m, str)][:40],
+                        "last_seen": time.time(),
+                        "busy": _fleet_workers.get(wid, {}).get("busy",
+                                                                False)}
+                self._send_json({"id": wid})
+                return
+            if self.path == "/api/fleet/poll":
+                wid = str(d.get("id", ""))
+                deadline = time.time() + 25
+                while time.time() < deadline:
+                    with _fleet_lock:
+                        if wid in _fleet_workers:
+                            _fleet_workers[wid]["last_seen"] = time.time()
+                        for jid in list(_fleet_queue):
+                            job = _fleet_jobs.get(jid)
+                            if job and job["wid"] == wid:
+                                _fleet_queue.remove(jid)
+                                self._send_json(
+                                    {"job": jid, "label": job["label"],
+                                     "messages": job["messages"]})
+                                return
+                    time.sleep(0.4)
+                self._send_json({})
+                return
+            if self.path == "/api/fleet/submit":
+                jid = str(d.get("job", ""))
+                with _fleet_lock:
+                    job = _fleet_jobs.get(jid)
+                    if job:
+                        job["text"] = str(d.get("text", ""))[:60000]
+                        job["err"] = str(d.get("err", ""))[:200]
+                        job["done"].set()
+                self._send_json({"ok": True})
+                return
+            self.send_error(404)
+            return
         if self.path == "/api/setup/install":
             # warm one backdrop alongside the models, so the very first
             # launch already opens onto a moving city
@@ -3509,6 +3711,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 base = self._data_base()
                 cur = load_prefs(base)
                 cur.update(d)
+                if base is None and any(k.startswith("contrib_") for k in d):
+                    threading.Thread(target=contrib_apply, args=(cur,),
+                                     daemon=True).start()
                 store_prefs(cur, base)
             self._send_json({"ok": isinstance(d, dict)})
             return
@@ -3821,12 +4026,18 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                             reflect=(tier == "Thinking"),
                             peer=(tier == "Power"))
             else:
-                # guarded like every other path now: a lone model that
-                # collapses into repetition gets cut back to its coherent
-                # prefix instead of streaming the loop to the reader
-                _stream_guarded(route_label or model_name, full_messages,
-                                emit, status, None,
-                                "kept the part before it wandered")
+                lbl = route_label or model_name
+                ftext = fleet_run(lbl, full_messages, status) \
+                    if not images else ""
+                if ftext:
+                    emit(ftext)
+                else:
+                    # guarded like every other path: a lone model that
+                    # collapses into repetition gets cut back to its
+                    # coherent prefix instead of streaming the loop
+                    _stream_guarded(lbl, full_messages,
+                                    emit, status, None,
+                                    "kept the part before it wandered")
         except (BrokenPipeError, ConnectionResetError):
             pass  # user hit Stop — browser closed the connection
         except Exception as exc:
@@ -3998,7 +4209,7 @@ body.resizing{cursor:col-resize;user-select:none}
 .vghost{
   font-family:var(--mono);font-size:11px;letter-spacing:.08em;
   color:rgba(255,255,255,.30);user-select:none;cursor:pointer;
-  padding-top:6px;
+  padding-top:6px;margin-right:auto;
 }
 .vghost:hover{color:rgba(255,255,255,.55)}
 
@@ -4588,6 +4799,17 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   font-family:var(--mono);font-size:11.5px;color:var(--accent-hot);
   margin:12px 0 4px;line-height:1.7;text-align:left;
 }
+#fleet-box{margin:14px 0 4px;text-align:left}
+#fleet-own{font-family:var(--mono);font-size:10.5px;color:var(--dim);
+  margin-bottom:8px;line-height:1.6}
+#fleet-own code{color:var(--text);user-select:all}
+#fleet-box input{
+  width:100%;box-sizing:border-box;margin-bottom:6px;padding:8px 10px;
+  background:var(--panel2);border:1px solid var(--line);border-radius:8px;
+  color:var(--text);font-size:12.5px;outline:none;
+}
+#fleet-box input:focus{border-color:var(--accent-dim)}
+#contrib-toggle.on{background:var(--accent-dim);color:var(--text)}
 #about-facts{
   font-family:var(--mono);font-size:11.5px;font-weight:700;
   color:var(--dim);margin-top:10px;line-height:1.6;
@@ -4945,6 +5167,13 @@ __AGENT_ROWS__
     <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
       placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
     <button class="about-btn" id="persona-save">Save preferences</button>
+    <div id="fleet-box">
+      <div id="fleet-own" hidden>Your fleet — key <code id="fleet-key"></code>
+        &middot; <span id="fleet-n"></span></div>
+      <input id="contrib-url" placeholder="Friend&rsquo;s MillenAI URL">
+      <input id="contrib-key" placeholder="Their contribute key">
+      <button class="about-btn" id="contrib-toggle">Contribute my GPU</button>
+    </div>
     <button class="about-btn" id="open-setup">Download models&hellip;</button>
     <button class="about-btn" id="about-check">Check for updates</button>
     <button class="about-btn" id="about-logs">Open logs folder</button>
@@ -6625,6 +6854,24 @@ async function openAbout(){
       (await fetch("/api/memory")).json(),
       (await fetch("/api/setup")).json()]);
     if(st.plat)$("#about-name").innerHTML="MillenAI <em>"+esc(st.plat)+"</em>";
+    try{
+      const fs=await(await fetch("/api/fleet/status")).json();
+      if(fs.key){
+        $("#fleet-own").hidden=false;
+        $("#fleet-key").textContent=fs.key;
+        $("#fleet-n").textContent=fs.workers.length+" friend"
+          +(fs.workers.length===1?"":"s")+" online"
+          +(fs.workers.some(w=>w.busy)?" \u00b7 working":"");
+      }
+    }catch(e){}
+    try{
+      const pr2=await(await fetch("/api/prefs")).json();
+      $("#contrib-url").value=pr2.contrib_url||"";
+      $("#contrib-key").value=pr2.contrib_key||"";
+      $("#contrib-toggle").classList.toggle("on",!!pr2.contrib_on);
+      $("#contrib-toggle").textContent=
+        pr2.contrib_on?"Contributing \u2713 (tap to stop)":"Contribute my GPU";
+    }catch(e){}
     const ready=st.models.filter(x=>x.status==="ready").length;
     $("#about-facts").textContent=
       st.arch+" · "+ready+"/"+st.models.length+" models ready";
@@ -6710,6 +6957,17 @@ $("#persona-save").addEventListener("click",async ev=>{
     b.textContent="Saved \u2713";
   }catch(e){b.textContent="Couldn\u2019t save";}
   setTimeout(()=>{b.textContent="Save preferences";},1800);
+});
+$("#contrib-toggle").addEventListener("click",async()=>{
+  const on=!$("#contrib-toggle").classList.contains("on");
+  await fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({contrib_on:on,
+      contrib_url:$("#contrib-url").value.trim(),
+      contrib_key:$("#contrib-key").value.trim()})});
+  $("#contrib-toggle").classList.toggle("on",on);
+  $("#contrib-toggle").textContent=
+    on?"Contributing \u2713 (tap to stop)":"Contribute my GPU";
 });
 $("#about-close").addEventListener("click",()=>{aboutVeil.hidden=true;});
 aboutVeil.addEventListener("click",e=>{if(e.target===aboutVeil)aboutVeil.hidden=true;});
@@ -6959,6 +7217,7 @@ if __name__ == "__main__":
     reap_orphan_engines()
     maybe_version_splash()
     threading.Thread(target=_mlx_janitor, daemon=True).start()
+    contrib_apply()   # resume Contribute mode if it was left on
     start_managed_engines()
     if not HAS_SEARCH:
         print("  (web search disabled — pip install ddgs to enable)")

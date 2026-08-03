@@ -860,3 +860,19 @@ that found all three: re-execute the page's own script text via
   (b) _voice_ready keys on the weights symlink existing, NOT on carcass
   absence — a stale *.incomplete beside a finished blob bricked voice.
   Voice verified end-to-end: say -> /api/transcribe exact match, speak ok.
+
+## 2.7 — FLEET (Contribute)
+- Friends' GPUs answer hub queries: worker connects OUTBOUND via
+  long-poll HTTP (25s poll < CF 100s window, no router config). Endpoints
+  /api/fleet/{register,poll,submit} gated by X-Fleet-Key (fleet_key file,
+  0600, auto-minted). /api/fleet/status is owner/local-only (shows key +
+  workers). Router offloads SINGLE-model, non-vision jobs only; 150s
+  wait; degenerate or timed-out results fall back to local silently —
+  the fleet can only make things faster.
+- Worker side: prefs contrib_on/url/key; contrib_apply() retires the old
+  thread BEFORE starting (args are baked at spawn — an empty-key loop
+  kept retrying forever after the key was fixed. Seen live.)
+- Trust: workers see the prompts (incl. the hub user's memory in the
+  system message). Friends only. UI: Settings › Contribute my GPU.
+- Verified: two local instances, hub routed "why is the sky blue" to a
+  registered worker, 377 chars in 5s, status line names the friend.
