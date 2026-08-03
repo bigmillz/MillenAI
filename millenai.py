@@ -4622,8 +4622,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   margin:12px 0 4px;line-height:1.7;text-align:left;
 }
 #about-facts{
-  font-family:var(--mono);font-size:10.5px;color:var(--faint);
-  margin-top:8px;line-height:1.6;
+  font-family:var(--mono);font-size:11.5px;font-weight:700;
+  color:var(--dim);margin-top:10px;line-height:1.6;
 }
 .about-btn{
   display:block;width:100%;margin-top:9px;padding:10px 14px;
@@ -4976,7 +4976,6 @@ __AGENT_ROWS__
     </svg>
     <div id="about-name">MillenAI</div>
     <div id="about-ver">Version __APP_VER__</div>
-    <div id="about-sub">Everything runs on this Mac. No cloud, no accounts.</div>
     <div id="about-facts"></div>
     <div id="persona-label">How should MillenAI reply?</div>
     <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
@@ -6664,8 +6663,7 @@ async function openAbout(){
     if(st.plat)$("#about-name").innerHTML="MillenAI <em>"+esc(st.plat)+"</em>";
     const ready=st.models.filter(x=>x.status==="ready").length;
     $("#about-facts").textContent=
-      st.arch+" · "+ready+"/"+st.models.length+" models ready · "+
-      m.facts.length+" things remembered";
+      st.arch+" · "+ready+"/"+st.models.length+" models ready";
   }catch(e){$("#about-facts").textContent="";}
 }
 /* ------------------------------------------- new models in this release */
