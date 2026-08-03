@@ -948,3 +948,9 @@ that found all three: re-execute the page's own script text via
 - Backdrop rotates per launch again (loading bar is the point) and the
   New backdrop button is gone.
 - Greetings got a New York accent.
+- 2.14.2 BACKDROP VARIETY: the picker only ever chose from the CACHE, and
+  the LRU held 6 — so the same six clips cycled forever even though all
+  89 were "eligible". Fixes: reach for an uncached clip on ~45% of
+  launches (or always while the cache is thin), never repeat the last
+  clip, LRU 6 -> 12 (~2.6 GB), and one background prewarm per launch.
+  Modelled over 400 launches: 82 distinct clips.

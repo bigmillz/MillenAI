@@ -3179,12 +3179,14 @@ def _sky_fetch(i: int):
         _faststart(tmp, _sky_path(i))
         with _sky_lock:
             _sky_jobs[i] = {"status": "ready", "pct": 100}
-        # LRU cap: 89 possible clips at ~400 MB each must never all land
-        # on disk — keep the 6 most recently played, drop the rest
+        # LRU cap: 89 clips at ~220 MB each must never all land on disk —
+        # keep the 12 most recently played (~2.6 GB), drop the rest. Six
+        # was too few once rotation returned: the picker only chooses
+        # from cache, so the same handful cycled forever (seen live).
         try:
             clips = sorted(glob.glob(os.path.join(_sky_dir(), "sky*.mov")),
                            key=os.path.getmtime)
-            for old in clips[:-6]:
+            for old in clips[:-12]:
                 os.remove(old)
         except Exception:
             pass
@@ -6706,11 +6708,19 @@ async function bootSkyline(){
   // reads best over them — and any clip is fair game after that.
   const mood=x=>darkSet.has(x)||!firstEver;
   let i;
-  if(cached.length){
-    let pool=cached.filter(x=>mood(x));
+  // NEW BLOOD: the picker used to choose only from cache, so the same six
+  // clips cycled forever. Every few launches it now reaches for one it has
+  // never played — that is what the loading bar is for.
+  const fresh=[];
+  for(let n=0;n<SKY_N;n++)if(!cached.includes(n)&&mood(n))fresh.push(n);
+  const reach=fresh.length&&(cached.length<8||Math.random()<0.45);
+  if(reach){
+    i=fresh[Math.floor(Math.random()*fresh.length)];
+  }else if(cached.length){
+    let pool=cached.filter(x=>mood(x)&&x!==last);
+    if(!pool.length)pool=cached.filter(x=>x!==last);
     if(!pool.length)pool=cached.slice();
-    const pick=pool.length?pool:cached;
-    i=pick[Math.floor(Math.random()*pick.length)];
+    i=pool[Math.floor(Math.random()*pool.length)];
   }else{
     const moody=[];
     for(let n=0;n<SKY_N;n++)if(mood(n))moody.push(n);
@@ -6719,6 +6729,13 @@ async function bootSkyline(){
     if(i===last)i=(i+1)%SKY_N;
   }
   localStorage.setItem("millen.sky",i);
+  // grow the pool for next time, quietly, one clip per launch
+  if(fresh.length>1){
+    const n=fresh.filter(x=>x!==i)[
+      Math.floor(Math.random()*Math.max(1,fresh.length-1))];
+    if(n!=null)setTimeout(()=>{
+      fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{});},12000);
+  }
   const c=$("#sky-color");
   const bar=$("#skyload"),fill=$("#skyload .fill"),lbl=$("#skyload .lbl");
   c.preload="auto";
