@@ -3973,7 +3973,6 @@ body.resizing{cursor:col-resize;user-select:none}
    buttons): the name owns its line now, controls sit beneath it */
 #brand-wrap{padding:0 6px 12px}
 #brand-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-#brand-row #brand{flex:0 1 auto;min-width:0}
 #brand-row #newchat{margin-left:2px}
 #update-flag{margin-top:4px}
 #update-flag{
@@ -3996,44 +3995,12 @@ body.resizing{cursor:col-resize;user-select:none}
 #update-flag[hidden]{display:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
    sitting it on the wordmark's baseline hangs it low against the taller type */
-#brand{display:flex;align-items:flex-start;gap:8px}
-#brand .vghost{
-  font-family:var(--mono);font-size:10.5px;letter-spacing:.06em;
-  color:rgba(255,255,255,.22);margin-top:9px;user-select:none;
+.vghost{
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;
+  color:rgba(255,255,255,.30);user-select:none;cursor:pointer;
+  padding-top:6px;
 }
-/* the brand is a CHAMELEON: its gradient is sampled live from the
-   backdrop footage (see paintBrandFromSky) — an SF dusk turns it amber
-   and umber, the aurora turns it green-violet. The rainbow is only the
-   pre-video fallback. */
-/* PURE OUTLINE wordmark, per Patrick: no fill at all — the backdrop
-   shows through the letters. The stroke wears ONE color, the average of
-   the sampled backdrop palette (--bwavg, set by paintBrandFromSky), and
-   morphs with the footage via the color transition. */
-/* the LOCKUP, per Patrick ("think design aesthetic"): "Millen" is lit
-   hollow glass, "AI" lands solid in the backdrop's own gradient — the
-   contrast of open line-work against a filled chameleon block is the
-   mark. One element, two voices. */
-#brand .name{
-  font-size:53px;letter-spacing:.02em;line-height:1.1;
-  display:inline-flex;align-items:baseline;
-  filter:drop-shadow(0 0 1.5px rgba(255,255,255,.30))
-         drop-shadow(0 2px 16px var(--bwglow,rgba(150,160,255,.38)));
-  transition:filter 1.2s ease;
-}
-#brand .name i{font-style:normal}
-#brand .name .nm1{
-  font-weight:700;color:transparent;-webkit-text-fill-color:transparent;
-  -webkit-text-stroke:1.5px color-mix(in srgb,var(--bwavg,#9aa3c0) 70%,#fff);
-  transition:-webkit-text-stroke-color 2.5s ease;
-}
-#brand .name .nm2{
-  font-weight:800;margin-left:2px;
-  background:linear-gradient(135deg,
-             var(--bw1,#ffc46e),var(--bwavg,#9aa3c0),var(--bw3,#8f9dff));
-  -webkit-background-clip:text;background-clip:text;
-  color:transparent;-webkit-text-fill-color:transparent;
-}
-body.perf #brand .name{animation:none;filter:none}
+.vghost:hover{color:rgba(255,255,255,.55)}
 
 #newchat,#settings-btn{
   width:28px;height:28px;flex-shrink:0;
@@ -4845,10 +4812,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
     <div id="brand-row">
-    <div id="brand" title="About MillenAI">
-      <span class="name"><i class="nm1">Millen</i><i class="nm2">AI</i></span>
-      <span class="vghost">__APP_VER__</span>
-    </div>
+    <span class="vghost" title="About MillenAI">MillenAI __APP_VER__</span>
 <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
