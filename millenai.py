@@ -1063,10 +1063,11 @@ def check_update():
         _update["size"] = dmg.get("size", 0)
     _update["latest"] = shown
     published = _gh_time(rel.get("published_at", ""))
-    # a release counts as newer if GitHub published it after this build was
-    # made, or if its tag carries a higher build number
-    newer = (published > _own_build_time() + 60
-             or _build_from_tag(tag) > APP_BUILD)
+    # a release is newer ONLY if its tag carries a higher build number.
+    # (The old published-after-my-build-time clause false-alarmed on every
+    # release when the bundle had been hot-patched: its mtime never moves,
+    # so "Update available 2.0.1 — you have 2.0.1". Seen live.)
+    newer = _build_from_tag(tag) > APP_BUILD
     return {"configured": True,
             "available": bool(dmg) and newer
                          and _app_bundle_path() is not None,
@@ -3048,8 +3049,6 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 return
             html = (HTML_CONTENT
                     .replace("__AGENT_ROWS__", build_agent_rows())
-                    .replace("__APP_VER_TAG__",
-                             short_version().replace(" ", "&nbsp;"))
                     .replace("__APP_BETA__",
                              'VERSION <b class="vnum">%s</b>' % short_version())
                     .replace("__TIER_ROWS__", build_tier_rows())
@@ -3858,7 +3857,7 @@ html.winwipe.winwipe-run body{
   width:384px;min-width:384px;height:100%;
   /* real frosted glass, per Patrick: ~30% panel, heavy blur carrying the
      legibility instead of the tint */
-  background:rgba(21,23,29,.30);
+  background:rgba(21,23,29,.24);
   -webkit-backdrop-filter:blur(26px) saturate(1.4);
           backdrop-filter:blur(26px) saturate(1.4);
   border-right:1px solid var(--line-soft);
@@ -3879,8 +3878,10 @@ body.resizing{cursor:col-resize;user-select:none}
 #brand-wrap{padding:0 6px 12px}
 #brand-row{display:flex;align-items:center;gap:8px;flex-wrap:nowrap}
 #brand-row #brand{flex:0 1 auto;min-width:0}
-#brand-row .tag{margin-left:auto}
+#update-flag{margin-left:auto}
 #brand-row #newchat{margin-left:2px}
+/* chip hidden -> the buttons inherit the push to the right edge */
+#update-flag[hidden]+#newchat{margin-left:auto}
 #update-flag{
   font-family:var(--mono);font-size:10px;letter-spacing:.12em;
   color:#fff;background:#e26d5a;border-radius:8px;padding:5px 9px;
@@ -3909,9 +3910,6 @@ body.resizing{cursor:col-resize;user-select:none}
   transition:-webkit-text-stroke-color 2.5s ease,filter 1.2s ease;
 }
 body.perf #brand .name{animation:none;filter:none}
-#brand-row .tag{font-family:var(--mono);font-size:10px;color:var(--accent);
-  border:1px solid var(--accent-dim);background:var(--accent-dim);
-  padding:2px 6px;border-radius:4px;letter-spacing:.08em}
 
 #newchat,#settings-btn{
   width:28px;height:28px;flex-shrink:0;
@@ -4720,7 +4718,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
     <div id="brand" title="About MillenAI">
       <span class="name">MillenAI</span>
     </div>
-    <span class="tag">__APP_VER_TAG__</span>
     <div id="update-flag" hidden title="Install the update">UPDATE</div>
     <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
