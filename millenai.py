@@ -458,17 +458,52 @@ def resolve_tier(name: str) -> list:
 # is asked for 100 GB of also-rans (that was possible when this listed
 # every tier pick).
 def _starter_labels() -> list:
+    """The MAX spread: since the tier merge every tier leads with the same
+    ladder, "best per tier" collapsed to ONE model (seen live: a fresh
+    machine would have installed only the 35B — no merger, no quick
+    path). Build the spread by ROLE instead: flagship, Gemma merger,
+    everyday mid, the quick pair, vision."""
+    fits = [l for l in MODEL_INFO
+            if SUPPORTED.get(l) and model_fits_machine(l)]
     picks = []
-    for t in TIERS.values():
-        for l in t["picks"]:
-            if SUPPORTED.get(l) and model_fits_machine(l):
-                if l not in picks:
-                    picks.append(l)
-                break            # only the best fitting pick per tier
+
+    def add(label):
+        if label and label in fits and label not in picks:
+            picks.append(label)
+
+    by_size = sorted(fits, key=lambda l: -MODEL_INFO[l]["gb"])
+    add(next((l for l in by_size), None))                      # flagship
+    add(next((l for l in by_size if l.startswith("Gemma 4")), None))
+    add(next((l for l in by_size if MODEL_INFO[l]["gb"] <= 8.5
+              and "Vision" not in l), None))                   # everyday
+    add("Llama 3.2 3B")
+    add("Llama 3.2 1B")
+    add("LLaVA Vision 7B")
     return picks
 
 
 STARTER_LABELS = _starter_labels()
+
+
+def plan_labels(plan: str) -> list:
+    """First-run size choice, hardware-aware. The user never sees model
+    names — just Basic / Pro / Max."""
+    fits = [l for l in MODEL_INFO
+            if SUPPORTED.get(l) and model_fits_machine(l)]
+    if plan == "basic":
+        # the smallest capable brain: ~1 GB, instant town
+        small = sorted(fits, key=lambda l: MODEL_INFO[l]["gb"])
+        return small[:1]
+    if plan == "pro":
+        # one strong everyday model plus the quick pair — ~10 GB
+        mids = sorted((l for l in fits if MODEL_INFO[l]["gb"] <= 8.5),
+                      key=lambda l: -MODEL_INFO[l]["gb"])
+        picks = mids[:1]
+        for extra in ("Llama 3.2 3B", "Llama 3.2 1B"):
+            if extra in fits and extra not in picks:
+                picks.append(extra)
+        return picks
+    return list(STARTER_LABELS)
 
 # who merges in combine mode — strongest first
 MERGE_RANK = sorted((l for l in MODEL_ROUTES),
@@ -3401,7 +3436,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 sky_status(random.randrange(len(SKY_SOURCES)))
             except Exception:
                 pass
-            self._send_json({"started": start_model_downloads()})
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                plan = (json.loads(self.rfile.read(n)) or {}).get("plan", "max")
+            except (ValueError, json.JSONDecodeError):
+                plan = "max"
+            self._send_json(
+                {"started": start_model_downloads(plan_labels(plan))})
             return
         if self.path == "/api/update/install":
             if _update["state"] in ("idle", "error"):
@@ -4715,6 +4756,16 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   transition:all .13s;
 }
 #setup-foot button:hover{color:var(--text);border-color:var(--dim)}
+.plans{display:flex;gap:10px;margin:14px 0 4px}
+.plan{flex:1;border:1px solid var(--line);border-radius:12px;
+  padding:12px 12px 10px;cursor:pointer;transition:all .15s;
+  display:flex;flex-direction:column;gap:4px}
+.plan b{font-size:15px}
+.plan span{font-size:11.5px;color:var(--dim);line-height:1.35}
+.plan em{font-style:normal;font-family:var(--mono);font-size:10.5px;
+  color:var(--faint)}
+.plan:hover{border-color:var(--accent-hot)}
+.plan.on{border-color:var(--accent-hot);background:var(--accent-dim)}
 #setup-go{background:var(--accent);color:#1a1a1a;border:none}
 #setup-go:hover{background:var(--accent-hot);color:#000}
 #setup-go:disabled{opacity:.55;cursor:default}
@@ -4923,9 +4974,9 @@ __AGENT_ROWS__
 <div id="setup-veil" hidden>
   <div id="setup-card">
     <h2>Welcome to MillenAI</h2>
-    <p class="sub">Everything runs 100% on this Mac — no cloud, no accounts.
-      One tap gets every model the three modes use. You can start chatting
-      as soon as the first one lands — the rest keep downloading.</p>
+    <p class="sub">We're getting you everything you need for the best
+      experience — private, and entirely on this Mac. Start chatting the
+      moment the first piece lands.</p>
     <div id="setup-list"></div>
     <div id="setup-note"></div>
     <div id="setup-foot">
@@ -6349,25 +6400,38 @@ function renderSetup(st){
   // WHILE DOWNLOADING (first run or updates): one bar, bandwidth,
   // percent — never a wall of per-model rows
   if(anyDl){
-    const n=st.models.filter(m=>m.status==="downloading"||m.status==="queued").length;
-    html+='<div class="setup-head">downloading '+n+' model'+(n===1?"":"s")
-      +' — you can start chatting as soon as the first lands</div>';
+    html+='<div class="setup-head">Getting everything ready — you can '
+      +'start chatting right now, downloads run in the background.</div>';
     setupList.innerHTML=html;
+    $("#setup-later").textContent="Continue in background";
     finishSetupChrome(st,stars,anyDl);
     return;
   }
+  $("#setup-later").textContent="Later";
 
   // FIRST RUN stays simple: the machine already picked its best brains —
   // show what it chose and one number, never the catalog. The full list
   // only exists behind "Add models…" for people who go looking.
   if(!setupManual){
-    html+='<div class="setup-head">'+st.models.length
-      +' models fit in your memory — starting with the best '
-      +stars.length+'</div>'
-      +'<div class="sub" style="margin:4px 0 0">'
-      +stars.map(m=>esc(m.label)).join(" · ")
+    html+='<div class="plans">'
+      +'<div class="plan" data-plan="basic"><b>Basic</b>'
+      +'<span>Fast answers, tiny download</span><em>~1 GB</em></div>'
+      +'<div class="plan" data-plan="pro"><b>Pro</b>'
+      +'<span>Great everyday quality</span><em>~10 GB</em></div>'
+      +'<div class="plan" data-plan="max"><b>Max</b>'
+      +'<span>The best this machine can run</span><em>'
+      +Math.round(st.want_gb)+' GB</em></div>'
       +'</div>';
     setupList.innerHTML=html;
+    setupList.querySelectorAll(".plan").forEach(el=>{
+      el.classList.toggle("on",el.dataset.plan===setupPlan);
+      el.addEventListener("click",()=>{
+        setupPlan=el.dataset.plan;
+        setupList.querySelectorAll(".plan").forEach(x=>
+          x.classList.toggle("on",x===el));
+        setupGo.textContent="Send it \u00b7 "+planGB(st)+" GB";
+      });
+    });
     finishSetupChrome(st,stars,anyDl);
     return;
   }
@@ -6420,8 +6484,14 @@ function renderSetup(st){
   }else{
     setupGo.disabled=!st.mlx_ok;
     setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Send it")+
-      " \u00b7 "+Math.max(0,Math.round(st.want_gb-st.have_gb))+" GB";
+      " \u00b7 "+planGB(st)+" GB";
   }
+}
+// the button quotes the CHOSEN plan, not the whole catalog
+function planGB(st){
+  if(setupManual||setupPlan==="max")
+    return Math.max(0,Math.round(st.want_gb-st.have_gb));
+  return setupPlan==="basic"?1:10;
 }
 
 function finishSetupChrome(st,stars,anyDl){
@@ -6440,7 +6510,7 @@ function finishSetupChrome(st,stars,anyDl){
   }else{
     setupGo.disabled=!st.mlx_ok;
     setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Send it")+
-      " \u00b7 "+Math.max(0,Math.round(st.want_gb-st.have_gb))+" GB";
+      " \u00b7 "+planGB(st)+" GB";
   }
 }
 
@@ -6488,6 +6558,7 @@ function rainbowWipe(){
 let wasDownloading=false;
 // true when the panel was opened to add models rather than by first-run setup
 let setupManual=false;
+let setupPlan="pro";
 function celebrateDownloads(){
   const card=$("#setup-card"),veil=$("#setup-veil");
   if(perf){closeSetup();return;}          // performance mode: no theatre
@@ -6523,12 +6594,35 @@ function closeSetup(){veil.hidden=true;if(setupTimer){clearInterval(setupTimer);
 setupLater.addEventListener("click",closeSetup);
 setupGo.addEventListener("click",async()=>{
   if(setupAllReady){closeSetup();return;}
-  await fetch("/api/setup/install",{method:"POST"});
+  await fetch("/api/setup/install",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({plan:setupManual?"max":setupPlan})});
   setupTick();
 });
 $("#open-setup").addEventListener("click",openSetup);
-$("#models-flag").addEventListener("click",()=>{
-  $("#models-flag").hidden=true;openSetup();});
+$("#models-flag").addEventListener("click",()=>{openSetup();});
+function paintModelsFlag(st){
+  const f=$("#models-flag");
+  if(st.busy){
+    f.hidden=!veil.hidden?true:false;
+    f.textContent="DOWNLOADING \u00b7 "+st.overall_pct+"%";
+  }else{
+    f.textContent="MODELS AVAILABLE";
+    f.hidden=!(st.mlx_ok&&!st.needs_setup&&
+      st.models.some(m=>m.star&&m.status!=="ready"));
+  }
+}
+// keep the chip honest while downloads run behind a closed panel
+(function flagTick(){
+  const busyish=$("#models-flag").textContent.startsWith("DOWNLOADING");
+  setTimeout(async()=>{
+    if(veil.hidden){
+      try{paintModelsFlag(await(await fetch("/api/setup")).json());}
+      catch(e){}
+    }
+    flagTick();
+  },busyish?6000:240000);
+})();
 // Every launch opens with the wipe. It deliberately does *not* wait on the
 // /api/setup round trip below — that call enumerates every model on disk and
 // can take seconds, which would leave the window sitting there looking frozen
@@ -6567,18 +6661,11 @@ setTimeout(kickWipe,450);
   try{
     const st=await(await fetch("/api/setup")).json();
     // auto-open only when the app can't hold a conversation yet
-    $("#models-flag").hidden=!(st.mlx_ok&&!st.needs_setup&&!st.busy&&
-      st.models.some(m=>m.star&&m.status!=="ready"));
+    paintModelsFlag(st);
     if(st.needs_setup){
+      // first run opens on the Basic / Pro / Max choice — the pick is
+      // the only decision, then everything is automatic
       openSetup();setupManual=false;
-      // zero-click, per Patrick: detect the memory, download the right
-      // models for it — no button press. (Server rejects this for remote
-      // guests; their host owns the models.)
-      try{
-        setupGo.disabled=true;setupGo.textContent="Downloading\u2026";
-        await fetch("/api/setup/install",{method:"POST"});
-      }catch(e){}
-      setupTick();
     }
   }catch(e){}
 })();
