@@ -829,3 +829,10 @@ that found all three: re-execute the page's own script text via
   read ZEBRA-42 and then DENY it existed ("is this a prank?"). Files
   first, explicit "real data, answer factually" frame, QUESTION: last.
   Smoketest rejects denial-shaped answers, not just substring hits.
+- 1.20.2 TUNNEL HEARTBEAT: Cloudflare drops a proxied response after
+  ~100s without bytes. Engine swap + big-model load = multi-minute wire
+  silence → remote council runs died as "network error" with zero drafts
+  while every localhost test passed. Fix: heartbeat thread in the chat
+  handler re-sends the last STATUS marker after >20s quiet (writes behind
+  a lock, hb_stop.set() on every exit path). Verified by measuring
+  inter-byte gaps through a full Thinking run: max 22.2s.

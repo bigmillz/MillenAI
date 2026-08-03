@@ -3658,18 +3658,45 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("X-Models", ", ".join(council)[:300])
         self.end_headers()
 
+        # Cloudflare drops a proxied response after ~100s without bytes,
+        # and an engine swap + big-model load is a multi-minute SILENCE:
+        # remote council runs died with "network error" while localhost
+        # sailed (seen live). A heartbeat thread re-sends the last status
+        # marker whenever the stream has been quiet too long. Writes are
+        # serialized with a lock; the client treats repeated STATUS
+        # markers as idempotent.
+        wlock = threading.Lock()
+        last_write = [time.time()]
+        last_status = ["working"]
+        hb_stop = threading.Event()
+
+        def _write(data: bytes):
+            with wlock:
+                self.wfile.write(data)
+                self.wfile.flush()
+                last_write[0] = time.time()
+
+        def _heartbeat():
+            while not hb_stop.wait(5):
+                if time.time() - last_write[0] > 20:
+                    try:
+                        _write(f"{NUL}STATUS:{last_status[0]}{NUL}"
+                               .encode("utf-8"))
+                    except Exception:
+                        return
+        threading.Thread(target=_heartbeat, daemon=True).start()
+
         def emit(chunk: str):
             chunk = strip_special(chunk)
             if not chunk:
                 return
-            self.wfile.write(chunk.encode("utf-8"))
-            self.wfile.flush()
+            _write(chunk.encode("utf-8"))
 
         def status(text: str):
             # sentinel-wrapped so the UI can show progress without it
             # ending up inside the answer text
-            self.wfile.write(f"{NUL}STATUS:{text}{NUL}".encode("utf-8"))
-            self.wfile.flush()
+            last_status[0] = text
+            _write(f"{NUL}STATUS:{text}{NUL}".encode("utf-8"))
 
         kind, target = route
         # first image before the vision engine exists: kick the download
@@ -3684,6 +3711,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                      "shows the check mark.")
             except (BrokenPipeError, ConnectionResetError):
                 pass
+            hb_stop.set()
             return
         try:
             if TIERS.get(tier, {}).get("research") or ag_research:
@@ -3706,6 +3734,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError):
                 pass
         finally:
+            hb_stop.set()
             plain = prompt[8:] if prompt.lower().startswith("/search") \
                 else prompt
             if plain and len(plain) > 12:
