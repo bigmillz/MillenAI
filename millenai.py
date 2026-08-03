@@ -80,14 +80,14 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "2.1.0"   # bump here — UI, window, DMG all follow
+APP_VERSION = "2.2.0"   # bump here — UI, window, DMG all follow
 
 
 def short_version(v: str = None) -> str:
     """Display form, macOS-style: '2.0.0'->'2.0', '2.0.1' stays."""
     v = v or APP_VERSION
     return v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
-APP_BUILD = 104               # integer compared against the GitHub release tag
+APP_BUILD = 105               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
