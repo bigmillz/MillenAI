@@ -4259,7 +4259,15 @@ body.perf #hero h1 .halo span,body.perf #hero h1::after{
 }
 #hero p{color:var(--dim);font-size:15px}
 /* the greeting reads as a headline, not a caption */
-#hero .greet{font-size:48px;font-weight:700;margin-top:20px}
+#hero .greet{
+  font-family:ui-serif,Georgia,'Times New Roman',serif;
+  font-size:44px;font-weight:400;letter-spacing:-.01em;
+  color:#eceade;margin-top:22px;
+}
+#hero .greet .spark{
+  color:#df7356;font-family:var(--helv);font-size:34px;
+  vertical-align:2px;margin-right:6px;display:inline-block;
+}
 /* the wordmark centres on its own; LIVE is pulled out of the flow so it
    sits further right without dragging the title off-centre */
 #hero .h1row{display:flex;align-items:center;justify-content:center;position:relative}
@@ -4460,7 +4468,7 @@ body.perf #composer-wrap{background:var(--bg);border-top:1px solid var(--line-so
 #composer{
   max-width:780px;margin:0 auto;pointer-events:auto;
   background:var(--panel2);border:1px solid var(--line);
-  border-radius:14px;display:flex;align-items:flex-end;gap:6px;
+  border-radius:20px;display:flex;align-items:flex-end;gap:6px;
   padding:9px 10px;transition:border-color .15s;
 }
 #composer:focus-within{border-color:var(--accent)}
@@ -4729,12 +4737,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   }
   #hero h1{font-size:10.5vw}
   #hero .live-big{font-size:10.5vw;-webkit-text-stroke:1.2px #d4d6da}
-  #hero .greet{font-size:30px}
+  #hero .greet{font-size:28px}
   #skyload{left:50%;width:min(340px,78vw)}
   #composer-wrap{padding:0 10px 12px}
   #tierpop{left:12px!important;right:12px;max-width:none}
   #hero{padding:0 12px}
-  #hero .greet{font-size:26px;margin-top:14px}
+  #hero .greet{font-size:24px;margin-top:14px}
   .arena-row{flex-direction:column}
 }
 
@@ -4836,7 +4844,7 @@ __AGENT_ROWS__
       <input type="file" id="fpick" multiple hidden
         accept="image/*,.txt,.md,.markdown,.csv,.json,.js,.ts,.py,.html,.css,.log,.sh,.yaml,.yml,.xml,.toml,.rtf">
       <button class="cbtn" id="mic" title="Voice input">🎙️</button>
-      <textarea id="input" rows="1" placeholder="Message MillenAI…"></textarea>
+      <textarea id="input" rows="1" placeholder="How can I help you today?"></textarea>
       <button class="cbtn" id="voicebtn" title="Voice chat — replies are read aloud">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
              stroke-linecap="round" stroke-linejoin="round">
@@ -5574,7 +5582,7 @@ const GREETINGS=[
   "What's worth a long answer?","Let's go deep.",
 ];
 function greeting(){return GREETINGS[Math.floor(Math.random()*GREETINGS.length)];}
-(function(){const g=$(".greet");if(g)g.textContent=greeting();})();
+(function(){const g=$(".greet");if(g)g.innerHTML='<span class="spark">✳</span>'+esc(greeting());})();
 
 /* ------------------------------------------------- chats: list + store */
 // Chats are owned by the backend (survives app updates); localStorage is
@@ -5601,7 +5609,7 @@ async function pushChatsToDisk(){
 }
 
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
+  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1><span class="live-big">LIVE</span></div><div class="beta-tag">__APP_BETA__</div><p class="greet"><span class="spark">✳</span>'+esc(greeting())+'</p></div>';
   paintLive();
 }
 function saveChats(){
