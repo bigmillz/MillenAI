@@ -1896,6 +1896,10 @@ def setup_status() -> dict:
         # screen is opt-in via "Add models…"
         "needs_setup": ready_n < 2,
         "mem_gb": round(psutil.virtual_memory().total / 1e9),
+        "plans": {pl: round(sum(
+            MODEL_INFO[l]["gb"] for l in plan_labels(pl)
+            if not model_cached(l, pulled)), 1)
+            for pl in ("basic", "pro", "max")},
         "ready_n": ready_n,
         "mlx_ok": _has_mlx() if IS_ARM else True,
         "ollama": _ollama_bin() is not None,
@@ -3663,6 +3667,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "mem_pct": vm.percent,
                 "gpu_pct": gpu,  # None when ioreg has no accelerator stats
                 "users_online": online, "users_total": total,
+                "fleet_online": len(_fleet_alive()),
+                "fleet_busy": sum(1 for v in _fleet_alive().values()
+                                  if v.get("busy")),
             }
         else:
             stats = {"real": False, "gpu_pct": gpu,
@@ -5128,6 +5135,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   color:var(--faint)}
 .plan:hover{border-color:var(--accent-hot)}
 .plan.on{border-color:var(--accent-hot);background:var(--accent-dim)}
+.plan.done{opacity:.45;cursor:default}
+.plan.done:hover{border-color:var(--line)}
 #nolimits-row{display:flex;gap:8px;align-items:flex-start;
   font-size:11px;color:var(--faint);margin:10px 2px 0;cursor:pointer;
   line-height:1.5;text-align:left}
@@ -5227,6 +5236,10 @@ __AGENT_ROWS__
       <div class="meter-label"><span>MODELS</span>
         <b id="models-up" title="Get more models">&uarr;</b></div>
       <div class="meter" id="models-meter"></div>
+    </div>
+    <div class="meter-row">
+      <div class="meter-label"><span>COMMUNITY GPU</span></div>
+      <div class="meter" id="fleet-meter"></div>
     </div>
   </div>
 </aside>
@@ -6036,17 +6049,19 @@ $("#newchat").addEventListener("click",()=>{
 function buildMeter(el){const f=document.createElement("div");
   f.className="mfill";el.appendChild(f);}
 buildMeter($("#gpu-meter"));buildMeter($("#models-meter"));
+buildMeter($("#fleet-meter"));
 function paintMeter(el,pct){
   const f=el.firstChild;if(!f)return;
   f.style.width=Math.max(0,Math.min(100,pct))+"%";
   f.classList.toggle("hot",pct>=80);
 }
-let simGpu=12;
+let simGpu=12,fleetStat=null;
 async function pollStats(){
   let gpu;
   try{
     const st=await(await fetch("/api/stats")).json();
     gpu=st.gpu_pct;
+    fleetStat={online:st.fleet_online||0,busy:st.fleet_busy||0};
   }catch(e){}
   if(gpu==null){
     // ambient fallback — clearly approximate
@@ -6054,6 +6069,13 @@ async function pollStats(){
     gpu=simGpu;
   }
   paintMeter($("#gpu-meter"),gpu);
+  // COMMUNITY GPU: each friend online lights a quarter of the bar;
+  // it burns hot while any of them is actually working
+  const fm=$("#fleet-meter");
+  if(fm&&fm.firstChild&&fleetStat){
+    fm.firstChild.style.width=Math.min(100,(fleetStat.online||0)*25)+"%";
+    fm.firstChild.classList.toggle("hot",(fleetStat.busy||0)>0);
+  }
 }
 // polling is owned by applyStatsPolling so perf mode can shut it off
 // (statsTimer is declared with the rest of the state — re-declaring it here
@@ -6692,25 +6714,9 @@ function renderSetup(st){
   // show what it chose and one number, never the catalog. The full list
   // only exists behind "Add models…" for people who go looking.
   if(!setupManual){
-    html+='<div class="plans">'
-      +'<div class="plan" data-plan="basic"><b>Basic</b>'
-      +'<span>Fast answers, tiny download</span><em>~1 GB</em></div>'
-      +'<div class="plan" data-plan="pro"><b>Pro</b>'
-      +'<span>Great everyday quality</span><em>~10 GB</em></div>'
-      +'<div class="plan" data-plan="max"><b>Max</b>'
-      +'<span>The best this machine can run</span><em>'
-      +Math.round(st.want_gb)+' GB</em></div>'
-      +'</div>';
+    html+=planCards(st);
     setupList.innerHTML=html;
-    setupList.querySelectorAll(".plan").forEach(el=>{
-      el.classList.toggle("on",el.dataset.plan===setupPlan);
-      el.addEventListener("click",()=>{
-        setupPlan=el.dataset.plan;
-        setupList.querySelectorAll(".plan").forEach(x=>
-          x.classList.toggle("on",x===el));
-        setupGo.textContent="Send it \u00b7 "+planGB(st)+" GB";
-      });
-    });
+    wirePlans(st);
     finishSetupChrome(st,stars,anyDl);
     return;
   }
@@ -6740,30 +6746,13 @@ function renderSetup(st){
   if(recs.length){
     html+='<div class="setup-head">More brainpower is available \u2014 '
          +'pick a size, downloads run in the background while you chat.'
-         +'</div>'
-      +'<div class="plans">'
-      +'<div class="plan" data-plan="basic"><b>Basic</b>'
-      +'<span>Fast answers, tiny download</span><em>~1 GB</em></div>'
-      +'<div class="plan" data-plan="pro"><b>Pro</b>'
-      +'<span>Great everyday quality</span><em>~10 GB</em></div>'
-      +'<div class="plan" data-plan="max"><b>Max</b>'
-      +'<span>The best this machine can run</span><em>'
-      +Math.round(st.want_gb)+' GB</em></div>'
-      +'</div>';
+         +'</div>'+planCards(st);
   }else{
     html+='<div class="setup-head">You\u2019re fully loaded \u2713 '
          +'Nothing more to download.</div>';
   }
   setupList.innerHTML=html;
-  setupList.querySelectorAll(".plan").forEach(el=>{
-    el.classList.toggle("on",el.dataset.plan===setupPlan);
-    el.addEventListener("click",()=>{
-      setupPlan=el.dataset.plan;
-      setupList.querySelectorAll(".plan").forEach(x=>
-        x.classList.toggle("on",x===el));
-      setupGo.textContent="Send it \u00b7 "+planGB(st)+" GB";
-    });
-  });
+  wirePlans(st);
 
   if(!st.mlx_ok){
     setupNote.textContent="engine not installed — reopen the app to finish setup";
@@ -6779,16 +6768,44 @@ function renderSetup(st){
   }else if(setupAllReady){
     setupGo.disabled=false;setupGo.textContent="Let\u2019s run it";
   }else{
-    setupGo.disabled=!st.mlx_ok;
-    setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Send it")+
-      " \u00b7 "+planGB(st)+" GB";
+    const left=(st.plans||{})[setupPlan]||0;
+    setupGo.disabled=!st.mlx_ok||left<=0;
+    setupGo.textContent=left<=0?"Installed \u2713"
+      :(stars.some(m=>m.status==="error")?"Retry":"Send it")+
+       " \u00b7 "+planGB(st)+" GB";
   }
 }
 // the button quotes the CHOSEN plan, not the whole catalog
+function planCards(st){
+  const rem=st.plans||{};
+  const meta=[["basic","Basic","Fast answers, tiny download"],
+              ["pro","Pro","Great everyday quality"],
+              ["max","Max","The best this machine can run"]];
+  if((rem[setupPlan]||0)<=0){
+    const next=meta.find(([k])=>rem[k]>0);
+    if(next)setupPlan=next[0];
+  }
+  return '<div class="plans">'+meta.map(([k,name,desc])=>{
+    const left=rem[k]||0;
+    return '<div class="plan'+(left<=0?' done':'')+'" data-plan="'+k+'">'
+      +'<b>'+name+'</b><span>'+desc+'</span>'
+      +'<em>'+(left<=0?'Installed \u2713':'~'+Math.max(1,Math.round(left))+' GB')+'</em></div>';
+  }).join("")+'</div>';
+}
+function wirePlans(st){
+  setupList.querySelectorAll(".plan").forEach(el=>{
+    el.classList.toggle("on",el.dataset.plan===setupPlan);
+    if(el.classList.contains("done"))return;
+    el.addEventListener("click",()=>{
+      setupPlan=el.dataset.plan;
+      setupList.querySelectorAll(".plan").forEach(x=>
+        x.classList.toggle("on",x===el));
+      setupGo.textContent="Send it \u00b7 "+planGB(st)+" GB";
+    });
+  });
+}
 function planGB(st){
-  if(setupPlan==="max")
-    return Math.max(0,Math.round(st.want_gb-st.have_gb));
-  return setupPlan==="basic"?1:10;
+  return Math.max(1,Math.round((st.plans||{})[setupPlan]||0));
 }
 
 function finishSetupChrome(st,stars,anyDl){
@@ -6805,9 +6822,11 @@ function finishSetupChrome(st,stars,anyDl){
   }else if(setupAllReady){
     setupGo.disabled=false;setupGo.textContent="Let\u2019s run it";
   }else{
-    setupGo.disabled=!st.mlx_ok;
-    setupGo.textContent=(stars.some(m=>m.status==="error")?"Retry":"Send it")+
-      " \u00b7 "+planGB(st)+" GB";
+    const left=(st.plans||{})[setupPlan]||0;
+    setupGo.disabled=!st.mlx_ok||left<=0;
+    setupGo.textContent=left<=0?"Installed \u2713"
+      :(stars.some(m=>m.status==="error")?"Retry":"Send it")+
+       " \u00b7 "+planGB(st)+" GB";
   }
 }
 
