@@ -5677,7 +5677,7 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
   -webkit-background-clip:text;background-clip:text;color:transparent;
   filter:drop-shadow(0 4px 26px rgba(140,150,255,.5))}
 #lfg[hidden]{display:none}
-#lfg.go{animation:lfgPop 2.6s cubic-bezier(.16,.8,.24,1) forwards}
+
 /* boot ritual: washes across the hero as the version settles — in from
    the left on a skew, a beat over center, out the right */
 #lfg.wash{top:64%;font-size:clamp(46px,7vw,96px);
@@ -5690,15 +5690,7 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
   64%{opacity:1;transform:translateX(-50%) scale(1)}
   100%{opacity:0;transform:translateX(calc(-50% + 46vw)) skewX(7deg);
      filter:blur(14px)}}
-@keyframes lfgPop{
-  0%{opacity:0;transform:translateX(-50%) scale(.55);filter:blur(10px)
-     drop-shadow(0 4px 26px rgba(140,150,255,0))}
-  8%{opacity:1;transform:translateX(-50%) scale(1.08);filter:blur(0)
-     drop-shadow(0 4px 26px rgba(140,150,255,.5))}
-  14%{transform:translateX(-50%) scale(1)}
-  84%{opacity:1;clip-path:inset(0 0 0 0)}
-  100%{opacity:0;clip-path:inset(0 0 0 100%);
-     transform:translateX(-50%) scale(1.03)}}
+
 /* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
    follows it edge-for-edge, unlike the wordmark's tighter window */
 body.painting #sky-color{
@@ -7668,14 +7660,7 @@ async function bootSkyline(){
     let shown=false;
     function reveal(){
       if(shown)return;shown=true;
-      const hadBar=bar&&!bar.hidden;
       hideBar();skyline.hidden=false;
-      // the payoff: only after a real wait, never on an instant start
-      if(hadBar&&!perf){
-        const g=$("#lfg");
-        if(g){g.hidden=false;g.classList.add("go");
-          setTimeout(()=>{g.hidden=true;g.classList.remove("go");},2700);}
-      }
     }
     c.addEventListener("canplaythrough",reveal,{once:true});
     c.addEventListener("error",()=>{

@@ -1266,3 +1266,7 @@ that found all three: re-execute the page's own script text via
   rode the greeting line at 47% and both went muddy — frozen-frame
   check caught it). The loading-bar payoff pop still fires separately
   after real downloads. Perf mode skips both.
+
+## 3.10.3 — one LFG only
+- The loading-bar payoff pop is gone; the boot wash is the single
+  "LFG, BITCH." moment per launch. lfgPop keyframes retired with it.
