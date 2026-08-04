@@ -1221,3 +1221,18 @@ that found all three: re-execute the page's own script text via
 - Debugging note: first suspect was a zombie test worker eating fleet
   jobs — wrong (model mismatch made offload impossible); the 45s
   _fleet_alive window plus model matching already guards that.
+
+## 3.9.2 — answers survive chat switches
+- Switching chats mid-answer LOST the response (seen live): loadChat
+  swaps the global `messages` array, so the in-flight send() pushed the
+  finished answer into whichever chat the user switched TO — and
+  loadChat also aborted the stream outright.
+- Fix: send() pins its owning chat (myChat/myMessages) at start; every
+  completion write (push, pop, persist) targets the pinned chat via
+  persistChat(id,msgs). loadChat no longer aborts — the answer streams
+  on quietly, lands in its own chat, and if you're back viewing that
+  chat when it finishes, it paints in. Auto-scroll only fires when the
+  owning chat is on screen, so a background finish never yanks the
+  view.
+- Verified in-browser with the exact repro: send, switch away
+  mid-stream, return — full answer present.

@@ -7109,6 +7109,11 @@ async function send(){
     uDiv.querySelector(".body").appendChild(row);
   }
 
+  // PIN the owning chat: loadChat() swaps the global `messages` array
+  // mid-flight, so a finished answer was pushed into whichever chat the
+  // user switched TO — the original showed only the question (seen live)
+  if(!curChat)curChat="c"+Date.now();
+  const myChat=curChat, myMessages=messages;
   generating=true; document.body.classList.add("gen");
   sendBtn.textContent="■"; sendBtn.classList.add("stop"); sendBtn.title="Stop";
   const aiDiv=addMsg("assistant",""); const body=aiDiv.querySelector(".body");
@@ -7163,7 +7168,7 @@ async function send(){
           ?'<span class="statusline">◇ '+esc(status)+'…</span>':"")
         +(searched?srcRow(sources):"")
         +renderMD(full)+'<span class="caret"></span>';
-      autoScroll();
+      if(curChat===myChat)autoScroll();
     }
   }catch(err){
     if(err.name==="AbortError")wasAborted=true;
@@ -7196,11 +7201,19 @@ async function send(){
     const rec={role:"assistant",content:full};
     if(drafts.length)rec.drafts=drafts;
     if(sources&&sources.length)rec.sources=sources;
-    messages.push(rec);
-    persistCurrent();
+    myMessages.push(rec);
+    persistChat(myChat,myMessages);
+    // viewing the owning chat but the live bubble was detached by a
+    // switch-away-and-back? paint the finished answer in
+    if(curChat===myChat&&!inner.contains(aiDiv)){
+      messages=myMessages;
+      inner.innerHTML="";
+      myMessages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",
+        m.content,m.drafts,m.sources));
+    }
   }else{
     // error or empty: keep it out of the model's context, refresh the dots
-    messages.pop();
+    myMessages.pop();
     pollEngines();
   }
   if(voiceChat&&full&&!isErr&&!wasAborted){
@@ -7211,7 +7224,7 @@ async function send(){
   setToks(0,"idle");
   generating=false;abortCtl=null;document.body.classList.remove("gen");
   sendBtn.textContent="↑";sendBtn.classList.remove("stop");sendBtn.title="Send";
-  autoScroll();
+  if(curChat===myChat)autoScroll();
   input.focus();
 }
 
@@ -7319,18 +7332,24 @@ function saveChats(){
   try{localStorage.setItem("millen.chats",JSON.stringify(chats.slice(0,30)));}
   catch(e){chats=chats.slice(0,10);localStorage.setItem("millen.chats",JSON.stringify(chats));}
 }
-function persistCurrent(){
-  if(!messages.length)return;
-  if(!curChat)curChat="c"+Date.now();
-  let c=chats.find(x=>x.id===curChat);
-  if(!c){c={id:curChat};chats.unshift(c);}
-  const first=messages.find(m=>m.role==="user");
+function persistChat(id,msgs){
+  // writes into the chat that OWNS these messages — which, after a
+  // mid-answer chat switch, is not necessarily the one on screen
+  if(!msgs.length)return;
+  let c=chats.find(x=>x.id===id);
+  if(!c){c={id:id};chats.unshift(c);}
+  const first=msgs.find(m=>m.role==="user");
   // show the raw text immediately, then let a small model name it properly
   if(!c.title)c.title=(first?first.content:"chat").slice(0,48);
-  c.ts=Date.now();c.messages=messages.slice();
+  c.ts=Date.now();c.messages=msgs.slice();
   chats.sort((a,b)=>b.ts-a.ts);
   saveChats();renderChats();
   if(!c.named&&first){c.named=true;nameChat(c,first.content);}
+}
+function persistCurrent(){
+  if(!messages.length)return;
+  if(!curChat)curChat="c"+Date.now();
+  persistChat(curChat,messages);
 }
 
 async function nameChat(c,text){
@@ -7362,7 +7381,8 @@ function loadChat(id){
   if(id===curChat)return;
   persistCurrent();
   const c=chats.find(x=>x.id===id);if(!c)return;
-  if(generating&&abortCtl)abortCtl.abort();
+  // an in-flight answer is NOT aborted: it streams on quietly and lands
+  // in its own chat — switching away no longer costs you the response
   curChat=id;
   messages=c.messages.slice();
   inner.innerHTML="";
