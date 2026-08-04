@@ -2483,6 +2483,7 @@ def place_search(query: str) -> tuple:
             break
     direct = [r for r in hits if is_direct(r)]
     ordered = direct + [r for r in hits if r not in direct]
+    _stash_sources(ordered)
     ctx = "\n".join("- %s: %s" % (r.get("title") or "", r.get("body") or "")
                     for r in ordered[:8]) or "No snippets found."
     # pages are worth 7 seconds each ONLY when they're about the right
@@ -2505,6 +2506,18 @@ def place_search(query: str) -> tuple:
     return ctx, bool(direct)
 
 
+# the last structured hits THIS thread's search produced — the chat
+# handler turns them into a clickable sources row under the answer.
+# Thread-local because ThreadingTCPServer runs one thread per request.
+_tl_search = threading.local()
+
+
+def _stash_sources(rows: list):
+    _tl_search.rows = [{"t": (r.get("title") or "")[:80],
+                        "u": (r.get("href") or r.get("url") or "")}
+                       for r in rows if (r.get("href") or r.get("url"))][:5]
+
+
 def run_search(query: str) -> str:
     """DuckDuckGo snippets with a 60s cache. Never raises."""
     if not HAS_SEARCH:
@@ -2513,15 +2526,19 @@ def run_search(query: str) -> str:
     with _search_lock:
         fresh = (time.time() - _search_cache["timestamp"]) < 60
         if _search_cache["query"] == query and fresh:
+            _tl_search.rows = _search_cache.get("rows") or []
             return _search_cache["data"]
+    rows = _ddg_text(query, 4)
+    _stash_sources(rows)
     ctx = "\n".join(
         f"- {r.get('title', '')}: {r.get('body', '')}"
-        for r in _ddg_text(query, 4)
+        for r in rows
     )
     if not ctx.strip():
         ctx = "No snippets found."
     with _search_lock:
-        _search_cache.update(query=query, data=ctx, timestamp=time.time())
+        _search_cache.update(query=query, data=ctx, timestamp=time.time(),
+                             rows=getattr(_tl_search, "rows", []))
     return ctx
 
 
@@ -3561,15 +3578,26 @@ def _sky_fetch(i: int):
         _faststart(tmp, _sky_path(i))
         with _sky_lock:
             _sky_jobs[i] = {"status": "ready", "pct": 100}
-        # LRU cap: 89 clips at ~220 MB each must never all land on disk —
-        # keep 30 (~6.6 GB). Twelve still felt stale ("still isn't using
-        # all the apple videos"): the pool IS the rotation, so it has to
-        # be wide, and the in-session trickle keeps widening it.
+        # THE WHOLE CATALOG lives on disk now (~20 GB), per Patrick ("i
+        # want all the apple ones") — the LRU only guards against a
+        # future catalog shrink. Orphans from old catalog hashes were
+        # silently eating gigabytes while never being playable: 34 files
+        # on disk, 16 valid (seen live) — delete anything whose name no
+        # current clip hashes to, plus day-old dead .dl partials.
         try:
+            valid = {os.path.basename(_sky_path(n))
+                     for n in range(len(SKY_SOURCES))}
             clips = sorted(glob.glob(os.path.join(_sky_dir(), "sky*.mov")),
                            key=os.path.getmtime)
-            for old in clips[:-30]:
+            for p in clips:
+                if os.path.basename(p) not in valid:
+                    os.remove(p)
+            clips = [p for p in clips if os.path.basename(p) in valid]
+            for old in clips[:-len(SKY_SOURCES)]:
                 os.remove(old)
+            for part in glob.glob(os.path.join(_sky_dir(), "*.dl")):
+                if time.time() - os.path.getmtime(part) > 86400:
+                    os.remove(part)
         except Exception:
             pass
     except Exception as exc:
@@ -4672,6 +4700,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             query = strip_greeting(prompt) or prompt.strip()
 
         if query:
+            _tl_search.rows = []   # keep-alive reuses threads — no stale rows
             snippets = None
             is_weather = bool(re.search(
                 r"\bweather\b|\bforecast\b|\btemperature\b", query, re.I))
@@ -4817,7 +4846,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         "What you just found on the web about "
                         f"'{query}' — the reader can NEVER see this "
                         "block, so restate anything you use:\n"
-                        f"{snippets}\n\n{strictness}"
+                        f"{snippets}\n\n"
+                        # every searched answer gets today pinned — a
+                        # generic search reply opened "Mondays can be
+                        # challenging" on a Tuesday (seen live)
+                        f"Today is {time.strftime('%A')}.\n{strictness}"
                         f"PROMPT: {query}"
                     ),
                 }
@@ -4917,6 +4950,17 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             # ending up inside the answer text
             last_status[0] = text
             _write(f"{NUL}STATUS:{text}{NUL}".encode("utf-8"))
+
+        # the search ran earlier on THIS thread — hand the client its
+        # structured hits so the answer carries a clickable sources row
+        if query:
+            src_rows = getattr(_tl_search, "rows", [])[:5]
+            if src_rows:
+                try:
+                    _write((NUL + "SOURCES:" + json.dumps(src_rows) + NUL)
+                           .encode("utf-8"))
+                except Exception:
+                    pass
 
         kind, target = route
         # first image before the vision engine exists: kick the download
@@ -5756,6 +5800,21 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
   border:1px solid rgba(255,255,255,.18);border-radius:5px;
   padding:2px 7px;margin-bottom:9px;
 }
+/* clickable source chips under the badge — favicon + domain, opens the
+   page. The graphical proof of the search, not just a claim of one. */
+.srcrow{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
+.srcchip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--mono);font-size:11px;color:var(--text);
+  text-decoration:none;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.14);border-radius:999px;
+  padding:4px 11px 4px 6px;transition:background .15s,border-color .15s;
+  max-width:220px;overflow:hidden;
+}
+.srcchip span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.srcchip img{width:16px;height:16px;border-radius:4px;flex:none}
+.srcchip:hover{background:rgba(255,255,255,.13);
+  border-color:rgba(255,255,255,.3)}
 .caret{
   display:inline-block;width:8px;height:15px;background:var(--accent);
   vertical-align:-2px;margin-left:2px;border-radius:1px;
@@ -6773,14 +6832,28 @@ function whoLabel(s){
   return s.split(",").length>1?"":s;
 }
 
-function addMsg(role,text,drafts){
+// the "searched the web" badge plus clickable source chips — the answer
+// shows WHERE it looked, Google-style, not just that it looked
+function srcRow(srcs){
+  let h='<span class="websrc">🌐 searched the web</span>';
+  if(srcs&&srcs.length){
+    h+='<div class="srcrow">'+srcs.map(s=>{
+      let d="";try{d=new URL(s.u).hostname.replace(/^www\./,"");}catch(e){return "";}
+      return '<a class="srcchip" href="'+esc(s.u)+'" target="_blank" rel="noopener" title="'+esc(s.t||d)+'">'
+        +'<img src="https://www.google.com/s2/favicons?domain='+encodeURIComponent(d)+'&sz=32" alt="" loading="lazy">'
+        +'<span>'+esc(d)+'</span></a>';
+    }).join("")+'</div>';
+  }
+  return h;
+}
+function addMsg(role,text,drafts,srcs){
   const hero=$("#hero"); if(hero)hero.remove();
   const div=document.createElement("div");
   div.className="msg "+(role==="user"?"user":"ai");
   const who=role==="user"?"you":(whoLabel(lastModels)||tier);
   div.innerHTML='<div class="who">'+who+'</div><div class="body"></div>';
   const body=div.querySelector(".body");
-  if(role==="user")body.textContent=text; else body.innerHTML=renderMD(text);
+  if(role==="user")body.textContent=text; else body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text);
   if(role!=="user"&&drafts&&drafts.length)paintDrafts(div,drafts,false);
   inner.appendChild(div);
   scroller.scrollTop=scroller.scrollHeight;
@@ -6925,7 +6998,7 @@ async function send(){
   body.innerHTML='<span class="caret"></span>';
 
   abortCtl=new AbortController();
-  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[];
+  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[],sources=null;
   lastModels="";
 
   try{
@@ -6938,7 +7011,7 @@ async function send(){
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
     if(lastModels){const w=aiDiv.querySelector(".who");if(w)w.textContent=whoLabel(lastModels);}
-    if(searched)body.innerHTML='<span class="websrc">🌐 searched the web</span><span class="caret"></span>';
+    if(searched)body.innerHTML=srcRow(sources)+'<span class="caret"></span>';
     const reader=resp.body.getReader(),dec=new TextDecoder();
     let raw="";
     while(true){
@@ -6952,7 +7025,11 @@ async function send(){
                  try{const d=JSON.parse(j);
                      if(!drafts.some(x=>x.m===d.m))drafts.push(d);}catch(e){}
                  return "";})
-              .replace(/\u0000DRAFT:[^\u0000]*$/,"");
+              .replace(/\u0000DRAFT:[^\u0000]*$/,"")
+              .replace(/\u0000SOURCES:(.*?)\u0000/g,(_,j)=>{
+                 try{sources=JSON.parse(j);}catch(e){}
+                 return "";})
+              .replace(/\u0000SOURCES:[^\u0000]*$/,"");
       if(drafts.length||(status&&/of \d+/.test(status)))
         paintDrafts(aiDiv,drafts,true,status);
       // a merge that collapsed mid-stream sends RESET \u2014 discard
@@ -6966,7 +7043,7 @@ async function send(){
       const hasBar=!!aiDiv.querySelector(".blendprog");
       body.innerHTML=(status&&!full&&!hasBar
           ?'<span class="statusline">◇ '+esc(status)+'…</span>':"")
-        +(searched?'<span class="websrc">🌐 searched the web</span>':"")
+        +(searched?srcRow(sources):"")
         +renderMD(full)+'<span class="caret"></span>';
       autoScroll();
     }
@@ -6989,7 +7066,7 @@ async function send(){
     const rescued=drafts.filter(x=>!/^\(no answer/.test(x.t));
     if(rescued.length)full=rescued[0].t;
   }
-  body.innerHTML=(searched&&full?'<span class="websrc">🌐 searched the web</span>':"")
+  body.innerHTML=(searched&&full?srcRow(sources):"")
     +renderMD(full||(wasAborted?"*(stopped)*":
     "⚠️ The engine returned nothing. Is the model server for **"+model+"** actually running?"));
   const secs=((performance.now()-t0)/1000);
@@ -6998,8 +7075,10 @@ async function send(){
     const meta=document.createElement("div");meta.className="meta";
     meta.innerHTML="<b>"+lastRate.toFixed(1)+" tok/s</b> · ~"+Math.round(tokEst)+" tokens · "+secs.toFixed(1)+"s";
     aiDiv.appendChild(meta);
-    messages.push(drafts.length?{role:"assistant",content:full,drafts:drafts}
-                              :{role:"assistant",content:full});
+    const rec={role:"assistant",content:full};
+    if(drafts.length)rec.drafts=drafts;
+    if(sources&&sources.length)rec.sources=sources;
+    messages.push(rec);
     persistCurrent();
   }else{
     // error or empty: keep it out of the model's context, refresh the dots
@@ -7169,7 +7248,7 @@ function loadChat(id){
   curChat=id;
   messages=c.messages.slice();
   inner.innerHTML="";
-  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",m.content,m.drafts));
+  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",m.content,m.drafts,m.sources));
   renderChats();
 }
 renderChats();
@@ -7319,43 +7398,36 @@ async function bootSkyline(){
   // reads best over them — and any clip is fair game after that.
   const mood=x=>darkSet.has(x)||!firstEver;
   let i;
-  // INSTANT START, per Patrick: never make a launch wait on a download —
-  // play something already on disk, and pull exactly ONE new clip in the
-  // background so tomorrow's rotation is wider than today's.
-  const fresh=[];
-  for(let n=0;n<SKY_N;n++)if(!cached.includes(n)&&mood(n))fresh.push(n);
-  if(cached.length){
-    // avoid anything played recently, not just the very last clip
-    let hist=[];
-    try{hist=JSON.parse(localStorage.getItem("millen.skyhist"))||[];}
-    catch(e){}
-    let pool=cached.filter(x=>mood(x)&&hist.indexOf(x)<0);
-    if(!pool.length)pool=cached.filter(x=>x!==last);
-    if(!pool.length)pool=cached.slice();
-    i=pool[Math.floor(Math.random()*pool.length)];
-    hist=[i].concat(hist.filter(x=>x!==i)).slice(0,8);
-    localStorage.setItem("millen.skyhist",JSON.stringify(hist));
-  }else{
-    const moody=[];
-    for(let n=0;n<SKY_N;n++)if(mood(n))moody.push(n);
-    const src=moody.length?moody:[...Array(SKY_N).keys()];
-    i=src[Math.floor(Math.random()*src.length)];
-    if(i===last)i=(i+1)%SKY_N;
-  }
+  // THE WHOLE CATALOG, per Patrick ("i want all the apple ones, but a
+  // loading bar for just the current one"): every launch draws from all
+  // 89 clips, played-recently excluded. A cached pick starts instantly;
+  // an uncached one shows the loading bar with real progress — that IS
+  // the special part. The trickle still backfills the disk so launches
+  // get more instant over time.
+  let hist=[];
+  try{hist=JSON.parse(localStorage.getItem("millen.skyhist"))||[];}
+  catch(e){}
+  const all=[];
+  for(let n=0;n<SKY_N;n++)if(mood(n))all.push(n);
+  let pool=all.filter(x=>hist.indexOf(x)<0);
+  if(!pool.length)pool=all.filter(x=>x!==last);
+  if(!pool.length)pool=all.length?all.slice():[...Array(SKY_N).keys()];
+  i=pool[Math.floor(Math.random()*pool.length)];
+  hist=[i].concat(hist.filter(x=>x!==i)).slice(0,32);
+  localStorage.setItem("millen.skyhist",JSON.stringify(hist));
   localStorage.setItem("millen.sky",i);
-  // grow the pool: one new clip after launch, then a slow TRICKLE while
-  // the app stays open — a machine that's on all day collects the whole
-  // catalogue without a single launch-time wait
+  // TRICKLE: keep pulling clips while the app is open until the whole
+  // catalogue is local — a machine that's on all day collects them all
   const warmFresh=()=>{
     const f2=[];
-    for(let n=0;n<SKY_N;n++)if(!cached.includes(n))f2.push(n);
+    for(let n=0;n<SKY_N;n++)if(!cached.includes(n)&&n!==i)f2.push(n);
     if(!f2.length)return;
     const n=f2[Math.floor(Math.random()*f2.length)];
     cached.push(n);           // don't re-pick it next tick
     fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{});
   };
-  if(fresh.length)setTimeout(warmFresh,9000);
-  setInterval(()=>{if(cached.length<30)warmFresh();},600000);
+  setTimeout(warmFresh,20000);
+  setInterval(()=>{if(cached.length<SKY_N)warmFresh();},300000);
   const c=$("#sky-color");
   const bar=$("#skyload"),fill=$("#skyload .fill"),lbl=$("#skyload .lbl");
   c.preload="auto";

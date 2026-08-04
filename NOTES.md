@@ -1125,3 +1125,27 @@ that found all three: re-execute the page's own script text via
 - No-match place answers: first + last sentences are now DICTATED by
   code (entity split: last term = locality). Gemma paraphrases the
   first ("I'm not aware of…") — semantically identical, accepted.
+
+## 3.6 — the whole sky, and search you can see
+- BACKDROPS, third and final round: the "same 3-4" wasn't the picker's
+  width — it was (a) days of disk-full silently failing every warm, and
+  (b) 18 of 34 cached files being ORPHANS from old catalog hashes
+  (unplayable, invisible, eating gigabytes). Now: every launch picks
+  from ALL 89 clips (skyhist last-32 excluded), an uncached pick shows
+  the loading bar with real progress ("it makes it feel special" — the
+  bar IS the feature, per Patrick, reversing the old instant-start
+  rule), the 5-min trickle backfills until the whole catalog (~20 GB)
+  is local, and the LRU pass deletes orphans + day-old .dl partials.
+- SOURCES ROW: searched answers now carry clickable chips (favicon +
+  domain, opens the page) under the "searched the web" badge — the
+  graphical proof of the search. Server stashes the structured hits in
+  a thread-local (_tl_search, cleared per request — keep-alive reuses
+  threads), emits one \x00SOURCES:json\x00 marker; client strips it
+  like STATUS/DRAFT, renders srcRow(), persists m.sources so chips
+  survive reload. Favicons via google s2 (the page already loads
+  Google Fonts; same trust boundary).
+- run_search's 60s cache now stores rows too — a cache hit used to
+  leave the sources row empty while the text answered from cache.
+- Every searched answer gets "Today is %A." pinned in the wrapper — a
+  generic search reply opened "Mondays can be challenging" on a
+  Tuesday (seen live).
