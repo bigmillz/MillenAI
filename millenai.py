@@ -5519,9 +5519,22 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #about-ver,#up-ver{font-family:var(--helv);font-size:14px;color:var(--dim);margin-top:6px}
 #up-detail{font-size:11.5px;color:var(--faint);margin:10px 0 4px;line-height:1.5}
 #about-sub{font-size:11.5px;color:var(--faint);margin-top:10px;line-height:1.5}
-#new-list{
-  font-family:var(--mono);font-size:11.5px;color:var(--accent-hot);
-  margin:12px 0 4px;line-height:1.7;text-align:left;
+#new-list{margin:16px 0 2px;text-align:left}
+#new-list .mrow{
+  display:flex;align-items:baseline;justify-content:space-between;gap:14px;
+  padding:8px 2px;border-bottom:1px solid var(--line-soft);
+}
+#new-list .mrow:last-child{border-bottom:none}
+#new-list .mname{
+  font-family:var(--helv);font-size:13.5px;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+#new-list .msize{
+  font-family:var(--mono);font-size:11px;color:var(--faint);flex:none;
+  font-variant-numeric:tabular-nums;
+}
+#new-list .mmore{
+  padding:10px 2px 0;font-size:11.5px;color:var(--faint);text-align:center;
 }
 #turbo-row[hidden]{display:none}
 #turbo-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
@@ -5978,7 +5991,7 @@ __AGENT_ROWS__
     </div>
     <div id="adv-grid">
       <button class="about-btn" id="about-preload">Preload backdrops</button>
-      <button class="about-btn" id="open-setup">Download models&hellip;</button>
+      <button class="about-btn" id="open-setup">Model updates&hellip;</button>
       <button class="about-btn" id="about-check">Check for updates</button>
       <button class="about-btn" id="about-forget">Forget me</button>
     </div>
@@ -6015,10 +6028,9 @@ __AGENT_ROWS__
 
 <div id="setup-veil" hidden>
   <div id="setup-card">
-    <h2>Welcome to MillenAI</h2>
-    <p class="sub">We're getting you everything you need for the best
-      experience — private, and entirely on this Mac. Start chatting the
-      moment the first piece lands.</p>
+    <h2 id="setup-title">Updates available</h2>
+    <p class="sub" id="setup-sub">New models are ready for this machine.
+      They download in the background while you keep chatting.</p>
     <div id="setup-list"></div>
     <label id="nolimits-row"><input type="checkbox" id="nolimits">
       No limits — offer models beyond this machine&rsquo;s memory
@@ -7284,8 +7296,8 @@ function renderSetup(st){
   // WHILE DOWNLOADING (first run or updates): one bar, bandwidth,
   // percent — never a wall of per-model rows
   if(anyDl){
-    html+='<div class="setup-head">Getting everything ready — you can '
-      +'start chatting right now, downloads run in the background.</div>';
+    setTitle("Downloading updates",
+      "Keep chatting \u2014 this finishes in the background.");
     setupList.innerHTML=html;
     $("#setup-later").textContent="Continue in background";
     finishSetupChrome(st,stars,anyDl);
@@ -7297,6 +7309,9 @@ function renderSetup(st){
   // show what it chose and one number, never the catalog. The full list
   // only exists behind "Add models…" for people who go looking.
   if(!setupManual){
+    setTitle("Welcome to MillenAI",
+      "We\u2019re getting you set up \u2014 private, and entirely on "
+      +"this Mac. Start chatting the moment the first piece lands.");
     html+=planCards(st);
     setupList.innerHTML=html;
     wirePlans(st);
@@ -7327,12 +7342,13 @@ function renderSetup(st){
   const missing=st.models.filter(m=>m.status!=="ready");
   const recs=missing.filter(m=>m.star);
   if(recs.length){
-    html+='<div class="setup-head">More brainpower is available \u2014 '
-         +'pick a size, downloads run in the background while you chat.'
-         +'</div>'+planCards(st);
+    setTitle("Updates available",
+      "New models are ready for this machine \u2014 pick how much you "
+      +"want. They download in the background while you keep chatting.");
+    html+=planCards(st);
   }else{
-    html+='<div class="setup-head">You\u2019re fully loaded \u2713 '
-         +'Nothing more to download.</div>';
+    setTitle("You\u2019re up to date",
+      "Every model this machine can run is installed.");
   }
   setupList.innerHTML=html;
   wirePlans(st);
@@ -7353,12 +7369,17 @@ function renderSetup(st){
   }else{
     const left=(st.plans||{})[setupPlan]||0;
     setupGo.disabled=!st.mlx_ok||left<=0;
-    setupGo.textContent=left<=0?"Installed \u2713"
-      :(stars.some(m=>m.status==="error")?"Retry":"Send it")+
+    setupGo.textContent=left<=0?"Up to date \u2713"
+      :(stars.some(m=>m.status==="error")?"Retry":"Update")+
        " \u00b7 "+planGB(st)+" GB";
   }
 }
 // the button quotes the CHOSEN plan, not the whole catalog
+function setTitle(t,s){
+  const h=$("#setup-title"),p=$("#setup-sub");
+  if(h)h.textContent=t;
+  if(p)p.textContent=s;
+}
 function planCards(st){
   const rem=st.plans||{};
   const meta=[["basic","Basic","Fast answers, tiny download"],
@@ -7383,7 +7404,7 @@ function wirePlans(st){
       setupPlan=el.dataset.plan;
       setupList.querySelectorAll(".plan").forEach(x=>
         x.classList.toggle("on",x===el));
-      setupGo.textContent="Send it \u00b7 "+planGB(st)+" GB";
+      setupGo.textContent="Update \u00b7 "+planGB(st)+" GB";
     });
   });
 }
@@ -7407,8 +7428,8 @@ function finishSetupChrome(st,stars,anyDl){
   }else{
     const left=(st.plans||{})[setupPlan]||0;
     setupGo.disabled=!st.mlx_ok||left<=0;
-    setupGo.textContent=left<=0?"Installed \u2713"
-      :(stars.some(m=>m.status==="error")?"Retry":"Send it")+
+    setupGo.textContent=left<=0?"Up to date \u2713"
+      :(stars.some(m=>m.status==="error")?"Retry":"Update")+
        " \u00b7 "+planGB(st)+" GB";
   }
 }
@@ -7806,9 +7827,10 @@ async function announceModels(){
       const gb=fresh.reduce((a,m)=>a+m.est_gb,0);
       title.textContent="New models available";
       $("#up-detail").textContent="This version adds models you don\u2019t have yet.";
-      $("#new-list").innerHTML=fresh.map(m=>
-        "\u2022 "+esc(m.label)+"  <span style='color:var(--faint)'>"
-        +m.est_gb+" GB</span>").join("<br>");
+      $("#new-list").innerHTML=fresh.slice(0,4).map(m=>
+        "<div class='mrow'><span class='mname'>"+esc(m.label)+
+        "</span><span class='msize'>"+m.est_gb+" GB</span></div>").join("")+
+        (fresh.length>4?"<div class='mmore'>+"+(fresh.length-4)+" more</div>":"");
       $("#new-get").textContent="Download \u00b7 "+gb.toFixed(1)+" GB";
       $("#new-off").hidden=true;
       veil.hidden=false;
@@ -7827,15 +7849,14 @@ async function announceModels(){
     if(prefs.remind_models_off)return;
     if(!missing.length)return;
     if(Date.now()-(prefs.remind_models_ts||0)<REMIND_GAP)return;
-    title.textContent="More models to try";
-    $("#up-detail").textContent=missing.length+" model"+(missing.length===1?"":"s")+
-      " in the catalog aren\u2019t installed yet \u2014 each one you add makes "+
-      "blends and Power Mode stronger.";
-    $("#new-list").innerHTML=missing.slice(0,5).map(m=>
-      "\u2022 "+esc(m.label)+"  <span style='color:var(--faint)'>"
-      +m.est_gb+" GB</span>").join("<br>")+
-      (missing.length>5?"<br>\u2026and "+(missing.length-5)+" more":"");
-    $("#new-get").textContent="Browse models\u2026";
+    title.textContent="More models available";
+    $("#up-detail").textContent="Your computer can run "+missing.length+
+      " more model"+(missing.length===1?"":"s")+".";
+    $("#new-list").innerHTML=missing.slice(0,4).map(m=>
+      "<div class='mrow'><span class='mname'>"+esc(m.label)+
+      "</span><span class='msize'>"+m.est_gb+" GB</span></div>").join("")+
+      (missing.length>4?"<div class='mmore'>+"+(missing.length-4)+" more</div>":"");
+    $("#new-get").textContent="Browse models";
     $("#new-off").hidden=false;
     veil.hidden=false;
     $("#new-skip").onclick=async()=>{veil.hidden=true;await stamp();};
