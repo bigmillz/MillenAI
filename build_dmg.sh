@@ -131,7 +131,7 @@ for i in $(seq 1 40); do
 done
 sleep 1
 
-osascript <<OSA
+osascript <<OSA || echo "  (Finder styling skipped — automation not authorized; plain DMG)"
 tell application "Finder"
   tell disk "$VOL"
     open
