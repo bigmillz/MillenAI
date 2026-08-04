@@ -1085,3 +1085,43 @@ that found all three: re-execute the page's own script text via
 - No-match shape got hard bookends for Gemma (first sentence = can't
   find it, last sentence = a question) — it liked presenting nearby
   cafes as if they were the answer.
+
+## 3.5 — answers voiced like Claude, and the bug that hid a model swap
+- VOICE, in SYSTEM_PROMPT and both rewrite passes: never open with a
+  title/heading (first line is a sentence spoken TO the person, in
+  their register); meet something personal in one genuine clause; end
+  an arranging/building task with momentum (the one or two details
+  needed) instead of the blanket no-offers rule; NEVER invent named
+  things (businesses, retreats, programs) or dress invention as
+  experience ("tried-and-tested") — the burnout-retreat answer invented
+  three retreats with prices and cohort dates.
+- Instructions alone don't stop a 4-bit model from confabulating —
+  GROUNDING does: _BOOKING_RX (arranging verb + bookable noun) routes
+  recommendation asks to web search, deep pages included, searching
+  only the SENTENCE with the ask (whole-message search surfaced Swiss
+  burnout clinics). Fence vocabulary matters: when the injected block
+  said "results"/"snippets" the answers said "the snippets show" — it
+  now says "what you just found", which echoes back as "I found".
+- Searched answers were EXCLUDED from the two-pass polish ('not query')
+  — every live-data reply was a single take. Bookish answers now get
+  the rewrite, fed the grounded message so the reviser can check names
+  against data. REVISE no longer says "add missing specifics"
+  unconditionally (that INVITED confabulated dates); adds only what is
+  certainly true, cuts suspects.
+- ROUTER BUG (the big one): a tier request arrives with model="" and
+  the route matcher matches on model_name — empty matched nothing and
+  fell through to the smallest-cached fallback. The header said Gemma
+  while Llama 3.2 1B answered. The desktop UI masked it by sending
+  model=council[0]; the tier API path (and my whole test harness) hit
+  it. model_name now defaults to the resolved council leader.
+- The disk hit 99% (~00:34), Gemma's engine died, respawns failed
+  silently, and the never-empty guarantee served 1B for hours — with
+  the router bug making it invisible. Lesson: when a test result
+  suddenly looks like a different model, CHECK WHICH ENGINE IS
+  LISTENING (lsof the port) before tuning prompts against it.
+- Turbo "unavailable": Groq free tier is 200k tokens/DAY and Fast
+  burns it — the probe worked (16 tok) while real requests 429'd.
+  Gemini free tier is the roomier fallback provider.
+- No-match place answers: first + last sentences are now DICTATED by
+  code (entity split: last term = locality). Gemma paraphrases the
+  first ("I'm not aware of…") — semantically identical, accepted.

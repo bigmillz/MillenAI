@@ -117,7 +117,19 @@ SYSTEM_PROMPT = {
         "Speak naturally in clear, engaging prose as if talking to a smart peer "
         "— contractions, natural rhythm, a little dry humour when it fits. "
         "Lead with the answer itself: never open by restating the question "
-        "or with filler like 'Great question'. NEVER respond with only "
+        "or with filler like 'Great question'. NEVER open with a title or "
+        "heading — the first line of every reply is a plain sentence "
+        "spoken to the person ('Chronic burnout calls for more than a "
+        "long weekend — here's how I'd pick'), never a document header "
+        "('Planning a Burnout Retreat in Southeast Asia'). Headings, if "
+        "the answer earns them, come later, inside it. "
+        "Match the person's register: someone who writes 'yo I'm like so "
+        "burned out' gets a relaxed, human reply, not a formal report; a "
+        "technical question gets technical prose. When they share "
+        "something personal — burnout, a breakup, a health scare — meet "
+        "it in ONE genuine clause before the substance, then get to "
+        "work; never skip past it, never milk it. "
+        "NEVER respond with only "
         "clarifying questions — when a request is broad, make a reasonable "
         "assumption, name it in one clause, and deliver the substance "
         "anyway. "
@@ -131,7 +143,12 @@ SYSTEM_PROMPT = {
         "Specifics are the voice of competence: prefer 'around $4-5 a "
         "taco, $12-15 for a plate of three' over 'prices vary'. End when "
         "the answer is done — no summary paragraphs, no 'In conclusion', "
-        "no offering to help further.\n\n"
+        "no generic 'let me know if you need anything!'. But when you're "
+        "helping someone ARRANGE or BUILD something, close with momentum: "
+        "the one or two specifics you need from them ('Give me rough "
+        "dates and a budget and I'll narrow it to two') or one pointed "
+        "offer ('Want the Chiang Mai option mapped day by day?'). "
+        "Specific forward motion is not filler; boilerplate is.\n\n"
         "SHAPE THE ANSWER SO IT CAN BE SCANNED — never one dense slab:\n"
         "- Short paragraphs, two or three sentences each, with a blank "
         "line between them. A paragraph longer than four sentences must "
@@ -151,8 +168,16 @@ SYSTEM_PROMPT = {
         "sentence would do.\n\n"
         "When you don't know, say so plainly. NEVER "
         "invent verifiable specifics — phone numbers, street addresses, "
-        "business hours, prices at a specific place, URLs. If you don't "
-        "have real data for one, say exactly that and point at where to "
+        "business hours, prices at a specific place, URLs — and NEVER "
+        "invent named things: a business, hotel, retreat, program, event "
+        "or product you cannot vouch actually exists. Recommending "
+        "'Blooming Lotus in Ubud' is only allowed if Blooming Lotus is "
+        "real; otherwise describe the CATEGORY and where to find it "
+        "('Ubud has a dozen week-long yoga retreats in the $900-1,400 "
+        "range — Bookretreats or Tripaneer list them with reviews'). "
+        "Never dress invention up as experience — no 'tried-and-tested', "
+        "'highly rated' or 'popular' unless real data says so. If you "
+        "don't have real data, say exactly that and point at where to "
         "check; a made-up phone number is worse than no answer. When "
         "stakes are real (health, money, code), be rigorous.\n\n"
         "Example of the register for a quick ask —\n"
@@ -1081,6 +1106,19 @@ _FRESH_WORDS = (
     "this weekend", "in stock", "wait time", "happening", "closes",
     "closing time", "opening time",
 )
+# arranging/booking something real: without live data the model invents
+# named retreats with cohort dates and prices ("Soulstice", "Nomad Nest"
+# — seen live). Needs BOTH an arranging verb and a bookable noun, so
+# "recommend a sorting algorithm" stays local. Named so the answer path
+# can also route these to the DEEP search — real program names and
+# prices live in listing pages, not 200-char snippets.
+_BOOKING_RX = re.compile(
+    r"\b(arrange|book|recommend|suggest|find|plan|help\s+me\s+"
+    r"(find|pick|choose))\b.*\b(retreats?|hostels?|hotels?|"
+    r"resorts?|airbnbs?|tours?|trips?|flights?|restaurants?|"
+    r"bars?|caf[eé]s?|classes|workshops?|events?|festivals?|"
+    r"concerts?|spas?|gyms?|studios?|coworking)\b", re.S)
+
 _FRESH_PATTERNS = (
     re.compile(r"\b20[2-9]\d\b"),                 # a specific modern year
     re.compile(r"\bwho\s+is\s+the\s+(current|new)\b"),
@@ -1090,6 +1128,7 @@ _FRESH_PATTERNS = (
     re.compile(r"\b(out|available|released)\s+yet\b"),
     re.compile(r"\b(is|are|when)\b.*\b(open|closed?)\b"),
     re.compile(r"\bwhat\s+time\b.*\b(open|close)"),
+    _BOOKING_RX,
 )
 # never search these — they're about the conversation, not the world
 _NO_SEARCH = re.compile(
@@ -2729,7 +2768,12 @@ SYNTH_INSTRUCTION = (
     "information plainly.\n"
     "VOICE — follow all of these:\n"
     "- Open with the answer itself. Never restate the question, never "
-    "start with filler like 'Great question' or 'Certainly'.\n"
+    "start with filler like 'Great question' or 'Certainly', never a "
+    "title or heading — the first line is a plain sentence spoken to "
+    "the person, matching their register.\n"
+    "- Drop any named business, program or price no draft can vouch is "
+    "real, and any 'tried-and-tested'-style fake vouching — keep the "
+    "honest category instead.\n"
     "- Shape it to be scanned: short paragraphs separated by blank "
     "lines, the key name or number in **bold**, a short list only for "
     "real options or steps. Never one dense block.\n"
@@ -2894,8 +2938,18 @@ def _detruncate(text: str) -> str:
 REVISE_INSTRUCTION = (
     "Below is your own first draft answer to a question. Rewrite it into "
     "the best answer you are capable of:\n"
-    "- fix anything inaccurate or vague; add the concrete specifics, "
-    "names, numbers and examples the draft was missing\n"
+    "- fix anything inaccurate or vague; add concrete specifics, names, "
+    "numbers and examples ONLY where you are certain they are true — a "
+    "plausible-sounding invented date, name or event is the worst edit "
+    "you can make. Cut any specific in the draft you suspect is wrong "
+    "rather than keeping it; where you're unsure, stay general\n"
+    "- if the draft opens with a title or heading, delete it — the "
+    "first line must be a plain sentence spoken to the person, in "
+    "their register (casual question, casual answer)\n"
+    "- delete any named business, program, retreat or price the draft "
+    "cannot vouch is real, and any fake vouching ('tried-and-tested', "
+    "'highly rated'); replace with the honest category and where to "
+    "find real listings\n"
     "- match the length to the question: tighten a simple answer to its "
     "essentials, deepen a substantial one\n"
     "- SHAPE it to be scanned: short paragraphs with blank lines "
@@ -2903,7 +2957,12 @@ REVISE_INSTRUCTION = (
     "when it is genuinely a set of options or steps, a table when the "
     "content is tabular. Break up any paragraph over four sentences.\n"
     "- cut filler, repetition, restating of the question, and any "
-    "closing summary or offer to help further\n"
+    "closing summary or generic offer to help — but KEEP a specific "
+    "closing question that asks for details needed to keep going "
+    "(dates, budget); that's momentum, not filler\n"
+    "- cut any mention of 'snippets', 'search results', 'excerpts' or "
+    "'live data' — the reader never sees those; state the facts as "
+    "your own knowledge\n"
     "- keep it flowing prose in a confident, natural voice\n"
     "Output ONLY the improved answer itself. Never begin with a preamble "
     "like 'Here is the improved answer' or 'Here's a rewritten version' — "
@@ -4537,6 +4596,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                        if m in MODEL_ROUTES]
         if not council:
             council = [model_name]
+        # a tier request arrives with model="" — the router matches on
+        # model_name, and an empty one fell through to the smallest-cached
+        # fallback: the header said Gemma while Llama 1B answered (seen
+        # live). The resolved council leader IS the model.
+        model_name = model_name or (council[0] if council[0:] else "")
         prompt = messages[-1]["content"] if messages else ""
 
         # a selected AGENT owns the request: its best installed model, its
@@ -4597,6 +4661,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             prompt = vm["content"]
 
         # "/search …" forces a lookup; otherwise auto-search decides.
+        bookish = False
         query, forced = None, prompt.lower().startswith("/search")
         if forced:
             query = prompt[7:].strip()
@@ -4631,8 +4696,17 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     r"\bhours\b|\bopen\b|\bclosed?\b|\bphone\b|"
                     r"\baddress\b|\bmenu\b|\breservation", query, re.I))
                 matched = True
+                bookish = bool(_BOOKING_RX.search(query.lower()))
                 if placey:
                     snippets, matched = place_search(query)
+                elif bookish:
+                    # search the SENTENCE with the ask, not the whole
+                    # message — "I'm chronically burned out. can you
+                    # arrange a retreat in southeast asia" searched whole
+                    # surfaced burnout clinics in Switzerland, not Bali
+                    srch = next((s for s in re.split(r"(?<=[.?!])\s+", query)
+                                 if _BOOKING_RX.search(s.lower())), query)
+                    snippets = run_search_deep(srch, pages=3)
                 else:
                     snippets = run_search(query)
                 if placey and matched:
@@ -4677,44 +4751,73 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 elif placey:
                     # nothing in any engine mentions the place — a flat
                     # "couldn't find any information" is a dead end for the
-                    # user; be a local who's honest AND still helpful
+                    # user; be a local who's honest AND still helpful.
+                    # The first sentence is DICTATED (the code knows the
+                    # entity) — asked politely, the model opened with
+                    # "Two familiar ones:" on a compliance coin-flip.
+                    # last term is the locality, the rest is the name:
+                    # "qzxvbn cafe bushwick" -> "Qzxvbn Cafe" in "Bushwick"
+                    pt = _place_terms(query).split()
+                    ent = (" ".join(pt[:-1]) or pt[0]).title() if pt \
+                        else "that"
+                    loc = (" in " + pt[-1].title()) if len(pt) > 1 else ""
                     strictness = (
-                        "IMPORTANT: none of the results above actually "
-                        "mention the place the user asked about — do not "
-                        "pretend they do.\n"
-                        "Answer in this spirit, in your own words (this "
-                        "example is for a DIFFERENT query, 'is milano's "
-                        "in ridgewood open'):\n"
-                        "\"I can't find a spot called Milano's in "
-                        "Ridgewood — it might go by a different name or "
-                        "only live on Instagram. Closest thing I see is "
-                        "**Milano Market** on Fresh Pond Rd. Got the "
-                        "exact spelling or a cross street? I'll take "
-                        "another look.\"\n"
-                        "Three beats: can't find it by that name; the "
-                        "closest one or two REAL results if any are "
-                        "genuinely similar (skip that beat otherwise); "
-                        "one short question to pin it down. Under 80 "
-                        "words. Never invent hours, phone numbers or "
-                        "addresses. Milano's, Milano Market and Ridgewood "
-                        "belong to the example ONLY — never mention them; "
-                        "use the place and neighborhood from the PROMPT "
-                        "below.\n"
-                        "Two hard rules: the FIRST sentence must say you "
-                        "can't find a place by that name, and the LAST "
-                        "sentence must be a question ending in '?'. Never "
-                        "present other places as if they were the answer."
-                        "\n")
+                        "IMPORTANT: nothing you found actually mentions "
+                        "the place the user asked about. Do not pretend "
+                        "it does, and never present other places as if "
+                        "they were the answer.\n"
+                        "Write EXACTLY this reply:\n"
+                        "First sentence, word for word: \"I can't find a "
+                        "spot called %s%s — it might go by a different "
+                        "name or only live on Instagram or Google "
+                        "Maps.\"\n" % (ent, loc) +
+                        "Middle, ONLY if one or two genuinely similar "
+                        "real places appear in what you found: each as "
+                        "'**Name** — what it is'. Otherwise skip the "
+                        "middle. Never invent hours, phone numbers or "
+                        "addresses.\n"
+                        "Last sentence, word for word: \"Got the exact "
+                        "spelling or a cross street? I'll take another "
+                        "look.\"\n")
+                elif bookish:
+                    # thin snippets + an eager 4-bit model = invented
+                    # sub-programs, participant caps and price tables
+                    # dressed as fact (seen live, twice)
+                    strictness = (
+                        "Name ONLY businesses, programs, prices and "
+                        "dates that appear in what you found — never "
+                        "add one it doesn't contain, and never invent "
+                        "details like group sizes or start dates. Where "
+                        "what you found is thin, recommend the honest "
+                        "CATEGORY and the listing site to browse (one "
+                        "you actually found). Speak as yourself — 'I "
+                        "found', 'I can see' — never 'the results', "
+                        "'the snippets' or 'the excerpt you shared'; "
+                        "the reader never sees those.\n"
+                        "Shape: open with ONE human sentence to the "
+                        "person in their own register — if they shared "
+                        "something personal (burned out, heartbroken), "
+                        "meet it in a clause; never open with a heading "
+                        "or a listing. Then the real options, honestly "
+                        "labeled. Close by asking for the one or two "
+                        "details you'd need to narrow it down.\n")
                 else:
                     strictness = ""
                 # data FIRST, instructions LAST — an instruction buried
                 # before 4KB of scraped pages gets forgotten, and the
                 # model answers by pasting the menu (seen live)
+                # vocabulary matters: when this block said "results" and
+                # "snippets", answers said "the snippets show…" — the
+                # model parrots whatever the scaffolding calls things.
+                # "What you just found" echoes back as "I found", which
+                # is exactly the voice we want.
                 messages[-1] = {
                     "role": "user",
                     "content": (
-                        "You have internet access. Live results for "
-                        f"'{query}':\n{snippets}\n\n{strictness}"
+                        "What you just found on the web about "
+                        f"'{query}' — the reader can NEVER see this "
+                        "block, so restate anything you use:\n"
+                        f"{snippets}\n\n{strictness}"
                         f"PROMPT: {query}"
                     ),
                 }
@@ -4849,8 +4952,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     status("turbo unavailable — running locally")
                 ftext = fleet_run(lbl, full_messages, status) \
                     if not images else ""
+                # searched answers were EXCLUDED from the polish pass, so
+                # every live-data reply was a single take — that's where
+                # the sloppy ones came from. Bookish (recommendations)
+                # answers now get the rewrite too, fed the same grounded
+                # message so the reviser can check names against data.
                 polish = (load_prefs(None).get("polish", True)
-                          and not images and not query
+                          and not images and (not query or bookish)
                           and _is_substantive(prompt))
                 if ftext:
                     emit(ftext)
@@ -4868,12 +4976,18 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         draft = ""
                     if draft and not _looks_degenerate(draft):
                         status(f"{lbl} is sharpening the answer")
+                        # for a searched answer the "question" is the
+                        # grounded message (live data + rules) — a
+                        # reviser that can't see the data can't tell a
+                        # real retreat from an invented one
+                        src_q = (full_messages[-1]["content"][:5000]
+                                 if query else prompt)
                         _stream_guarded(
                             lbl,
                             [full_messages[0],
                              {"role": "user",
                               "content": REVISE_INSTRUCTION
-                              + "QUESTION: " + prompt
+                              + "QUESTION: " + src_q
                               + "\n\nFIRST DRAFT:\n" + draft[:6000]}],
                             emit, status, draft,
                             "showing the first draft")
