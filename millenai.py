@@ -344,11 +344,51 @@ def cloud_conf():
     return None
 
 
+def _anthropic_stream(c: dict, messages: list, emit) -> bool:
+    """Anthropic speaks its own dialect: x-api-key, a version header, a
+    hoisted system prompt, and content_block_delta events."""
+    sys_txt = "\n\n".join(m["content"] for m in messages
+                           if m.get("role") == "system")
+    turns = [{"role": m["role"], "content": m["content"]}
+             for m in messages if m.get("role") in ("user", "assistant")]
+    body = {"model": c["model"], "max_tokens": 4096, "stream": True,
+            "messages": turns}
+    if sys_txt:
+        body["system"] = sys_txt
+    req = urllib.request.Request(
+        c["base"].rstrip("/") + "/messages", data=json.dumps(body).encode(),
+        headers={"Content-Type": "application/json",
+                 "x-api-key": c["key"],
+                 "anthropic-version": "2023-06-01",
+                 "User-Agent": "MillenAI/%s" % APP_VERSION})
+    got = False
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            for raw in r:
+                line = raw.decode("utf-8", "replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                try:
+                    d = json.loads(line[5:].strip())
+                except Exception:
+                    continue
+                if d.get("type") == "content_block_delta":
+                    tok = (d.get("delta") or {}).get("text") or ""
+                    if tok:
+                        got = True
+                        emit(tok)
+    except Exception:
+        return got
+    return got
+
+
 def cloud_stream(messages: list, emit) -> bool:
     """Stream from the configured cloud endpoint. False = fall back local."""
     c = cloud_conf()
     if not c:
         return False
+    if "anthropic.com" in c.get("base", ""):
+        return _anthropic_stream(c, messages, emit)
     payload = json.dumps({"model": c["model"], "messages": messages,
                           "max_tokens": 4096, "temperature": 0.75,
                           "stream": True}).encode()

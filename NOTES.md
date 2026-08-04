@@ -977,3 +977,13 @@ that found all three: re-execute the page's own script text via
   CPU and crawl. Now: budget = min(RAM*0.75, VRAM*1.25) whenever
   nvidia-smi reports a card (cached; Mac unaffected). Simulated:
   165GB+3090 -> 30 GB budget, flagship Qwen 35B MoE (fits the card).
+- 2.16.2 TURBO PROVIDERS: added Anthropic's native dialect to
+  cloud_stream (x-api-key + anthropic-version + /v1/messages +
+  content_block_delta SSE; system prompt hoisted out of messages) and
+  Google Gemini via its OpenAI-compatible endpoint (needs no new code).
+  turbo.sh now offers Groq / Gemini / Claude / xAI / OpenRouter /
+  Cloudflare and tests each in the right dialect.
+  NOTE: there is no free Claude API — it is paid per token, a Claude.ai
+  or Claude Code subscription does NOT grant API access, and proxying
+  subscription credentials would breach Anthropic's terms. Gemini's free
+  tier is the free frontier-class option.

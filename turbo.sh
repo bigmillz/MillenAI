@@ -30,10 +30,12 @@ cat <<'INTRO'
   Answers come from a cloud GPU instead of your Mac. Much faster,
   but your prompts leave this computer while it is on.
 
-  1  Groq          fastest, biggest free tier   console.groq.com/keys
-  2  xAI (Grok)    grok models, paid credits    console.x.ai
-  3  OpenRouter    many models, free tier       openrouter.ai/keys
-  4  Cloudflare    workers ai, free tier        dash.cloudflare.com
+  1  Groq          free, very fast, 120B       console.groq.com/keys
+  2  Google Gemini free tier, frontier-class    aistudio.google.com/apikey
+  3  Anthropic     Claude — PAID, best quality  console.anthropic.com
+  4  xAI (Grok)    grok models, paid credits    console.x.ai
+  5  OpenRouter    many models, free tier       openrouter.ai/keys
+  6  Cloudflare    workers ai, free tier        dash.cloudflare.com
 
 INTRO
 
@@ -42,13 +44,17 @@ NAME="Groq 120B"; BASE="https://api.groq.com/openai/v1"
 MODEL="openai/gpt-oss-120b"
 
 PICK=""
-read -r -p "  provider [1-4, default 1]: " PICK || true
+read -r -p "  provider [1-6, default 1]: " PICK || true
 case "${PICK:-1}" in
-  2) NAME="xAI Grok";   BASE="https://api.x.ai/v1"
+  2) NAME="Gemini";     BASE="https://generativelanguage.googleapis.com/v1beta/openai"
+     MODEL="gemini-2.5-flash" ;;
+  3) NAME="Claude";     BASE="https://api.anthropic.com/v1"
+     MODEL="claude-sonnet-4-5" ;;
+  4) NAME="xAI Grok";   BASE="https://api.x.ai/v1"
      MODEL="grok-4-fast" ;;
-  3) NAME="OpenRouter"; BASE="https://openrouter.ai/api/v1"
+  5) NAME="OpenRouter"; BASE="https://openrouter.ai/api/v1"
      MODEL="meta-llama/llama-3.3-70b-instruct:free" ;;
-  4) NAME="Cloudflare Workers AI"
+  6) NAME="Cloudflare Workers AI"
      CFACC=""
      read -r -p "  cloudflare account id: " CFACC || true
      BASE="https://api.cloudflare.com/client/v4/accounts/${CFACC}/ai/v1"
@@ -63,10 +69,18 @@ echo
 [[ -n "$KEY" ]] || { echo "  no key given — nothing changed."; exit 1; }
 
 echo "  testing $NAME ($MODEL)…"
-RESP=$(curl -s -m 25 "$BASE/chat/completions" \
-  -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
-  -d "{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"say ok\"}]}" \
-  || true)
+if [[ "$BASE" == *anthropic.com* ]]; then
+  RESP=$(curl -s -m 25 "$BASE/messages" \
+    -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" \
+    -H "Content-Type: application/json" \
+    -d "{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"say ok\"}]}" \
+    || true)
+else
+  RESP=$(curl -s -m 25 "$BASE/chat/completions" \
+    -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+    -d "{\"model\":\"$MODEL\",\"max_tokens\":16,\"messages\":[{\"role\":\"user\",\"content\":\"say ok\"}]}" \
+    || true)
+fi
 
 if ! grep -q '"content"' <<<"$RESP"; then
   echo "  that did not work. the provider said:"
