@@ -7866,41 +7866,17 @@ async function announceModels(){
     const missing=st.models.filter(m=>m.status!=="ready"&&m.supported!==false);
     const fresh=missing.filter(m=>seen.indexOf(m.label)<0);
 
-    if(fresh.length){                 // tier 1: genuinely new — announce once
-      const gb=fresh.reduce((a,m)=>a+m.est_gb,0);
-      title.textContent="New models available";
-      $("#up-detail").textContent="This version adds models you don\u2019t have yet.";
-      $("#new-list").innerHTML=fresh.slice(0,4).map(m=>
-        "<div class='mrow'><span class='mname'>"+esc(m.label)+
-        "</span><span class='msize'>"+m.est_gb+" GB</span></div>").join("")+
-        (fresh.length>4?"<div class='mmore'>+"+(fresh.length-4)+" more</div>":"");
-      $("#new-get").textContent="Download \u00b7 "+gb.toFixed(1)+" GB";
-      $("#new-off").hidden=true;
-      veil.hidden=false;
-      $("#new-skip").onclick=async()=>{veil.hidden=true;await stamp();};
-      $("#new-get").onclick=async()=>{
-        veil.hidden=true;await stamp();
-        await fetch("/api/model/download",{method:"POST",
-          headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({labels:fresh.map(m=>m.label)})});
-        openSetup();                  // watch them come down
-      };
-      return;
-    }
-
-    // tier 2: the daily nudge
-    if(prefs.remind_models_off)return;
+    // ONE SENTENCE, per Patrick — the Basic/Pro/Max panel does the rest
+    if(prefs.remind_models_off&&!fresh.length)return;
     if(!missing.length)return;
-    if(Date.now()-(prefs.remind_models_ts||0)<REMIND_GAP)return;
+    if(!fresh.length&&
+       Date.now()-(prefs.remind_models_ts||0)<REMIND_GAP)return;
     title.textContent="More models available";
-    $("#up-detail").textContent="Your computer can run "+missing.length+
-      " more model"+(missing.length===1?"":"s")+".";
-    $("#new-list").innerHTML=missing.slice(0,4).map(m=>
-      "<div class='mrow'><span class='mname'>"+esc(m.label)+
-      "</span><span class='msize'>"+m.est_gb+" GB</span></div>").join("")+
-      (missing.length>4?"<div class='mmore'>+"+(missing.length-4)+" more</div>":"");
-    $("#new-get").textContent="Browse models";
-    $("#new-off").hidden=false;
+    $("#up-detail").textContent=
+      "More models to enhance your experience are available.";
+    $("#new-list").innerHTML="";
+    $("#new-get").textContent="See what's new";
+    $("#new-off").hidden=!!fresh.length;
     veil.hidden=false;
     $("#new-skip").onclick=async()=>{veil.hidden=true;await stamp();};
     $("#new-get").onclick=async()=>{veil.hidden=true;await stamp();openSetup();};
