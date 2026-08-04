@@ -5557,8 +5557,16 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   width:4px;height:9px;border:solid #14161c;
   border-width:0 2.2px 2.2px 0;transform:rotate(45deg)}
 #turbo-row,#contrib-row,#nolimits-row{
-  align-items:center;gap:10px;font-size:12.5px;color:var(--text);
-  padding:7px 2px}
+  display:flex;align-items:center;gap:10px;font-size:13px;
+  color:var(--text);padding:8px 2px;cursor:pointer;line-height:1.4}
+#turbo-row[hidden]{display:none}
+.hint{
+  font-style:normal;width:15px;height:15px;flex:none;cursor:help;
+  border:1px solid var(--line);border-radius:50%;color:var(--faint);
+  font-size:10px;line-height:13px;text-align:center;
+  font-family:var(--helv);margin-left:auto;
+}
+.hint:hover{color:var(--text);border-color:var(--dim)}
 
 #fleet-box{margin:14px 0 4px;text-align:left}
 #fleet-own{font-family:var(--mono);font-size:10.5px;color:var(--dim);
@@ -5973,11 +5981,11 @@ __AGENT_ROWS__
       placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
     <button class="about-btn" id="persona-save">Save preferences</button>
     <label id="contrib-row"><input type="checkbox" id="contrib">
-      Contribute GPU power — answer friends&rsquo; questions while this
-      machine is idle</label>
+      <span>Contribute GPU power</span><i class="hint" id="contrib-hint"
+      title="When this machine is idle, it answers questions for friends on MillenAI — and theirs answer yours. Nothing runs while you are using it.">i</i></label>
     <label id="turbo-row" hidden><input type="checkbox" id="turbo">
-      Use cloud power — faster answers from the cloud (prompts leave this
-      computer)</label>
+      <span>Use cloud power</span><i class="hint" id="turbo-hint"
+      title="Answers come from a cloud GPU instead of this Mac — much faster, but your prompts leave this computer while it is on.">i</i></label>
     <div id="fleet-box">
       <div id="fleet-own" hidden><span id="fleet-n"></span></div>
       <div id="fleet-pending"></div>
@@ -7780,9 +7788,9 @@ async function openAbout(){
       try{
         const cs=await(await fetch("/api/cloud")).json();
         $("#turbo-row").hidden=!cs.configured;
-        if(cs.name)$("#turbo-row").lastChild.textContent=
-          " Use cloud power \u2014 "+cs.name
-          +" (faster; prompts leave this computer)";
+        if(cs.name)$("#turbo-hint").title=
+          "Answers come from "+cs.name+" instead of this Mac \u2014 much "
+          +"faster, but your prompts leave this computer while it is on.";
       }catch(e){}
       $("#contrib-url").value=pr2.contrib_url||"";
       $("#contrib-state").textContent=
