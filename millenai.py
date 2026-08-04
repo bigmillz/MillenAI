@@ -5608,14 +5608,14 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
   -webkit-background-clip:text;background-clip:text;color:transparent;
   filter:drop-shadow(0 4px 26px rgba(140,150,255,.5))}
 #lfg[hidden]{display:none}
-#lfg.go{animation:lfgPop 1.25s cubic-bezier(.16,.8,.24,1) forwards}
+#lfg.go{animation:lfgPop 2.6s cubic-bezier(.16,.8,.24,1) forwards}
 @keyframes lfgPop{
   0%{opacity:0;transform:translateX(-50%) scale(.55);filter:blur(10px)
      drop-shadow(0 4px 26px rgba(140,150,255,0))}
-  16%{opacity:1;transform:translateX(-50%) scale(1.08);filter:blur(0)
+  8%{opacity:1;transform:translateX(-50%) scale(1.08);filter:blur(0)
      drop-shadow(0 4px 26px rgba(140,150,255,.5))}
-  28%{transform:translateX(-50%) scale(1)}
-  68%{opacity:1;clip-path:inset(0 0 0 0)}
+  14%{transform:translateX(-50%) scale(1)}
+  84%{opacity:1;clip-path:inset(0 0 0 0)}
   100%{opacity:0;clip-path:inset(0 0 0 100%);
      transform:translateX(-50%) scale(1.03)}}
 /* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
@@ -7555,7 +7555,7 @@ async function bootSkyline(){
       if(hadBar&&!perf){
         const g=$("#lfg");
         if(g){g.hidden=false;g.classList.add("go");
-          setTimeout(()=>{g.hidden=true;g.classList.remove("go");},1350);}
+          setTimeout(()=>{g.hidden=true;g.classList.remove("go");},2700);}
       }
     }
     c.addEventListener("canplaythrough",reveal,{once:true});
