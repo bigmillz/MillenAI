@@ -971,3 +971,9 @@ that found all three: re-execute the page's own script text via
   REVISE + SYNTH calibrate too (complete beats long).
 - Turbo upgraded to openai/gpt-oss-120b on Groq (was llama-3.3-70b) —
   found via /models on the configured key; turbo.sh default matches.
+- 2.16.1 VRAM-AWARE SIZING: machine_budget_bytes used 75% of SYSTEM RAM,
+  which is right for Apple's unified pool and wrong for a discrete GPU —
+  a 165 GB PC with a 24 GB 3090 was offered a 120B that would spill to
+  CPU and crawl. Now: budget = min(RAM*0.75, VRAM*1.25) whenever
+  nvidia-smi reports a card (cached; Mac unaffected). Simulated:
+  165GB+3090 -> 30 GB budget, flagship Qwen 35B MoE (fits the card).

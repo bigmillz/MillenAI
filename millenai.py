@@ -237,13 +237,45 @@ def hw_class(mem_gb: float) -> str:
     return "titan"
 
 
+_vram = {"b": None}
+
+
+def gpu_vram_bytes():
+    """Total VRAM on a discrete NVIDIA GPU, or 0. Cached — nvidia-smi is
+    slow enough that per-model calls would be felt."""
+    if _vram["b"] is not None:
+        return _vram["b"]
+    _vram["b"] = 0
+    if not IS_MAC:
+        try:
+            out = subprocess.run(
+                ["nvidia-smi", "--query-gpu=memory.total",
+                 "--format=csv,noheader,nounits"],
+                capture_output=True, text=True, timeout=4).stdout
+            mb = max(int(x) for x in out.split() if x.strip().isdigit())
+            _vram["b"] = mb * 1024 * 1024
+        except Exception:
+            _vram["b"] = 0
+    return _vram["b"]
+
+
 def machine_budget_bytes():
-    """What this machine can ever hold resident: 75% of total memory (the
-    practical wired-limit on Apple silicon; a sane ceiling elsewhere).
+    """What this machine can hold resident and still be FAST.
+
+    Apple silicon shares one pool, so 75% of total memory is the real
+    wired ceiling. A PC with a discrete GPU is different: what matters is
+    VRAM, not the 165 GB of system RAM sitting behind it — sizing by RAM
+    would offer a 120B to a 24 GB 3090, which technically runs and then
+    crawls at a token a second with most layers spilled to CPU. Budget
+    the card, plus a modest spill allowance, and cap by system RAM.
     None when psutil is missing — then nothing is hidden."""
     if not HAS_PSUTIL:
         return None
-    return int(psutil.virtual_memory().total * 0.75)
+    ram = int(psutil.virtual_memory().total * 0.75)
+    vram = gpu_vram_bytes()
+    if vram:
+        return int(min(ram, vram * 1.25))
+    return ram
 
 
 _no_limits = {"v": None}
@@ -805,6 +837,12 @@ def plan_labels(plan: str) -> list:
 # who merges in combine mode — strongest first
 MERGE_RANK = sorted((l for l in MODEL_ROUTES),
                     key=lambda l: -MODEL_INFO[l]["mem"])
+
+
+def budget_label() -> str:
+    """Human note about what the ladder was sized against."""
+    v = gpu_vram_bytes()
+    return ("%d GB VRAM" % round(v / 1e9)) if v else ""
 
 
 def chip_name() -> str:
