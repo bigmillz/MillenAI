@@ -1187,3 +1187,12 @@ that found all three: re-execute the page's own script text via
   "free LLM API" is someone's abused proxy. The honest answers are the
   Community GPU fleet (no signup, already built) and Turbo with a
   2-minute free key. Documented here so we stop re-asking.
+
+## 3.8.1 — the payoff line
+- When the loading bar finishes a real download, "LFG, BITCH." pops in
+  rainbow gradient where the bar stood and wipes itself away in 1.25s
+  — fires ONLY after an actual wait (hadBar check), never on instant
+  starts, never in performance mode.
+- The flat grey band across the bottom was #composer-wrap's opaque
+  --bg gradient painting over the video — now a translucent scrim
+  (rgba(5,6,10,.62)) so the backdrop runs to the window edge.

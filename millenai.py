@@ -5582,6 +5582,28 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
 #skyload .lbl{margin-top:13px;font-size:13px;letter-spacing:.24em;
   text-transform:uppercase;color:#dfe3ee;font-family:var(--mono);
   text-shadow:0 2px 14px rgba(0,0,0,.7)}
+/* the payoff line: pops the instant the bar finishes, wipes itself
+   away — fast enough to catch, never long enough to stick */
+#lfg{position:fixed;left:calc(50% + var(--sbw,384px)/2);top:57%;
+  transform:translateX(-50%);z-index:5;pointer-events:none;
+  font-family:'Space Grotesk',sans-serif;font-weight:700;
+  font-size:clamp(34px,4.6vw,58px);letter-spacing:.04em;
+  white-space:nowrap;
+  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 4px 26px rgba(140,150,255,.5))}
+#lfg[hidden]{display:none}
+#lfg.go{animation:lfgPop 1.25s cubic-bezier(.16,.8,.24,1) forwards}
+@keyframes lfgPop{
+  0%{opacity:0;transform:translateX(-50%) scale(.55);filter:blur(10px)
+     drop-shadow(0 4px 26px rgba(140,150,255,0))}
+  16%{opacity:1;transform:translateX(-50%) scale(1.08);filter:blur(0)
+     drop-shadow(0 4px 26px rgba(140,150,255,.5))}
+  28%{transform:translateX(-50%) scale(1)}
+  68%{opacity:1;clip-path:inset(0 0 0 0)}
+  100%{opacity:0;clip-path:inset(0 0 0 100%);
+     transform:translateX(-50%) scale(1.03)}}
 /* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
    follows it edge-for-edge, unlike the wordmark's tighter window */
 body.painting #sky-color{
@@ -5899,7 +5921,9 @@ body:not(.perf) .caret{animation:blink .9s step-end infinite}
 #composer-wrap{
   position:absolute;left:0;right:0;bottom:0;z-index:2;
   padding:0 24px 22px;pointer-events:none;
-  background:linear-gradient(transparent,var(--bg) 55%);
+  /* translucent scrim, not solid --bg — the flat grey band across the
+     bottom of the backdrop read as a rendering bug (seen live) */
+  background:linear-gradient(transparent,rgba(5,6,10,.62) 78%);
 }
 body.perf #composer-wrap{background:var(--bg);border-top:1px solid var(--line-soft);padding-top:14px}
 #skyline video{transition:transform 1.1s cubic-bezier(.22,.61,.36,1);
@@ -6428,6 +6452,7 @@ __AGENT_ROWS__
     <div class="track"><div class="fill"></div></div>
     <div class="lbl">loading the backdrop</div>
   </div>
+<div id="lfg" hidden>LFG, BITCH.</div>
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
@@ -7509,7 +7534,14 @@ async function bootSkyline(){
     let shown=false;
     function reveal(){
       if(shown)return;shown=true;
+      const hadBar=bar&&!bar.hidden;
       hideBar();skyline.hidden=false;
+      // the payoff: only after a real wait, never on an instant start
+      if(hadBar&&!perf){
+        const g=$("#lfg");
+        if(g){g.hidden=false;g.classList.add("go");
+          setTimeout(()=>{g.hidden=true;g.classList.remove("go");},1350);}
+      }
     }
     c.addEventListener("canplaythrough",reveal,{once:true});
     c.addEventListener("error",()=>{
