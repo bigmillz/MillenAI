@@ -637,9 +637,14 @@ TIERS = {
     # it the quick path; the ladder still gives every machine its best.
     "Fast": {
         "icon": "\u26a1\ufe0f", "desc": "the strongest model that fits",
+        # Gemma 4 26B outranks the Qwen 35B MoE deliberately (A/B'd
+        # 2026-08-04): identical accuracy on facts, extraction and trap
+        # questions, but Gemma never collapsed, never slop-looped, and
+        # held 1-6s while Qwen's hidden thinking mode stalled it for
+        # 15-19s on random turns. Same brains, steadier hand.
         "picks": ["Qwen 3 235B MoE", "GPT-OSS 120B", "Llama 4 Scout",
-                  "Llama 3.3 70B", "Qwen 3.6 35B MoE", "Qwen 3.6 27B",
-                  "GPT-OSS 20B", "Gemma 4 26B", "Gemma 4 12B",
+                  "Llama 3.3 70B", "Gemma 4 26B", "Qwen 3.6 27B",
+                  "Qwen 3.6 35B MoE", "GPT-OSS 20B", "Gemma 4 12B",
                   "Phi-4 14B", "Mistral Nemo 12B", "Llama 3.1 8B",
                   "Llama 3.2 3B", "Gemma 2 2B", "Llama 3.2 1B"],
         "count": 1,
@@ -650,8 +655,8 @@ TIERS = {
         # has installed autoselects \u2014 a Titan rig leads with the 235B, a
         # 16 GB laptop lands on Phi-4, nobody configures anything
         "picks": ["Qwen 3 235B MoE", "GPT-OSS 120B", "Llama 4 Scout",
-                  "Llama 3.3 70B", "Qwen 3.6 35B MoE", "GPT-OSS 20B",
-                  "Gemma 4 26B", "Phi-4 14B", "DeepSeek R1 7B",
+                  "Llama 3.3 70B", "Gemma 4 26B", "Qwen 3.6 35B MoE",
+                  "GPT-OSS 20B", "Phi-4 14B", "DeepSeek R1 7B",
                   "Qwen 2.5 Coder 14B", "Gemma 4 12B"],
         "count": 3,
     },
@@ -4631,16 +4636,38 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 else:
                     snippets = run_search(query)
                 if placey and matched:
-                    strictness = (
+                    # the closed-day check is MECHANICAL, not left to the
+                    # model: whether "Closed on Tuesday" survives into a
+                    # given run's snippets — and whether a 4-bit model
+                    # notices it — is a coin flip (Lucali came back "open
+                    # tonight 5-11pm" on a Tuesday, twice in three runs)
+                    wd = time.strftime("%A")
+                    closed_hit = re.search(
+                        r"(close[sd]?[^.\n]{0,40}\b%s|\b%s[^.\n]{0,15}"
+                        r"close[sd]?)" % (wd[:3], wd[:3]), snippets, re.I)
+                    warn = ("READ FIRST: today is %s, and a source above "
+                            "says it is CLOSED on %ss. Unless a source "
+                            "clearly contradicts that, your first "
+                            "sentence must be exactly: \"Closed tonight "
+                            "— it's %s, and they're closed %ss.\" Then "
+                            "continue the shape below.\n"
+                            % (wd, wd, wd, wd)) if closed_hit else (
+                            "Today is %s — never name any other weekday "
+                            "as today.\n" % wd)
+                    strictness = warn + (
                         "The data above is your ONLY source for hours, "
                         "phone numbers, addresses and prices — never "
                         "estimate or invent one. Write ENTIRELY in your "
                         "own words: pasting any line, menu or form text "
                         "from the data is a failure.\n"
                         "ANSWER SHAPE, exactly:\n"
-                        "1. First sentence = the verdict: open or closed "
-                        "tonight, with the hours, if the data shows it "
-                        "(mind today's weekday for closed-days).\n"
+                        "1. First sentence = the verdict, and it must NAME "
+                        "today's weekday ('Closed tonight — it's Tuesday, "
+                        "and they close Tuesdays' / 'Open tonight, Friday "
+                        "hours are 5-11pm'). Before writing it, check "
+                        "every source for a closed-day that matches "
+                        "today's weekday — a listed 'Closed Monday and "
+                        "Tuesday' beats a generic hours range.\n"
                         "2. Then at most three options as short bold-name "
                         "lines: **Name** — what it is — tonight's hours.\n"
                         "3. One practical heads-up if the data supports one. "
@@ -4672,7 +4699,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         "addresses. Milano's, Milano Market and Ridgewood "
                         "belong to the example ONLY — never mention them; "
                         "use the place and neighborhood from the PROMPT "
-                        "below.\n")
+                        "below.\n"
+                        "Two hard rules: the FIRST sentence must say you "
+                        "can't find a place by that name, and the LAST "
+                        "sentence must be a question ending in '?'. Never "
+                        "present other places as if they were the answer."
+                        "\n")
                 else:
                     strictness = ""
                 # data FIRST, instructions LAST — an instruction buried

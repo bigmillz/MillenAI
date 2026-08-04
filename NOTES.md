@@ -1062,3 +1062,26 @@ that found all three: re-execute the page's own script text via
 - The Milano's/Ridgewood worked example leaked into a real answer
   verbatim; the prompt now fences it ("belong to the example ONLY") and
   the smoketest asserts the fence holds.
+
+## 3.4 — Gemma takes the Fast slot
+- A/B'd Qwen 3.6 35B MoE vs Gemma 4 26B vs Phi-4 14B (facts, trick
+  math, noisy-data extraction, hallucination bait): accuracy IDENTICAL,
+  so the ladder decision came down to temperament. Qwen's hidden
+  thinking mode stalls random turns for 15-19s (the "0.9 tok/s" answer)
+  and it produced the phrase-loop slop; Gemma held 1-6s on everything,
+  never collapsed, followed shape instructions tighter. Phi-4: chatty,
+  ignores "just the line", 21s on facts — disqualified.
+- Fast and Thinking ladders now rank Gemma 4 26B above the Qwen MoE.
+  NOTE both are MoE (Gemma a4b = 4B active, Qwen A3B = 3B active) —
+  the "35B" badge is marketing; these are ~3-4B-activation brains.
+  A dense Qwen 3.6 27B might beat both but disk is 99% full (22GB
+  free), so it stays undownloaded and untested.
+- The closed-day check is MECHANICAL now: code scans the snippets for
+  "closed …Tue / Tue… closed" matching today's weekday and, on a hit,
+  dictates the exact verdict sentence. Lucali-on-a-Tuesday went from
+  right-1-in-3 to right-3-of-3; without the hit, the prompt still pins
+  today's weekday ("never name any other weekday as today" — a run
+  once said "It's closed tonight, Friday" on a Tuesday).
+- No-match shape got hard bookends for Gemma (first sentence = can't
+  find it, last sentence = a question) — it liked presenting nearby
+  cafes as if they were the answer.
