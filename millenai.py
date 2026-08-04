@@ -5013,8 +5013,9 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 #telemetry .t-head span{white-space:nowrap}
 #models-up{cursor:pointer;color:var(--dim);font-weight:700;
-  padding:0 4px;border:1px solid var(--line);border-radius:6px;
-  font-size:11px;line-height:1.5}
+  padding:3px 10px;border:1px solid var(--line);border-radius:7px;
+  font-size:12px;line-height:1.5;user-select:none}
+#models-up:active{transform:translateY(1px)}
 #models-up:hover{color:var(--text);border-color:var(--accent-hot)}
 #telemetry .t-head .live{color:var(--text);white-space:nowrap}
 .meter-row{margin-bottom:9px}
@@ -8018,15 +8019,10 @@ upGo.addEventListener("click",async()=>{
     }
   },700);
 });
-const DAY=86400000;
-function maybeCheckUpdate(){
-  const last=parseInt(localStorage.getItem("millen.upcheck")||"0",10);
-  if(Date.now()-last<DAY)return;
-  localStorage.setItem("millen.upcheck",Date.now());
-  checkUpdate();
-}
-maybeCheckUpdate();                 // once on launch, at most once a day
-setInterval(maybeCheckUpdate,3600000);
+checkUpdate();                      // ALWAYS on launch — a stale build
+                                    // was the root of most "X doesn't
+                                    // work" reports (seen live, often)
+setInterval(checkUpdate,3600000);   // and hourly while running
 
 input.focus();
 </script>
