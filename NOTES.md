@@ -987,3 +987,9 @@ that found all three: re-execute the page's own script text via
   or Claude Code subscription does NOT grant API access, and proxying
   subscription credentials would breach Anthropic's terms. Gemini's free
   tier is the free frontier-class option.
+- 2.17.3 DUPLICATE-ID TRAP (again): #about-card is shared by THREE
+  dialogs (settings, update, new-models). The settings restructure moved
+  padding into #about-head/#about-body/#about-foot, which the small
+  cards don't have — so their buttons ran to the card edge. Scoped
+  padding added via #update-veil/#new-veil #about-card. Renaming those
+  ids is still the real fix.

@@ -5487,6 +5487,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   box-shadow:0 24px 80px rgba(0,0,0,.6);
   display:flex;flex-direction:column;overflow:hidden;
 }
+/* the small dialogs (update, new models) have no head/body/foot — give
+   them their own padding, or their buttons run to the card's edge */
+#update-veil #about-card,#new-veil #about-card{
+  padding:24px 22px 18px;max-height:none;
+}
+#update-veil .about-btn,#new-veil .about-btn{margin-top:10px}
 #about-head{padding:22px 24px 12px;flex:none}
 #about-body{
   padding:0 24px;overflow-y:auto;flex:1 1 auto;min-height:0;
