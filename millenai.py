@@ -3837,7 +3837,7 @@ button.guest::after{display:none}
   <a class="gbtn primary" href="/auth/google">
     <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.4 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.4 5.8c4.4-4.1 7.2-10.1 7.2-17.5z"/><path fill="#FBBC05" d="M10.4 28.7a14.5 14.5 0 0 1 0-9.4l-7.8-6.1a24 24 0 0 0 0 21.6l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.3-5.6l-7.4-5.8c-2.1 1.4-4.8 2.3-7.9 2.3-6.3 0-11.7-3.9-13.6-9.5l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
     Continue with Google</a>
-  <button class="guest" onclick="guest()">Continue as guest</button>
+  <button class="guest" onclick="guest()">Continue as guest — 24h pass</button>
   <div class="err" id="e"></div>
   <a class="pinlink" id="pinlink" onclick="togglePin()">I have a name &amp; PIN</a>
   <form id="pinform" hidden onsubmit="go();return false">
@@ -3846,8 +3846,8 @@ button.guest::after{display:none}
            inputmode="numeric" placeholder="PIN (8+ digits)">
     <button>Continue</button>
   </form>
-  <div class="small" id="blurb">guest chats live in this browser.<br>
-       sign in with Google to keep them on every device.</div>
+  <div class="small" id="blurb">a guest pass lasts 24 hours in this
+       browser.<br>sign in with Google to keep chats on every device.</div>
 </div>
 <script>
 // DRIFTING MOTES: slow points of light rising through the scene — the
@@ -4483,14 +4483,20 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(body)
             return
         if self.path == "/api/guest":
-            # one tap, zero questions: a random private profile that lives
-            # in this browser's cookie (180 days). Google sign-in remains
-            # the way to keep chats across devices.
+            # one tap, zero questions: a TEMPORARY pass — the cookie lives
+            # 24 hours, the profile is marked and swept after a week of
+            # silence. Google sign-in remains the way to keep chats.
             uid = _user_id("guest", secrets.token_hex(12))
+            try:
+                d = os.path.join(app_dir(), "users", uid)
+                os.makedirs(d, exist_ok=True)
+                open(os.path.join(d, ".guest"), "w").close()
+            except Exception:
+                pass
             body = json.dumps({"ok": True}).encode()
             self.send_response(200)
             self.send_header("Set-Cookie",
-                             "millen_user=%s; Path=/; Max-Age=15552000; "
+                             "millen_user=%s; Path=/; Max-Age=86400; "
                              "HttpOnly; SameSite=Lax" % uid)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -7375,6 +7381,31 @@ const GREETINGS=[
   "This ain't Times Square. Real answers only.",
   "Big city, bigger questions.","You know how we do.",
   "Mad questions? Start with one.","Talk to me, Goose.",
+  "Bodega cat's asleep. I'm not.",
+  "Deli's got your sandwich. I got your questions.",
+  "Chopped cheese or answers? We got both.",
+  "Cash only? Nah, questions only.",
+  "Halal cart's got the line. I'm free right now.",
+  "Showtime. What time is it? SHOWTIME.",
+  "This is a Brooklyn-bound express. Ask away.",
+  "Stand clear of the closing doors — but ask first.",
+  "We are delayed because of train traffic ahead. Perfect time to ask.",
+  "Swipe again at this turnstile.",
+  "The G came on time once. Anything's possible.",
+  "Walk faster, talk faster, ask faster.",
+  "Alternate side parking's suspended. Ask anything.",
+  "The rats are organized. So am I.",
+  "Pigeons know things. So do I.",
+  "Rent's too high, questions are free.",
+  "Dollar slice energy — cheap, fast, hits the spot.",
+  "I'm walkin' here. But go ahead.",
+  "You lookin' at me? Good. Ask.",
+  "Fuhgeddaboudit — actually no, tell me about it.",
+  "Not for nothing, but what do you need?",
+  "Ayo, I got answers like Canal Street's got 'watches.'",
+  "Radiator's clanking, I'm cooking. What's up?",
+  "Stoop's open. Sit. Talk.",
+  "It's giving answers today.",
   // the plain-spoken handful
   "What's on your mind?","Where should we start?","Talk to me.",
   "Ask me anything.","What's cooking?","Fire away.","Hit me with it.",
@@ -7531,7 +7562,7 @@ function applyStatsPolling(){
   if(perf){
     if(statsTimer){clearInterval(statsTimer);statsTimer=null;}
   }else if(!statsTimer){
-    pollStats();statsTimer=setInterval(pollStats,1000);
+    pollStats();statsTimer=setInterval(pollStats,2000);
   }
 }
 applyStatsPolling();
@@ -7599,7 +7630,20 @@ async function pollEngines(){
     }
   }catch(e){}
 }
-pollEngines();setInterval(pollEngines,8000);
+pollEngines();setInterval(()=>{if(!document.hidden)pollEngines();},8000);
+// BACKGROUNDED = ASLEEP: a hidden window kept decoding 2K video and
+// polling telemetry around the clock. Nothing visible changes — it all
+// resumes the instant the window is back.
+document.addEventListener("visibilitychange",()=>{
+  const v=$("#sky-color");
+  if(document.hidden){
+    if(v&&!v.paused)v.pause();
+    if(statsTimer){clearInterval(statsTimer);statsTimer=null;}
+  }else{
+    if(v&&v.paused&&!skyline.hidden){const p=v.play();if(p&&p.catch)p.catch(()=>{});}
+    applyStatsPolling();
+  }
+});
 
 /* ------------------------------------------------- NYC skyline backdrop */
 // Apple's ATV aerial loops of New York, served by OUR OWN server from
@@ -7897,23 +7941,26 @@ starTick();
 // PARALLAX: the city leans a few px toward the cursor — barely there,
 // endlessly alive. Desktop pointers only, and never in perf mode.
 if(matchMedia("(pointer:fine)").matches){
-  const skv=$("#sky-color");let pxT=0,pyT=0,pxN=0,pyN=0;
-  document.addEventListener("mousemove",e=>{
-    pxT=(e.clientX/innerWidth-.5);pyT=(e.clientY/innerHeight-.5);
-  },{passive:true});
-  (function paraTick(){
-    requestAnimationFrame(paraTick);
-    if(document.body.classList.contains("perf")||generating)return;
+  // rAF only WHILE easing — the old loop span at full frame rate
+  // forever, even with the mouse still (M4 "gobbling", per Patrick)
+  const skv=$("#sky-color");let pxT=0,pyT=0,pxN=0,pyN=0,paraOn=false;
+  function paraStep(){
+    if(document.body.classList.contains("perf")||generating){paraOn=false;return;}
     pxN+=(pxT-pxN)*.04;pyN+=(pyT-pyN)*.04;
     skv.style.transform="scale(1.05) translate("+(-pxN*16).toFixed(1)+"px,"+(-pyN*11).toFixed(1)+"px)";
-  })();
+    if(Math.abs(pxT-pxN)+Math.abs(pyT-pyN)<.0008){paraOn=false;return;}
+    requestAnimationFrame(paraStep);
+  }
+  document.addEventListener("mousemove",e=>{
+    pxT=(e.clientX/innerWidth-.5);pyT=(e.clientY/innerHeight-.5);
+    if(!paraOn){paraOn=true;requestAnimationFrame(paraStep);}
+  },{passive:true});
 }
 // the brand chameleon runs on its own gentle clock — the warp loop only
 // draws while a query runs, but the wordmark should match the city always
-(function brandTick(ts){
-  requestAnimationFrame(brandTick);
-  if(!perf)paintBrandFromSky(ts||0);
-})();
+setInterval(()=>{
+  if(!perf&&!document.hidden)paintBrandFromSky(performance.now());
+},1500);
 
 /* ------------------------------------------- mic: whisper voice input */
 const micBtn=$("#mic");
@@ -8708,13 +8755,34 @@ input.focus();
 _mlx_last_use = 0.0
 
 
+def _purge_stale_guests():
+    """Guest passes are temporary: a marked profile untouched for a week
+    is deleted wholesale. Signed-in profiles are never touched."""
+    root = os.path.join(app_dir(), "users")
+    try:
+        for uid in os.listdir(root):
+            d = os.path.join(root, uid)
+            if not os.path.exists(os.path.join(d, ".guest")):
+                continue
+            newest = max((os.path.getmtime(os.path.join(d, f))
+                          for f in os.listdir(d)), default=0)
+            if time.time() - newest > 7 * 86400:
+                shutil.rmtree(d, ignore_errors=True)
+    except Exception:
+        pass
+
+
 def _mlx_janitor():
     """An MLX engine held its full model in RAM FOREVER after last use —
     the always-on instance pinned 17 GB around the clock and the music
     skipped. Five idle minutes and the engine is released; the next
     question just pays the reload."""
+    swept = [0.0]
     while True:
         time.sleep(60)
+        if time.time() - swept[0] > 6 * 3600:
+            swept[0] = time.time()
+            _purge_stale_guests()
         try:
             if _mlx_procs and _mlx_last_use and \
                     time.time() - _mlx_last_use > 300:

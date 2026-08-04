@@ -1270,3 +1270,18 @@ that found all three: re-execute the page's own script text via
 ## 3.10.3 — one LFG only
 - The loading-bar payoff pop is gone; the boot wash is the single
   "LFG, BITCH." moment per launch. lfgPop keyframes retired with it.
+
+## 3.11 — lighter idle, guest passes, more bodega
+- PERFORMANCE (no feature lost, per Patrick — "gobbling up my m4 pro"):
+  the two always-on rAF loops are gone. Parallax now runs ONLY while
+  easing toward a fresh mouse target (was 60-120Hz forever, mouse still
+  or not); the wordmark chameleon moved from rAF to a 1.5s clock (its
+  probe was 6s-gated anyway). Telemetry polls at 2s (was 1s). A hidden
+  window now pauses the 2K video and stops all polling — everything
+  resumes on visibilitychange. Idle CPU/GPU drops to near-zero in the
+  background; on-screen behavior is pixel-identical.
+- GUEST PASSES are temporary now: 24h cookie (was 180d), profile dir
+  marked with .guest at creation, and the mlx janitor sweeps marked
+  profiles untouched for a week (every ~6h). Sign-in copy says so.
+- +25 NYC greetings (bodega-core, transit pain, street wisdom, pure
+  attitude — "Showtime. What time is it? SHOWTIME.").
