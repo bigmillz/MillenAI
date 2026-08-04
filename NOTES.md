@@ -1236,3 +1236,17 @@ that found all three: re-execute the page's own script text via
   view.
 - Verified in-browser with the exact repro: send, switch away
   mid-stream, return — full answer present.
+
+## 3.10 — answers with maps and photos (the Fable treatment)
+- A matched place answer now carries: source chips, up to three PHOTOS
+  (og:image from the pages the search actually fetched — _page_text
+  grew a meta out-param, plumbed through _fetch_pages' threads), and a
+  pinned LIVE MAP (OpenStreetMap embed iframe; geocoding via Nominatim
+  — keyless, cached, identified UA; "Open in Maps" deep-links Apple
+  Maps). Bookish answers get photos too.
+- Wire format: \x00PHOTOS:[urls]\x00 and \x00MAP:{lat,lon,name}\x00
+  markers alongside SOURCES; persisted per message (m.photos, m.map) so
+  history keeps its visuals. Photos render with no-referrer + onerror
+  self-removal (hotlink-hostile CDNs just disappear quietly).
+- Verified live: Lucali → closed-Tuesday verdict, lucali.com/yelp
+  chips, the shop's own two photos, and a Henry Street pin on the map.

@@ -2323,10 +2323,12 @@ _results_cache = {}        # query -> (fetched_at, [result dicts])
 _RESULTS_TTL = 300.0
 
 
-def _page_text(url: str, cap: int = 2600) -> str:
+def _page_text(url: str, cap: int = 2600, meta: list = None) -> str:
     """The readable text of a page, or "" — research quality lives and
     dies on this: models writing briefs from 200-char snippets invent the
-    rest, so the top sources get actually READ."""
+    rest, so the top sources get actually READ. When `meta` is a list,
+    the page's og:image lands in it — the photos that make an answer
+    look like it has actually been somewhere."""
     try:
         req = urllib.request.Request(url, headers={
             "User-Agent": "Mozilla/5.0 (Macintosh) MillenAI"})
@@ -2334,6 +2336,13 @@ def _page_text(url: str, cap: int = 2600) -> str:
             if "text/html" not in (r.headers.get("Content-Type") or ""):
                 return ""
             raw = r.read(400_000).decode("utf-8", "replace")
+        if meta is not None:
+            m = re.search(r'property=["\']og:image["\'][^>]*?content=["\']'
+                          r'(https?://[^"\']+)', raw) or \
+                re.search(r'content=["\'](https?://[^"\']+)["\'][^>]*?'
+                          r'property=["\']og:image', raw)
+            if m:
+                meta.append(m.group(1)[:400])
         raw = re.sub(r"(?is)<(script|style|nav|header|footer|aside)[^>]*>"
                      r".*?</\1>", " ", raw)
         raw = re.sub(r"(?s)<[^>]+>", " ", raw)
@@ -2389,7 +2398,7 @@ def search_results(query: str, limit: int = 5) -> list:
     return out
 
 
-def _fetch_pages(urls: list, cap: int = 1600) -> list:
+def _fetch_pages(urls: list, cap: int = 1600, meta: list = None) -> list:
     """['--- PAGE (url):\ntext', …] fetched in parallel — page reads carry
     7s timeouts each, and doing them serially is where a 25-second
     time-to-first-token came from."""
@@ -2397,7 +2406,7 @@ def _fetch_pages(urls: list, cap: int = 1600) -> list:
 
     def grab(i, u):
         try:
-            body = _page_text(u)[:cap]
+            body = _page_text(u, meta=meta)[:cap]
             if body:
                 out[i] = "--- PAGE (%s):\n%s" % (u, body)
         except Exception:
@@ -2411,6 +2420,38 @@ def _fetch_pages(urls: list, cap: int = 1600) -> list:
     return [x for x in out if x]
 
 
+_geo_cache = {}
+
+
+def _geocode(q: str):
+    """lat/lon/name via OpenStreetMap's Nominatim — free, keyless, one
+    polite identified request per place. None on any failure."""
+    q = (q or "").strip().lower()
+    if not q:
+        return None
+    if q in _geo_cache:
+        return _geo_cache[q]
+    out = None
+    try:
+        url = ("https://nominatim.openstreetmap.org/search?format=json"
+               "&limit=1&q=" + urllib.parse.quote(q))
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "MillenAI/%s (contact: millertechnology.net)"
+                          % APP_VERSION})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            rows = json.load(r)
+        if rows:
+            out = {"lat": round(float(rows[0]["lat"]), 6),
+                   "lon": round(float(rows[0]["lon"]), 6),
+                   "name": (rows[0].get("display_name") or "")[:80]}
+    except Exception:
+        pass
+    if len(_geo_cache) > 200:
+        _geo_cache.clear()
+    _geo_cache[q] = out
+    return out
+
+
 def run_search_deep(query: str, pages: int = 2) -> str:
     """Snippets PLUS the readable text of the top result pages — place
     queries need actual hours/addresses, which live in pages, not blurbs."""
@@ -2419,7 +2460,10 @@ def run_search_deep(query: str, pages: int = 2) -> str:
         return base
     urls = [r.get("href") or r.get("url") or ""
             for r in _ddg_text(query, pages + 1)]
-    extras = _fetch_pages([u for u in urls if u.startswith("http")][:pages])
+    photos = []
+    extras = _fetch_pages([u for u in urls if u.startswith("http")][:pages],
+                          meta=photos)
+    _tl_search.photos = photos
     if extras:
         return base + "\n\n" + "\n\n".join(extras)
     return base
@@ -2500,7 +2544,9 @@ def place_search(query: str) -> tuple:
     urls = sorted(((r.get("href") or "") for r in direct
                    if (r.get("href") or "").startswith("http")),
                   key=_rank)[:2]
-    extras = _fetch_pages(urls)
+    photos = []
+    extras = _fetch_pages(urls, meta=photos)
+    _tl_search.photos = photos
     if extras:
         ctx += "\n\n" + "\n\n".join(extras)
     return ctx, bool(direct)
@@ -4766,6 +4812,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
         if query:
             _tl_search.rows = []   # keep-alive reuses threads — no stale rows
+            _tl_search.photos = []
+            _tl_search.geo = None
             snippets = None
             is_weather = bool(re.search(
                 r"\bweather\b|\bforecast\b|\btemperature\b", query, re.I))
@@ -4793,6 +4841,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 bookish = bool(_BOOKING_RX.search(query.lower()))
                 if placey:
                     snippets, matched = place_search(query)
+                    if matched:
+                        # the map card: a real place gets pinned
+                        _tl_search.geo = _geocode(_place_terms(query))
                 elif bookish:
                     # search the SENTENCE with the ask, not the whole
                     # message — "I'm chronically burned out. can you
@@ -5031,6 +5082,24 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             if src_rows:
                 try:
                     _write((NUL + "SOURCES:" + json.dumps(src_rows) + NUL)
+                           .encode("utf-8"))
+                except Exception:
+                    pass
+            # the Fable treatment: photos from the pages actually read,
+            # and a pinned map when the answer is about a real place
+            ph = [p for p in dict.fromkeys(
+                getattr(_tl_search, "photos", []) or [])
+                if p.startswith("http")][:3]
+            if ph:
+                try:
+                    _write((NUL + "PHOTOS:" + json.dumps(ph) + NUL)
+                           .encode("utf-8"))
+                except Exception:
+                    pass
+            geo = getattr(_tl_search, "geo", None)
+            if geo:
+                try:
+                    _write((NUL + "MAP:" + json.dumps(geo) + NUL)
                            .encode("utf-8"))
                 except Exception:
                     pass
@@ -5925,6 +5994,23 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .srcchip img{width:16px;height:16px;border-radius:4px;flex:none}
 .srcchip:hover{background:rgba(255,255,255,.13);
   border-color:rgba(255,255,255,.3)}
+/* photos + pinned map under an answer — the Fable treatment */
+.photorow{display:flex;gap:8px;margin:14px 0 2px;flex-wrap:wrap}
+.photorow img{height:118px;max-width:190px;object-fit:cover;
+  border-radius:11px;border:1px solid rgba(255,255,255,.15);
+  box-shadow:0 10px 30px -14px rgba(0,0,0,.7)}
+.mapcard{margin:14px 0 2px;border-radius:13px;overflow:hidden;
+  border:1px solid rgba(255,255,255,.17);position:relative;
+  box-shadow:0 14px 40px -18px rgba(0,0,0,.8)}
+.mapcard iframe{width:100%;height:235px;border:0;display:block;
+  filter:saturate(.92) contrast(1.04)}
+.mapcard a{position:absolute;right:10px;bottom:10px;
+  background:rgba(10,12,16,.82);color:#ececec;
+  font-family:var(--mono);font-size:11px;letter-spacing:.05em;
+  padding:6px 11px;border-radius:9px;text-decoration:none;
+  border:1px solid rgba(255,255,255,.22);
+  -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
+.mapcard a:hover{background:rgba(24,27,36,.92)}
 .caret{
   display:inline-block;width:8px;height:15px;background:var(--accent);
   vertical-align:-2px;margin-left:2px;border-radius:1px;
@@ -6964,14 +7050,32 @@ function srcRow(srcs){
   }
   return h;
 }
-function addMsg(role,text,drafts,srcs){
+// the Fable treatment: real photos from the pages the answer read,
+// and a live pinned map when the answer is about a place
+function photoRow(ph){
+  if(!ph||!ph.length)return "";
+  return '<div class="photorow">'+ph.map(u=>
+    '<img src="'+esc(u)+'" loading="lazy" referrerpolicy="no-referrer" '
+    +'onerror="this.remove()" alt="">').join("")+'</div>';
+}
+function mapCard(m){
+  if(!m||typeof m.lat!=="number")return "";
+  const d=0.004,bb=(m.lon-d)+","+(m.lat-d)+","+(m.lon+d)+","+(m.lat+d);
+  return '<div class="mapcard"><iframe loading="lazy" src='
+    +'"https://www.openstreetmap.org/export/embed.html?bbox='+bb
+    +'&layer=mapnik&marker='+m.lat+','+m.lon+'"></iframe>'
+    +'<a href="https://maps.apple.com/?ll='+m.lat+','+m.lon
+    +'&q='+encodeURIComponent((m.name||"").split(",")[0]||"pin")
+    +'" target="_blank" rel="noopener">Open in Maps \u2197</a></div>';
+}
+function addMsg(role,text,drafts,srcs,mapd,ph){
   const hero=$("#hero"); if(hero)hero.remove();
   const div=document.createElement("div");
   div.className="msg "+(role==="user"?"user":"ai");
   const who=role==="user"?"you":(whoLabel(lastModels)||tier);
   div.innerHTML='<div class="who">'+who+'</div><div class="body"></div>';
   const body=div.querySelector(".body");
-  if(role==="user")body.textContent=text; else body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text);
+  if(role==="user")body.textContent=text; else body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text)+photoRow(ph)+mapCard(mapd);
   if(role!=="user"&&drafts&&drafts.length)paintDrafts(div,drafts,false);
   inner.appendChild(div);
   scroller.scrollTop=scroller.scrollHeight;
@@ -7121,7 +7225,7 @@ async function send(){
   body.innerHTML='<span class="caret"></span>';
 
   abortCtl=new AbortController();
-  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[],sources=null;
+  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[],sources=null,photos=null,mapd=null;
   lastModels="";
 
   try{
@@ -7152,7 +7256,15 @@ async function send(){
               .replace(/\u0000SOURCES:(.*?)\u0000/g,(_,j)=>{
                  try{sources=JSON.parse(j);}catch(e){}
                  return "";})
-              .replace(/\u0000SOURCES:[^\u0000]*$/,"");
+              .replace(/\u0000SOURCES:[^\u0000]*$/,"")
+              .replace(/\u0000PHOTOS:(.*?)\u0000/g,(_,j)=>{
+                 try{photos=JSON.parse(j);}catch(e){}
+                 return "";})
+              .replace(/\u0000PHOTOS:[^\u0000]*$/,"")
+              .replace(/\u0000MAP:(.*?)\u0000/g,(_,j)=>{
+                 try{mapd=JSON.parse(j);}catch(e){}
+                 return "";})
+              .replace(/\u0000MAP:[^\u0000]*$/,"");
       if(drafts.length||(status&&/of \d+/.test(status)))
         paintDrafts(aiDiv,drafts,true,status);
       // a merge that collapsed mid-stream sends RESET \u2014 discard
@@ -7191,7 +7303,8 @@ async function send(){
   }
   body.innerHTML=(searched&&full?srcRow(sources):"")
     +renderMD(full||(wasAborted?"*(stopped)*":
-    "⚠️ The engine returned nothing. Is the model server for **"+model+"** actually running?"));
+    "⚠️ The engine returned nothing. Is the model server for **"+model+"** actually running?"))
+    +(full&&!wasAborted?photoRow(photos)+mapCard(mapd):"");
   const secs=((performance.now()-t0)/1000);
   const isErr=full.trim().startsWith("⚠️")||full.includes("\n⚠️");
   if(full&&!isErr){
@@ -7201,6 +7314,8 @@ async function send(){
     const rec={role:"assistant",content:full};
     if(drafts.length)rec.drafts=drafts;
     if(sources&&sources.length)rec.sources=sources;
+    if(photos&&photos.length)rec.photos=photos;
+    if(mapd)rec.map=mapd;
     myMessages.push(rec);
     persistChat(myChat,myMessages);
     // viewing the owning chat but the live bubble was detached by a
@@ -7209,7 +7324,7 @@ async function send(){
       messages=myMessages;
       inner.innerHTML="";
       myMessages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",
-        m.content,m.drafts,m.sources));
+        m.content,m.drafts,m.sources,m.map,m.photos));
     }
   }else{
     // error or empty: keep it out of the model's context, refresh the dots
@@ -7386,7 +7501,7 @@ function loadChat(id){
   curChat=id;
   messages=c.messages.slice();
   inner.innerHTML="";
-  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",m.content,m.drafts,m.sources));
+  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",m.content,m.drafts,m.sources,m.map,m.photos));
   renderChats();
 }
 renderChats();
