@@ -5540,28 +5540,26 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #turbo-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
   color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
   text-align:left}
-#turbo-row input,#polish-row input,#nolimits-row input{
+#turbo-row input,#contrib-row input,#nolimits-row input{
   appearance:none;-webkit-appearance:none;
   width:17px;height:17px;flex:none;margin:0;border-radius:5px;
   border:1.5px solid var(--faint);background:rgba(255,255,255,.04);
   cursor:pointer;position:relative;transition:all .15s;
 }
-#turbo-row input:hover,#polish-row input:hover,#nolimits-row input:hover{
+#turbo-row input:hover,#contrib-row input:hover,#nolimits-row input:hover{
   border-color:var(--accent-hot)}
-#turbo-row input:checked,#polish-row input:checked,
+#turbo-row input:checked,#contrib-row input:checked,
 #nolimits-row input:checked{
   background:var(--accent);border-color:var(--accent)}
-#turbo-row input:checked::after,#polish-row input:checked::after,
+#turbo-row input:checked::after,#contrib-row input:checked::after,
 #nolimits-row input:checked::after{
   content:"";position:absolute;left:5px;top:1.5px;
   width:4px;height:9px;border:solid #14161c;
   border-width:0 2.2px 2.2px 0;transform:rotate(45deg)}
-#turbo-row,#polish-row,#nolimits-row{
+#turbo-row,#contrib-row,#nolimits-row{
   align-items:center;gap:10px;font-size:12.5px;color:var(--text);
   padding:7px 2px}
-#polish-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
-  color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
-  text-align:left}
+
 #fleet-box{margin:14px 0 4px;text-align:left}
 #fleet-own{font-family:var(--mono);font-size:10.5px;color:var(--dim);
   margin-bottom:8px;line-height:1.6}
@@ -5583,7 +5581,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   color:var(--text);font-size:12.5px;outline:none;
 }
 #fleet-box input:focus{border-color:var(--accent-dim)}
-#contrib-toggle.on{background:var(--accent-dim);color:var(--text)}
 #about-facts{
   font-family:var(--mono);font-size:11.5px;font-weight:700;
   color:var(--dim);margin-top:10px;line-height:1.6;
@@ -5975,15 +5972,15 @@ __AGENT_ROWS__
     <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
       placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
     <button class="about-btn" id="persona-save">Save preferences</button>
+    <label id="contrib-row"><input type="checkbox" id="contrib">
+      Contribute GPU power — answer friends&rsquo; questions while this
+      machine is idle</label>
     <label id="turbo-row" hidden><input type="checkbox" id="turbo">
-      Turbo — use the cloud endpoint you configured (prompts leave this
+      Use cloud power — faster answers from the cloud (prompts leave this
       computer)</label>
-    <label id="polish-row"><input type="checkbox" id="polish" checked>
-      Best quality — answers are drafted, then rewritten (slower)</label>
     <div id="fleet-box">
       <div id="fleet-own" hidden><span id="fleet-n"></span></div>
       <div id="fleet-pending"></div>
-      <button class="about-btn" id="contrib-toggle">&#9889; Contribute GPU power</button>
       <div id="contrib-state"></div>
       <details id="fleet-adv"><summary>advanced</summary>
         <input id="contrib-url" placeholder="Hub URL (blank = default)">
@@ -7580,6 +7577,7 @@ $("#models-up").addEventListener("click",openSetup);
 })();
 function shareDone(on){
   $("#share-veil").hidden=true;
+  const cb=$("#contrib");if(cb&&on)cb.checked=true;
   if(on)fetch("/api/prefs",{method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contrib_on:true})});
@@ -7777,18 +7775,16 @@ async function openAbout(){
     try{
       const pr2=await(await fetch("/api/prefs")).json();
       const mine=await(await fetch("/api/fleet/mine")).json();
-      $("#polish").checked=pr2.polish!==false;
       $("#turbo").checked=!!pr2.turbo;
+      $("#contrib").checked=!!pr2.contrib_on;
       try{
         const cs=await(await fetch("/api/cloud")).json();
         $("#turbo-row").hidden=!cs.configured;
         if(cs.name)$("#turbo-row").lastChild.textContent=
-          " Turbo \u2014 "+cs.name+" (prompts leave this computer)";
+          " Use cloud power \u2014 "+cs.name
+          +" (faster; prompts leave this computer)";
       }catch(e){}
       $("#contrib-url").value=pr2.contrib_url||"";
-      $("#contrib-toggle").classList.toggle("on",!!pr2.contrib_on);
-      $("#contrib-toggle").innerHTML=pr2.contrib_on
-        ?"Contributing \u2713 (tap to stop)":"\u26a1 Contribute GPU power";
       $("#contrib-state").textContent=
         pr2.contrib_on&&mine.state!=="off"?mine.state:"";
     }catch(e){}
@@ -7883,21 +7879,13 @@ $("#turbo").addEventListener("change",()=>{
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({turbo:$("#turbo").checked})});
 });
-$("#polish").addEventListener("change",()=>{
-  fetch("/api/prefs",{method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({polish:$("#polish").checked})});
-});
-$("#contrib-toggle").addEventListener("click",async()=>{
-  const on=!$("#contrib-toggle").classList.contains("on");
+$("#contrib").addEventListener("change",async()=>{
+  const on=$("#contrib").checked;
+  $("#contrib-state").textContent=on?"connecting\u2026":"";
   await fetch("/api/prefs",{method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contrib_on:on,
       contrib_url:$("#contrib-url").value.trim()})});
-  $("#contrib-toggle").classList.toggle("on",on);
-  $("#contrib-toggle").innerHTML=
-    on?"Contributing \u2713 (tap to stop)":"\u26a1 Contribute GPU power";
-  $("#contrib-state").textContent=on?"connecting\u2026":"";
 });
 $("#about-close").addEventListener("click",()=>{aboutVeil.hidden=true;});
 aboutVeil.addEventListener("click",e=>{if(e.target===aboutVeil)aboutVeil.hidden=true;});
