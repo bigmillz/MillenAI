@@ -1205,3 +1205,19 @@ that found all three: re-execute the page's own script text via
   first-run installer, the daily models nudge, the share-GPU invite,
   and the sidebar models-up button. Server-side admin lockdown already
   blocked the actions; now the UI stops offering them.
+
+## 3.9 — the fleet is one toggle
+- AUTO-APPROVE (fleet_auto pref, default on): a worker that registers
+  gets its token in the same response — the whole community-GPU flow is
+  now: flip "Contribute GPU power", done. The knock-and-approve flow
+  survives behind fleet_auto=false. "reconnecting" state renamed "hub
+  offline — retrying"; the advanced Hub URL field is gone from Settings
+  (contrib_url in prefs.json still honored).
+- REVISE + ATTACHMENTS: the two-pass reviser saw only the bare prompt
+  for doc questions — combined with the anti-invention clause it
+  deleted a CORRECT answer as unvouchable ("you haven't attached the
+  file", 2x in the gauntlet). Doc-carrying answers now feed the
+  reviser the full message, same as searched ones. Triple-verified.
+- Debugging note: first suspect was a zombie test worker eating fleet
+  jobs — wrong (model mismatch made offload impossible); the 45s
+  _fleet_alive window plus model matching already guards that.

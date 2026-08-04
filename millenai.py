@@ -627,7 +627,7 @@ def _contrib_loop(url: str, key: str):
                          {"id": wid, "token": token, "job": job["job"],
                           "err": str(exc)[:100]})
         except Exception:
-            _contrib_state[0] = "reconnecting"
+            _contrib_state[0] = "hub offline — retrying"
             _contrib_stop.wait(8)
 
 
@@ -4488,6 +4488,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 if not wid:
                     wid = secrets.token_hex(8)
                 claim = approved.get(wid)
+                # AUTOMATED, per Patrick: a fresh worker is approved on
+                # arrival and gets its token in the same breath — the
+                # fleet is one toggle end to end. fleet_auto=False in
+                # prefs restores the old knock-and-approve flow.
+                if (not claim and not token_ok
+                        and load_prefs(None).get("fleet_auto", True)):
+                    claim = {"token": secrets.token_hex(16),
+                             "claimed": False, "name": name}
+                    approved[wid] = claim
+                    _fleet_save_approved(approved)
                 if keyed or token_ok or (claim and not claim.get("claimed")):
                     if claim and not claim.get("claimed"):
                         # ONE-TIME token handover right after approval —
@@ -5083,12 +5093,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         draft = ""
                     if draft and not _looks_degenerate(draft):
                         status(f"{lbl} is sharpening the answer")
-                        # for a searched answer the "question" is the
-                        # grounded message (live data + rules) — a
+                        # for a searched OR doc-carrying answer the
+                        # "question" is the full grounded message — a
                         # reviser that can't see the data can't tell a
-                        # real retreat from an invented one
+                        # real specific from an invented one. Given only
+                        # the bare prompt, it deleted a correct answer
+                        # with "you haven't attached the file" (the
+                        # anti-invention rule doing its job on the
+                        # wrong evidence — seen in the gauntlet).
                         src_q = (full_messages[-1]["content"][:5000]
-                                 if query else prompt)
+                                 if (query or docs) else prompt)
                         _stream_guarded(
                             lbl,
                             [full_messages[0],
@@ -6563,9 +6577,6 @@ __AGENT_ROWS__
       <div id="fleet-own" hidden><span id="fleet-n"></span></div>
       <div id="fleet-pending"></div>
       <div id="contrib-state"></div>
-      <details id="fleet-adv"><summary>advanced</summary>
-        <input id="contrib-url" placeholder="Hub URL (blank = default)">
-      </details>
     </div>
     <div id="adv-grid">
       <button class="about-btn" id="open-setup">Model updates&hellip;</button>
@@ -8387,7 +8398,6 @@ async function openAbout(){
           "Answers come from "+cs.name+" instead of this Mac \u2014 much "
           +"faster, but your prompts leave this computer while it is on.";
       }catch(e){}
-      $("#contrib-url").value=pr2.contrib_url||"";
       $("#contrib-state").textContent=
         pr2.contrib_on&&mine.state!=="off"?mine.state:"";
     }catch(e){}
@@ -8493,8 +8503,7 @@ $("#contrib").addEventListener("change",async()=>{
   $("#contrib-state").textContent=on?"connecting\u2026":"";
   await fetch("/api/prefs",{method:"POST",
     headers:{"Content-Type":"application/json"},
-    body:JSON.stringify({contrib_on:on,
-      contrib_url:$("#contrib-url").value.trim()})});
+    body:JSON.stringify({contrib_on:on})});
 });
 $("#about-close").addEventListener("click",()=>{aboutVeil.hidden=true;});
 aboutVeil.addEventListener("click",e=>{if(e.target===aboutVeil)aboutVeil.hidden=true;});
