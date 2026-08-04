@@ -46,11 +46,11 @@ check("local bare URL -> app", s == 200 and b"id=\"skyline\"" in b)
 s, h, b = req("/?key=oldlink")
 check("legacy key links still land", s == 200 and b"id=\"skyline\"" in b)
 s, h, b = req("/", headers={"X-Forwarded-For": "1.2.3.4"})
-check("remote stranger -> account screen", b"pick a name and a PIN" in b)
+check("remote stranger -> account screen", b"pick a name and a pin" in b.lower())
 
 print("== identities ==")
 s, h, b = req("/", cookie=K, headers={"X-Forwarded-For": "1.2.3.4"})
-check("remote no-identity -> sign-in", b"pick a name and a PIN" in b)
+check("remote no-identity -> sign-in", b"pick a name and a pin" in b.lower())
 s, h, b = req("/api/welcome", "POST", {"name": "smoke", "pin": "1234"},
               cookie=K, headers={"X-Forwarded-For": "1.2.3.4"})
 check("short PIN rejected", b"8-12 digit" in b)
@@ -157,13 +157,22 @@ t = chat({"model": "", "models": [], "tier": "Fast", "auto_web": True,
 check("weather answer carries real data", ("°F" in t or "degrees" in t or " mph" in t)
       and "⚠️" not in t and len(t) > 60, t[:120])
 
+# a place no index knows must NOT get a bare "couldn't find any info"
+# shrug (3.3) — the answer says so plainly AND asks a pin-down question
+t = chat({"model": "", "models": [], "tier": "Fast", "auto_web": True,
+          "messages": [{"role": "user", "content": "is qzxvbn cafe in bushwick open tonight"}]})
+check("unknown place gets helpful no-match answer",
+      len(t) > 100 and "?" in t and "⚠️" not in t, t[:160])
+
 
 print("== attached files ==")
 t = chat({"model": "", "models": [], "tier": "Fast", "auto_web": True,
           "messages": [{"role": "user", "content": "what is the project codename mentioned in this file?"}],
           "docs": [{"name": "notes.txt",
                     "text": "quarterly planning notes\nthe project codename is ZEBRA-42\nlunch is at noon"}]})
-affirms = "zebra-42" in t.lower() and not re.search(
+# models emit fancy hyphens (ZEBRA‑42 with U+2011) — normalize first
+flat = re.sub(r"[^a-z0-9]+", "", t.lower())
+affirms = "zebra42" in flat and not re.search(
     r"not seeing|don't see|do not see|there is no|isn't a|can't help", t.lower())
 check("doc content reaches the model", affirms, t[:160])
 

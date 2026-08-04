@@ -1014,3 +1014,34 @@ that found all three: re-execute the page's own script text via
 - BACKDROPS: LRU 12 -> 30 (~6.6 GB); 10-min in-session trickle keeps
   warming uncached clips; skyhist (last 8) prevents repeats. The pool IS
   the rotation — it has to be wide.
+
+## 3.3 — place search that actually finds places
+- "is ables in bushwick open" -> "I couldn't find any information" at
+  0.9 tok/s. Three separate causes, all fixed:
+  1. THE ENGINE: default DDG backend returned neighborhood listicles;
+     bing found the actual business (an Instagram-only steakhouse). All
+     searches now go through _ddg_text(), which tries bing -> auto ->
+     duckduckgo — engines rate-limit individually for ~a minute, so one
+     strike must never mean "no results".
+  2. THE QUERY: the raw conversational prompt was sent verbatim.
+     place_search() strips filler (_PLACE_FILLER) to entity+locality
+     ("ables bushwick"), runs three variants, and match-checks results:
+     a direct hit must contain the anchor AND next term as WHOLE WORDS
+     ("pool tables" must not count as "ables"; "Ables" obituaries have
+     the name but not the place).
+  3. THE SHRUG: matched=False now gets its own answer shape — say you
+     can't find it by that name, offer the closest real result, ask one
+     pin-down question. Shape is taught by a WORKED EXAMPLE for a
+     different query; abstract templates get parroted back literally
+     ("**Name** - What is it?" appeared in a live answer).
+- INSTRUCTIONS AFTER DATA: the answer-shape prompt now comes AFTER the
+  snippets/pages, right before the question. Buried before 4KB of
+  scraped page text it was forgotten — the model answered by pasting
+  Lucali's entire menu and email-signup form.
+- Page fetches parallelized (_fetch_pages): serial 7s timeouts were the
+  25s time-to-first-token. Pages are fetched only for MATCHED results —
+  reading listicles about the neighborhood is pure latency.
+- Smoketest: sign-in copy check was case-sensitive and broke silently
+  when the copy got capitalized; ZEBRA-42 check normalized (models emit
+  U+2011 non-breaking hyphens). New gauntlet check: unknown place must
+  get a helpful no-match answer, not a shrug.

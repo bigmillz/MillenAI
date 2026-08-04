@@ -2285,8 +2285,28 @@ def _page_text(url: str, cap: int = 2600) -> str:
         return ""
 
 
+# bing first: for real-world entities (shops, restaurants) it found the
+# business page where the default engine returned neighborhood listicles.
+# Engines rate-limit individually for a minute at a time, so always have
+# somewhere else to turn.
+_SEARCH_BACKENDS = ("bing", "auto", "duckduckgo")
+
+
+def _ddg_text(query: str, limit: int = 5) -> list:
+    """Raw engine hits, trying several backends until one answers.
+    Never raises — an empty list means every engine struck out."""
+    for backend in _SEARCH_BACKENDS:
+        try:
+            rows = DDGS().text(query, max_results=limit, backend=backend)
+            if rows:
+                return rows
+        except Exception:
+            continue
+    return []
+
+
 def search_results(query: str, limit: int = 5) -> list:
-    """Structured DuckDuckGo hits — title, snippet and URL. Never raises.
+    """Structured search hits — title, snippet and URL. Never raises.
 
     Deliberately separate from run_search's single-slot cache: a research
     run fires several queries back to back, and a one-entry cache would
@@ -2299,18 +2319,37 @@ def search_results(query: str, limit: int = 5) -> list:
         hit = _results_cache.get(query)
         if hit and now - hit[0] < _RESULTS_TTL:
             return hit[1]
-    try:
-        out = [{"title": (r.get("title") or "").strip(),
-                "body": (r.get("body") or "").strip(),
-                "url": (r.get("href") or "").strip()}
-               for r in DDGS().text(query, max_results=limit)]
-    except Exception:
-        out = []                      # offline or rate-limited — not fatal
+    out = [{"title": (r.get("title") or "").strip(),
+            "body": (r.get("body") or "").strip(),
+            "url": (r.get("href") or "").strip()}
+           for r in _ddg_text(query, limit)]
     with _search_lock:
         if len(_results_cache) > 40:
             _results_cache.clear()
         _results_cache[query] = (now, out)
     return out
+
+
+def _fetch_pages(urls: list, cap: int = 1600) -> list:
+    """['--- PAGE (url):\ntext', …] fetched in parallel — page reads carry
+    7s timeouts each, and doing them serially is where a 25-second
+    time-to-first-token came from."""
+    out, threads = [None] * len(urls), []
+
+    def grab(i, u):
+        try:
+            body = _page_text(u)[:cap]
+            if body:
+                out[i] = "--- PAGE (%s):\n%s" % (u, body)
+        except Exception:
+            pass
+    for i, u in enumerate(urls):
+        t = threading.Thread(target=grab, args=(i, u), daemon=True)
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join(timeout=9)
+    return [x for x in out if x]
 
 
 def run_search_deep(query: str, pages: int = 2) -> str:
@@ -2319,24 +2358,81 @@ def run_search_deep(query: str, pages: int = 2) -> str:
     base = run_search(query)
     if not HAS_SEARCH:
         return base
-    try:
-        results = DDGS().text(query, max_results=pages + 1)
-        extras = []
-        for r in results[:pages]:
-            u = r.get("href") or r.get("url") or ""
-            if not u.startswith("http"):
-                continue
-            try:
-                body = _page_text(u)[:1600]
-                if body:
-                    extras.append("--- PAGE (%s):\n%s" % (u, body))
-            except Exception:
-                continue
-        if extras:
-            return base + "\n\n" + "\n\n".join(extras)
-    except Exception:
-        pass
+    urls = [r.get("href") or r.get("url") or ""
+            for r in _ddg_text(query, pages + 1)]
+    extras = _fetch_pages([u for u in urls if u.startswith("http")][:pages])
+    if extras:
+        return base + "\n\n" + "\n\n".join(extras)
     return base
+
+
+# words that carry no identity in "is ables in bushwick open tonight" —
+# what's left after removing them is the entity + locality ("ables
+# bushwick"), which is what a search engine actually wants
+_PLACE_FILLER = frozenset("""
+    a an and are at book by call can close closed closes closing could
+    currently do does for from get hi hey hours hows how i if in is it its
+    me my near now number of on open or over phone please reservation
+    reservations right still take takes tell that the their there they this
+    time times to today tomorrow tonight until up wanna want was we what
+    whats when whens where wheres which who whos will would yall you your
+""".split())
+
+
+def _place_terms(prompt: str) -> str:
+    """'is ables in bushwick open tonight' -> 'ables bushwick'."""
+    words = re.findall(r"[a-z0-9'&-]+", prompt.lower())
+    return " ".join(w for w in words if w not in _PLACE_FILLER)[:80]
+
+
+def place_search(query: str) -> tuple:
+    """(snippets_text, matched) for an is-it-open / where-is-it question.
+
+    matched=False means NO result even mentions the place asked about —
+    the difference between "Lucali closes at 10" and "there may be no
+    business by that name here". The answer prompt needs to know which
+    conversation it is in: a bare "couldn't find any information" shrug
+    (seen live, for a spot that doesn't exist under that name in any
+    index) helps nobody.
+    """
+    if not HAS_SEARCH:
+        return run_search(query), True
+    terms = _place_terms(query) or query
+    toks = terms.split()
+    anchor = toks[0] if toks else ""
+
+    def is_direct(r):
+        # the name token alone is not enough — "Ables" obituaries contain
+        # "ables" yet say nothing about Bushwick. Require the anchor AND
+        # the next term (usually the locality) when there is one. Whole
+        # words only: "pool tables" must not count as "ables".
+        blob = ("%s %s %s" % (r.get("title") or "", r.get("body") or "",
+                              r.get("href") or "")).lower()
+        return bool(anchor) and all(
+            re.search(r"\b%s\b" % re.escape(t), blob) for t in toks[:2])
+
+    hits, seen = [], set()
+    rest = " ".join(toks[1:])
+    for q in (terms + " hours", ('"%s" %s' % (anchor, rest)).strip(), query):
+        for r in _ddg_text(q, 6):
+            u = (r.get("href") or "").strip()
+            if u and u not in seen:
+                seen.add(u)
+                hits.append(r)
+        if sum(1 for r in hits if is_direct(r)) >= 2:
+            break
+    direct = [r for r in hits if is_direct(r)]
+    ordered = direct + [r for r in hits if r not in direct]
+    ctx = "\n".join("- %s: %s" % (r.get("title") or "", r.get("body") or "")
+                    for r in ordered[:8]) or "No snippets found."
+    # pages are worth 7 seconds each ONLY when they're about the right
+    # place — reading listicles about the neighborhood is pure latency
+    urls = [(r.get("href") or "") for r in direct
+            if (r.get("href") or "").startswith("http")][:2]
+    extras = _fetch_pages(urls)
+    if extras:
+        ctx += "\n\n" + "\n\n".join(extras)
+    return ctx, bool(direct)
 
 
 def run_search(query: str) -> str:
@@ -2348,15 +2444,12 @@ def run_search(query: str) -> str:
         fresh = (time.time() - _search_cache["timestamp"]) < 60
         if _search_cache["query"] == query and fresh:
             return _search_cache["data"]
-    try:
-        results = DDGS().text(query, max_results=4)
-        ctx = "\n".join(
-            f"- {r.get('title', '')}: {r.get('body', '')}" for r in results
-        )
-        if not ctx.strip():
-            ctx = "No snippets found."
-    except Exception as exc:  # network hiccups, rate limits, etc.
-        ctx = f"Search failed: {exc}"
+    ctx = "\n".join(
+        f"- {r.get('title', '')}: {r.get('body', '')}"
+        for r in _ddg_text(query, 4)
+    )
+    if not ctx.strip():
+        ctx = "No snippets found."
     with _search_lock:
         _search_cache.update(query=query, data=ctx, timestamp=time.time())
     return ctx
@@ -4494,28 +4587,62 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 placey = bool(re.search(
                     r"\bhours\b|\bopen\b|\bclosed?\b|\bphone\b|"
                     r"\baddress\b|\bmenu\b|\breservation", query, re.I))
-                snippets = (run_search_deep(query) if placey
-                            else run_search(query))
-                strictness = (
-                    "The snippets and pages below are your ONLY source "
-                    "for hours, phone numbers, addresses and prices — "
-                    "never estimate or invent one.\n"
-                    "ANSWER SHAPE, exactly:\n"
-                    "1. First sentence = the verdict: open or closed "
-                    "tonight, with the hours, if the data shows it.\n"
-                    "2. Then at most three options as short bold-name "
-                    "lines: **Name** — what it is — tonight's hours.\n"
-                    "3. One practical heads-up if the data supports one. "
-                    "Nothing else: no 'best bet is to check', no filler, "
-                    "under 120 words. If the data truly lacks the answer, "
-                    "say that in ONE sentence and stop.\n" if placey else "")
+                matched = True
+                if placey:
+                    snippets, matched = place_search(query)
+                else:
+                    snippets = run_search(query)
+                if placey and matched:
+                    strictness = (
+                        "The data above is your ONLY source for hours, "
+                        "phone numbers, addresses and prices — never "
+                        "estimate or invent one. Write ENTIRELY in your "
+                        "own words: pasting any line, menu or form text "
+                        "from the data is a failure.\n"
+                        "ANSWER SHAPE, exactly:\n"
+                        "1. First sentence = the verdict: open or closed "
+                        "tonight, with the hours, if the data shows it "
+                        "(mind today's weekday for closed-days).\n"
+                        "2. Then at most three options as short bold-name "
+                        "lines: **Name** — what it is — tonight's hours.\n"
+                        "3. One practical heads-up if the data supports one. "
+                        "Nothing else: no 'best bet is to check', no filler, "
+                        "under 120 words. If the data truly lacks the answer, "
+                        "say that in ONE sentence and stop.\n")
+                elif placey:
+                    # nothing in any engine mentions the place — a flat
+                    # "couldn't find any information" is a dead end for the
+                    # user; be a local who's honest AND still helpful
+                    strictness = (
+                        "IMPORTANT: none of the results above actually "
+                        "mention the place the user asked about — do not "
+                        "pretend they do.\n"
+                        "Answer in this spirit, in your own words (this "
+                        "example is for a DIFFERENT query, 'is milano's "
+                        "in ridgewood open'):\n"
+                        "\"I can't find a spot called Milano's in "
+                        "Ridgewood — it might go by a different name or "
+                        "only live on Instagram. Closest thing I see is "
+                        "**Milano Market** on Fresh Pond Rd. Got the "
+                        "exact spelling or a cross street? I'll take "
+                        "another look.\"\n"
+                        "Three beats: can't find it by that name; the "
+                        "closest one or two REAL results if any are "
+                        "genuinely similar (skip that beat otherwise); "
+                        "one short question to pin it down. Under 80 "
+                        "words. Never invent hours, phone numbers or "
+                        "addresses.\n")
+                else:
+                    strictness = ""
+                # data FIRST, instructions LAST — an instruction buried
+                # before 4KB of scraped pages gets forgotten, and the
+                # model answers by pasting the menu (seen live)
                 messages[-1] = {
                     "role": "user",
                     "content": (
-                        "You have internet access. Using these live search "
-                        f"snippets, answer the prompt.\n{strictness}"
-                        f"SNIPPETS FOR '{query}':\n{snippets}\n\nPROMPT: "
-                        f"{query}"
+                        "You have internet access. Live results for "
+                        f"'{query}':\n{snippets}\n\n{strictness}"
+                        f"PROMPT: {query}"
                     ),
                 }
 
