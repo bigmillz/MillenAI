@@ -1082,6 +1082,11 @@ def needs_search(prompt: str) -> bool:
     if not HAS_SEARCH:
         return False
     p = prompt.strip()
+    # "Hey is abe's open tonight" was never searched: the no-search guard
+    # fires on any message that STARTS with a greeting, and New Yorkers
+    # open with one. Strip the hello, judge the question. (Seen live.)
+    p = re.sub(r"^(hey|hi|hello|yo+|ayo|yerr+|sup|good\s+(morning|"
+               r"afternoon|evening))\b[\s,!.\u2014-]*", "", p, flags=re.I)
     if len(p) < 8 or _NO_SEARCH.match(p):
         return False
     low = p.lower()
@@ -2291,6 +2296,32 @@ def search_results(query: str, limit: int = 5) -> list:
     return out
 
 
+def run_search_deep(query: str, pages: int = 2) -> str:
+    """Snippets PLUS the readable text of the top result pages — place
+    queries need actual hours/addresses, which live in pages, not blurbs."""
+    base = run_search(query)
+    if not HAS_SEARCH:
+        return base
+    try:
+        results = DDGS().text(query, max_results=pages + 1)
+        extras = []
+        for r in results[:pages]:
+            u = r.get("href") or r.get("url") or ""
+            if not u.startswith("http"):
+                continue
+            try:
+                body = _page_text(u)[:1600]
+                if body:
+                    extras.append("--- PAGE (%s):\n%s" % (u, body))
+            except Exception:
+                continue
+        if extras:
+            return base + "\n\n" + "\n\n".join(extras)
+    except Exception:
+        pass
+    return base
+
+
 def run_search(query: str) -> str:
     """DuckDuckGo snippets with a 60s cache. Never raises."""
     if not HAS_SEARCH:
@@ -3314,13 +3345,13 @@ def _sky_fetch(i: int):
         with _sky_lock:
             _sky_jobs[i] = {"status": "ready", "pct": 100}
         # LRU cap: 89 clips at ~220 MB each must never all land on disk —
-        # keep the 12 most recently played (~2.6 GB), drop the rest. Six
-        # was too few once rotation returned: the picker only chooses
-        # from cache, so the same handful cycled forever (seen live).
+        # keep 30 (~6.6 GB). Twelve still felt stale ("still isn't using
+        # all the apple videos"): the pool IS the rotation, so it has to
+        # be wide, and the in-session trickle keeps widening it.
         try:
             clips = sorted(glob.glob(os.path.join(_sky_dir(), "sky*.mov")),
                            key=os.path.getmtime)
-            for old in clips[:-12]:
+            for old in clips[:-30]:
                 os.remove(old)
         except Exception:
             pass
@@ -4436,16 +4467,24 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     ),
                 }
             else:
-                snippets = run_search(query)
                 placey = bool(re.search(
                     r"\bhours\b|\bopen\b|\bclosed?\b|\bphone\b|"
                     r"\baddress\b|\bmenu\b|\breservation", query, re.I))
+                snippets = (run_search_deep(query) if placey
+                            else run_search(query))
                 strictness = (
-                    "These snippets are your ONLY source for hours, phone "
-                    "numbers, addresses and prices. If the specific fact "
-                    "asked for is not in them, say you couldn't verify it "
-                    "and suggest checking the business's own page — NEVER "
-                    "estimate or invent it.\n" if placey else "")
+                    "The snippets and pages below are your ONLY source "
+                    "for hours, phone numbers, addresses and prices — "
+                    "never estimate or invent one.\n"
+                    "ANSWER SHAPE, exactly:\n"
+                    "1. First sentence = the verdict: open or closed "
+                    "tonight, with the hours, if the data shows it.\n"
+                    "2. Then at most three options as short bold-name "
+                    "lines: **Name** — what it is — tonight's hours.\n"
+                    "3. One practical heads-up if the data supports one. "
+                    "Nothing else: no 'best bet is to check', no filler, "
+                    "under 120 words. If the data truly lacks the answer, "
+                    "say that in ONE sentence and stop.\n" if placey else "")
                 messages[-1] = {
                     "role": "user",
                     "content": (
@@ -6948,10 +6987,16 @@ async function bootSkyline(){
   const fresh=[];
   for(let n=0;n<SKY_N;n++)if(!cached.includes(n)&&mood(n))fresh.push(n);
   if(cached.length){
-    let pool=cached.filter(x=>mood(x)&&x!==last);
+    // avoid anything played recently, not just the very last clip
+    let hist=[];
+    try{hist=JSON.parse(localStorage.getItem("millen.skyhist"))||[];}
+    catch(e){}
+    let pool=cached.filter(x=>mood(x)&&hist.indexOf(x)<0);
     if(!pool.length)pool=cached.filter(x=>x!==last);
     if(!pool.length)pool=cached.slice();
     i=pool[Math.floor(Math.random()*pool.length)];
+    hist=[i].concat(hist.filter(x=>x!==i)).slice(0,8);
+    localStorage.setItem("millen.skyhist",JSON.stringify(hist));
   }else{
     const moody=[];
     for(let n=0;n<SKY_N;n++)if(mood(n))moody.push(n);
@@ -6960,12 +7005,19 @@ async function bootSkyline(){
     if(i===last)i=(i+1)%SKY_N;
   }
   localStorage.setItem("millen.sky",i);
-  // exactly one new clip per load, after the backdrop is already playing
-  if(fresh.length){
-    const n=fresh[Math.floor(Math.random()*fresh.length)];
-    setTimeout(()=>{
-      fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{});},9000);
-  }
+  // grow the pool: one new clip after launch, then a slow TRICKLE while
+  // the app stays open — a machine that's on all day collects the whole
+  // catalogue without a single launch-time wait
+  const warmFresh=()=>{
+    const f2=[];
+    for(let n=0;n<SKY_N;n++)if(!cached.includes(n))f2.push(n);
+    if(!f2.length)return;
+    const n=f2[Math.floor(Math.random()*f2.length)];
+    cached.push(n);           // don't re-pick it next tick
+    fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{});
+  };
+  if(fresh.length)setTimeout(warmFresh,9000);
+  setInterval(()=>{if(cached.length<30)warmFresh();},600000);
   const c=$("#sky-color");
   const bar=$("#skyload"),fill=$("#skyload .fill"),lbl=$("#skyload .lbl");
   c.preload="auto";

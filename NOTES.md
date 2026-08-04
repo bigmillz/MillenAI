@@ -1002,3 +1002,15 @@ that found all three: re-execute the page's own script text via
   the weather treatment — snippets are the ONLY source, unverified means
   say so. Live: same query now cites real sources, flags their
   disagreement, invents nothing.
+
+## 3.1 — place answers + backdrop pool
+- PLACE ANSWERS Gemini-shaped: placey searches use run_search_deep
+  (snippets + readable text of the top 2 result pages via _page_text —
+  the hours live in pages, not blurbs) and a strict ANSWER SHAPE:
+  verdict first, <=3 bold-name lines, one heads-up, <=120 words.
+- ROOT CAUSE of the fabricated restobar essay: the message started with
+  "Hey", and _NO_SEARCH fires on greeting-PREFIXED messages, so search
+  never ran. needs_search now strips a leading greeting before judging.
+- BACKDROPS: LRU 12 -> 30 (~6.6 GB); 10-min in-session trickle keeps
+  warming uncached clips; skyhist (last 8) prevents repeats. The pool IS
+  the rotation — it has to be wide.
