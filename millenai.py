@@ -5547,6 +5547,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #about-ver,#up-ver{font-family:var(--helv);font-size:14px;color:var(--dim);margin-top:6px}
 #up-detail{font-size:11.5px;color:var(--faint);margin:10px 0 4px;line-height:1.5}
 #about-sub{font-size:11.5px;color:var(--faint);margin-top:10px;line-height:1.5}
+#new-pct{font-family:var(--mono);font-size:11px;color:var(--dim);
+  margin:8px 0 2px}
+#new-pct[hidden]{display:none}
+#new-bar{margin-top:16px}
 #new-list{margin:16px 0 2px;text-align:left}
 #new-list .mrow{
   display:flex;align-items:baseline;justify-content:space-between;gap:14px;
@@ -5969,7 +5973,10 @@ __AGENT_ROWS__
     <div id="about-name">New models available</div>
     <div id="up-detail">This version adds models you don&rsquo;t have yet.</div>
     <div id="new-list"></div>
+    <div class="big-bar" id="new-bar" hidden><i></i></div>
+    <div id="new-pct" hidden></div>
     <button class="about-btn primary" id="new-get">Download</button>
+    <button class="about-btn" id="new-bg" hidden>Run in background</button>
     <button class="about-btn" id="new-skip">Not now</button>
     <button class="about-btn quiet" id="new-off" hidden>Don&rsquo;t remind me again</button>
   </div>
@@ -7875,13 +7882,42 @@ async function announceModels(){
     $("#up-detail").textContent=
       "More models to enhance your experience are available.";
     $("#new-list").innerHTML="";
-    $("#new-get").textContent="See what's new";
+    $("#new-bar").hidden=true;$("#new-pct").hidden=true;
+    $("#new-get").hidden=false;$("#new-get").textContent="Download";
+    $("#new-bg").hidden=true;$("#new-skip").hidden=false;
     $("#new-off").hidden=!!fresh.length;
     veil.hidden=false;
-    $("#new-skip").onclick=async()=>{veil.hidden=true;await stamp();};
-    $("#new-get").onclick=async()=>{veil.hidden=true;await stamp();openSetup();};
+    let poll=null;
+    const stopPoll=()=>{if(poll){clearInterval(poll);poll=null;}};
+    $("#new-skip").onclick=async()=>{stopPoll();veil.hidden=true;await stamp();};
     $("#new-off").onclick=async()=>{
-      veil.hidden=true;await stamp({remind_models_off:true});};
+      stopPoll();veil.hidden=true;await stamp({remind_models_off:true});};
+    $("#new-bg").onclick=()=>{stopPoll();veil.hidden=true;};
+    $("#new-get").onclick=async()=>{
+      await stamp();
+      $("#new-get").hidden=true;$("#new-skip").hidden=true;
+      $("#new-off").hidden=true;
+      $("#new-bar").hidden=false;$("#new-pct").hidden=false;
+      $("#new-pct").textContent="starting\u2026";
+      $("#new-bg").hidden=false;
+      await fetch("/api/setup/install",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({plan:"max"})});
+      poll=setInterval(async()=>{
+        try{
+          const s=await(await fetch("/api/setup")).json();
+          $("#new-bar").firstChild.style.width=(s.overall_pct||0)+"%";
+          $("#new-pct").textContent=
+            s.have_gb+" / "+s.want_gb+" GB \u00b7 "+(s.overall_pct||0)+"%"
+            +(s.speed_mbs?" \u00b7 "+s.speed_mbs+" MB/s":"");
+          if(!s.busy&&(s.overall_pct||0)>=100){
+            stopPoll();
+            $("#new-pct").textContent="Done \u2713";
+            setTimeout(()=>{veil.hidden=true;},1600);
+          }
+        }catch(e){}
+      },2000);
+    };
   }catch(e){}
 }
 setTimeout(announceModels,2500);      // after the first paint
