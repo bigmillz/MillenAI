@@ -46,11 +46,16 @@ check("local bare URL -> app", s == 200 and b"id=\"skyline\"" in b)
 s, h, b = req("/?key=oldlink")
 check("legacy key links still land", s == 200 and b"id=\"skyline\"" in b)
 s, h, b = req("/", headers={"X-Forwarded-For": "1.2.3.4"})
-check("remote stranger -> account screen", b"pick a name and a pin" in b.lower())
+check("remote stranger -> account screen", b"continue as guest" in b.lower()
+      and b"pinform" in b)
 
 print("== identities ==")
 s, h, b = req("/", cookie=K, headers={"X-Forwarded-For": "1.2.3.4"})
-check("remote no-identity -> sign-in", b"pick a name and a pin" in b.lower())
+check("remote no-identity -> sign-in", b"continue as guest" in b.lower())
+s, h, b = req("/api/guest", "POST", {}, cookie=K,
+              headers={"X-Forwarded-For": "1.2.3.4"})
+mg = re.search(r"millen_user=([0-9a-f]{20})", str(h))
+check("guest tap mints an identity", s == 200 and mg)
 s, h, b = req("/api/welcome", "POST", {"name": "smoke", "pin": "1234"},
               cookie=K, headers={"X-Forwarded-For": "1.2.3.4"})
 check("short PIN rejected", b"8-12 digit" in b)

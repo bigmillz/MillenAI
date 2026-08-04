@@ -3443,6 +3443,11 @@ SKY_SOURCES = [
 # Clips that read DARK (Apple's own labels: the Night city passes, the
 # aurora, and the deep-ocean dives). After 7pm local the backdrop picker
 # prefers these; in daylight it avoids them.
+# the five New York clips (N-series aerials + the NY-at-night ISS pass)
+# — the picker leans toward them, per Patrick ("prioritize apple nyc")
+SKY_NYC = [i for i, u in enumerate(SKY_SOURCES)
+           if re.search(r"comp_N\d{3}_|NY_NIGHT", u)]
+
 SKY_DARK = [0, 3, 4, 6, 8, 11, 14, 16, 23, 25, 27, 31, 36, 42, 47, 52,
             56, 61, 65, 71, 75, 76, 83]
 
@@ -3753,6 +3758,24 @@ button::after{content:"";position:absolute;inset:0;
   -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
   transition:border-color .25s,background .25s}
 .gbtn:hover{border-color:rgba(143,157,255,.7);background:rgba(24,27,36,.8)}
+/* the two doors: Google is the bright one, guest the glass one */
+.gbtn.primary{display:__GOOGLE_FLEX__;align-items:center;
+  justify-content:center;gap:10px;width:100%;box-sizing:border-box;
+  background:#ececec;color:#111;font-weight:700;border:0;
+  box-shadow:0 14px 44px -18px rgba(255,255,255,.55)}
+.gbtn.primary:hover{background:#fff;transform:translateY(-1px)}
+button.guest{background:rgba(18,20,26,.55);color:#ececec;
+  border:1px solid rgba(255,255,255,.16);margin-top:12px;
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+button.guest:hover{border-color:rgba(143,157,255,.7);
+  background:rgba(24,27,36,.8);box-shadow:none}
+button.guest::after{display:none}
+.pinlink{display:inline-block;margin-top:18px;cursor:pointer;
+  font-family:'IBM Plex Mono',monospace;font-size:11.5px;color:#8a8fa0;
+  letter-spacing:.06em;border-bottom:1px dotted rgba(255,255,255,.25);
+  transition:color .2s}
+.pinlink:hover{color:#c9cede}
+#pinform{margin-top:16px;animation:doorIn .5s cubic-bezier(.16,1,.3,1) both}
 .small{margin-top:20px;font-family:'IBM Plex Mono',monospace;
   font-size:11px;color:#6e727c;line-height:1.7;letter-spacing:.02em}
 @media(prefers-reduced-motion:reduce){
@@ -3766,18 +3789,21 @@ button::after{content:"";position:absolute;inset:0;
     <div class="halo" aria-hidden="true"><h1>MillenAI</h1></div>
     <h1>MillenAI</h1>
   </div>
-  <p class="tag">Pick a name and a PIN.<br>Your chats stay yours.</p>
-  <form onsubmit="go();return false">
-    <input id="n" autocomplete="off" maxlength="24" placeholder="your name"
-           autofocus>
+  <p class="tag">Your AI. Walk right in.</p>
+  <a class="gbtn primary" href="/auth/google">
+    <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.5l6.7-6.7C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.8 6.1C12.3 13.4 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.4 5.8c4.4-4.1 7.2-10.1 7.2-17.5z"/><path fill="#FBBC05" d="M10.4 28.7a14.5 14.5 0 0 1 0-9.4l-7.8-6.1a24 24 0 0 0 0 21.6l7.8-6.1z"/><path fill="#34A853" d="M24 48c6.2 0 11.4-2 15.3-5.6l-7.4-5.8c-2.1 1.4-4.8 2.3-7.9 2.3-6.3 0-11.7-3.9-13.6-9.5l-7.8 6.1C6.5 42.6 14.6 48 24 48z"/></svg>
+    Continue with Google</a>
+  <button class="guest" onclick="guest()">Continue as guest</button>
+  <div class="err" id="e"></div>
+  <a class="pinlink" id="pinlink" onclick="togglePin()">I have a name &amp; PIN</a>
+  <form id="pinform" hidden onsubmit="go();return false">
+    <input id="n" autocomplete="off" maxlength="24" placeholder="your name">
     <input id="p" type="password" autocomplete="off" maxlength="12"
            inputmode="numeric" placeholder="PIN (8+ digits)">
     <button>Continue</button>
   </form>
-  <a class="gbtn" href="/auth/google">Continue with Google</a>
-  <div class="err" id="e"></div>
-  <div class="small">same name + PIN = same chats, on any device.<br>
-       a different PIN opens a different, empty profile.</div>
+  <div class="small" id="blurb">guest chats live in this browser.<br>
+       sign in with Google to keep them on every device.</div>
 </div>
 <script>
 // DRIFTING MOTES: slow points of light rising through the scene — the
@@ -3829,6 +3855,19 @@ button::after{content:"";position:absolute;inset:0;
     v.src="/sky/"+i+".mov";
   }catch(e){}
 })();
+function guest(){
+  const e=document.getElementById("e");
+  fetch("/api/guest",{method:"POST"})
+    .then(r=>r.json())
+    .then(d=>{if(d.ok)location.reload();
+              else e.textContent="try again";})
+    .catch(()=>{e.textContent="network error — try again";});
+}
+function togglePin(){
+  const f=document.getElementById("pinform");
+  f.hidden=!f.hidden;
+  if(!f.hidden)document.getElementById("n").focus();
+}
 function go(){
   const n=document.getElementById("n").value.trim();
   const p=document.getElementById("p").value.trim();
@@ -4022,6 +4061,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 body = (WELCOME_PAGE.replace(
                     "__GOOGLE_DISPLAY__",
                     "inline-block" if google_conf() else "none")
+                    .replace("__GOOGLE_FLEX__",
+                             "inline-flex" if google_conf() else "none")
                     .encode("utf-8"))
                 self.send_response(200)
                 self.send_header("Content-Type",
@@ -4040,6 +4081,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                              "1" if (HAS_WEBVIEW and IS_MAC) else "0")
                     .replace("__SKY_N__", str(len(SKY_SOURCES)))
                     .replace("__SKY_DARK__", json.dumps(SKY_DARK))
+                    .replace("__SKY_NYC__", json.dumps(SKY_NYC))
                     .replace("__APP_VER__", short_version()))
             body = html.encode("utf-8")
             self.send_response(200)
@@ -4386,6 +4428,21 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 uid = own
             else:
                 uid = _user_id("pin", name.lower() + ":" + pin)
+            body = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Set-Cookie",
+                             "millen_user=%s; Path=/; Max-Age=15552000; "
+                             "HttpOnly; SameSite=Lax" % uid)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path == "/api/guest":
+            # one tap, zero questions: a random private profile that lives
+            # in this browser's cookie (180 days). Google sign-in remains
+            # the way to keep chats across devices.
+            uid = _user_id("guest", secrets.token_hex(12))
             body = json.dumps({"ok": True}).encode()
             self.send_response(200)
             self.send_header("Set-Cookie",
@@ -4850,7 +4907,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         # every searched answer gets today pinned — a
                         # generic search reply opened "Mondays can be
                         # challenging" on a Tuesday (seen live)
-                        f"Today is {time.strftime('%A')}.\n{strictness}"
+                        f"Today is {time.strftime('%A')}.\n"
+                        # a burnout-retreat answer once NARRATED the junk
+                        # the engine happened to return ("Mental Floss
+                        # mentions Generation Beta") — junk is invisible
+                        "Any result that does not help answer is noise: "
+                        "never mention, summarize or apologize for an "
+                        "off-topic result. The reader must never learn "
+                        "what the search happened to return.\n"
+                        f"{strictness}"
                         f"PROMPT: {query}"
                     ),
                 }
@@ -5168,7 +5233,7 @@ html.winwipe body::before{
   content:"";position:fixed;inset:0;background:var(--bg);z-index:-99;
 }
 html.winwipe.winwipe-run body{
-  animation:winWipe .95s cubic-bezier(.3,.75,.25,1) forwards;
+  animation:winWipe .62s cubic-bezier(.3,.75,.25,1) forwards;
 }
 @keyframes winWipe{
   from{clip-path:inset(0 0 0 100%)}
@@ -7412,6 +7477,13 @@ async function bootSkyline(){
   let pool=all.filter(x=>hist.indexOf(x)<0);
   if(!pool.length)pool=all.filter(x=>x!==last);
   if(!pool.length)pool=all.length?all.slice():[...Array(SKY_N).keys()];
+  // HOME-TEAM BIAS: half the launches lean New York (the N-series
+  // aerials + the NY-at-night ISS pass), everything else still rotates.
+  // NYC only dodges the LAST THREE played, not the whole history —
+  // five clips against a 32-deep history would never resurface.
+  const nyc=new Set(JSON.parse('__SKY_NYC__'));
+  const nycAvail=all.filter(x=>nyc.has(x)&&hist.slice(0,3).indexOf(x)<0);
+  if(nycAvail.length&&Math.random()<0.5)pool=nycAvail;
   i=pool[Math.floor(Math.random()*pool.length)];
   hist=[i].concat(hist.filter(x=>x!==i)).slice(0,32);
   localStorage.setItem("millen.skyhist",JSON.stringify(hist));
@@ -8523,12 +8595,12 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
 #w{position:fixed;inset:0;display:flex;flex-direction:column;
   align-items:center;justify-content:center;
   animation:allout .5s ease 2.3s forwards}
-#hello{font-family:'Helvetica Neue',sans-serif;font-size:22px;
+#hello{font-family:'Helvetica Neue',sans-serif;font-size:2.2vw;
   letter-spacing:.55em;color:#cfcfcf;text-transform:uppercase;
   text-shadow:0 2px 18px rgba(0,0,0,.8);opacity:0;
   animation:helloIn .5s ease .25s forwards}
 #v{font-family:'Helvetica Neue',sans-serif;font-weight:800;
-  font-size:150px;letter-spacing:.02em;margin-top:6px;
+  font-size:16vw;letter-spacing:.02em;margin-top:6px;
   background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
              #6ec7ff,#8f9dff,#c98fff);
   -webkit-background-clip:text;background-clip:text;color:transparent;
@@ -8599,10 +8671,17 @@ def maybe_version_splash():
         store_prefs(prefs)
         if last is None or not (HAS_WEBVIEW and IS_MAC):
             return          # fresh install gets the boot wipe, not this
+        # the WHOLE screen, per Patrick — the version zoom is the
+        # marquee moment after an update, not a little box
+        try:
+            scr = webview.screens[0]
+            sw, sh = scr.width, scr.height
+        except Exception:
+            sw, sh = 1728, 1117
         w = webview.create_window(
             "", html=SPLASH_HTML.replace("__V__", short_version()),
             frameless=True, transparent=True, on_top=True,
-            width=1100, height=420, focus=False)
+            x=0, y=0, width=sw, height=sh, focus=False)
 
         def _bye():
             try:
