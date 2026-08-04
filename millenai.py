@@ -6657,15 +6657,26 @@ const GREETINGS=[
   "What are we solving first?","Your move.","What's it gonna be?",
   "Feed me a problem.","Where can I earn my keep?",
   "What's worth a long answer?","Let's go deep.",
-  // a little NYC, per Patrick
+  // FULL NYC, per Patrick
   "What's up?","Let's fucking go.","Yo.","What's good?",
-  "Talk to me, Goose.","Whaddaya need?","Let's get it.",
-  "What are we doing today?","Hit me.","I'm listening.",
+  "What's good dawg?","Talk to me, Goose.","Whaddaya need?",
+  "Let's get it.","What are we doing today?","Hit me.","I'm listening.",
   "What's the move?","Say less.","Let's cook.","Bet — what's up?",
   "Alright, what've you got?","Lay it on me.","What's the word?",
   "Ready when you are, chief.","Let's run it.","What's the play?",
   "Go ahead, I got time.","Shoot.","What're we getting into?",
   "Let's make it happen.","Straight up — what do you need?",
+  "Yerrr.","What's poppin'?","Ayo, what's good?","We outside.",
+  "Talk your talk.","Run me the play.","What we cookin'?",
+  "You already know what it is.","Deadass, what do you need?",
+  "No cap — hit me.","What's the science?","Gimme the rundown.",
+  "It's whatever you need, b.","What's the deal?","How we movin'?",
+  "Brick outside, warm in here — what's up?","What's the wave?",
+  "Aight, let's work.","You good? What do you need?",
+  "The city's up. So am I.","What's crackin'?","Speak your piece.",
+  "Word — what's next?","On God, let's get to it.","What it do?",
+  "Whole squad's ready. Ask away.","Mad questions? Start with one.",
+  "Son, just ask.","What's the story, kid?","Let's eat.",
 ];
 function greeting(){return GREETINGS[Math.floor(Math.random()*GREETINGS.length)];}
 (function(){const g=$(".greet");if(g)g.textContent=greeting();})();
