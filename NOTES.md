@@ -961,3 +961,13 @@ that found all three: re-execute the page's own script text via
   spares the engines. Plus a last-resort guarantee: if the whole chat
   pipeline emits ZERO bytes, retry on the smallest cached model and, if
   that is silent too, say so in plain language. A reply is never blank.
+
+## 2.15 — Fable-grade voice
+- CALIBRATION over inflation: the "always 2-3x longer" mandate made
+  simple questions insufferable. The prompt now matches depth to the ask
+  (tight+priced for quick facts, full treatment for meaty ones), demands
+  specifics over hedges, and bans closing fluff ("In conclusion", offers
+  to help further). One worked micro-example anchors the quick register.
+  REVISE + SYNTH calibrate too (complete beats long).
+- Turbo upgraded to openai/gpt-oss-120b on Groq (was llama-3.3-70b) —
+  found via /models on the configured key; turbo.sh default matches.

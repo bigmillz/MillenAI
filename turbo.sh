@@ -38,8 +38,8 @@ cat <<'INTRO'
 INTRO
 
 # defaults first: a stray keystroke must never leave these unset
-NAME="Groq"; BASE="https://api.groq.com/openai/v1"
-MODEL="llama-3.3-70b-versatile"
+NAME="Groq 120B"; BASE="https://api.groq.com/openai/v1"
+MODEL="openai/gpt-oss-120b"
 
 PICK=""
 read -r -p "  provider [1-4, default 1]: " PICK || true
