@@ -5678,6 +5678,18 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
   filter:drop-shadow(0 4px 26px rgba(140,150,255,.5))}
 #lfg[hidden]{display:none}
 #lfg.go{animation:lfgPop 2.6s cubic-bezier(.16,.8,.24,1) forwards}
+/* boot ritual: washes across the hero as the version settles — in from
+   the left on a skew, a beat over center, out the right */
+#lfg.wash{top:64%;font-size:clamp(46px,7vw,96px);
+  animation:lfgWash 2.2s cubic-bezier(.22,.61,.36,1) forwards}
+@keyframes lfgWash{
+  0%{opacity:0;transform:translateX(calc(-50% - 46vw)) skewX(-9deg)
+     scale(.92);filter:blur(16px)}
+  20%{opacity:1;filter:blur(0)}
+  46%{transform:translateX(-50%) skewX(0) scale(1.05)}
+  64%{opacity:1;transform:translateX(-50%) scale(1)}
+  100%{opacity:0;transform:translateX(calc(-50% + 46vw)) skewX(7deg);
+     filter:blur(14px)}}
 @keyframes lfgPop{
   0%{opacity:0;transform:translateX(-50%) scale(.55);filter:blur(10px)
      drop-shadow(0 4px 26px rgba(140,150,255,0))}
@@ -8175,10 +8187,22 @@ function finishSetupChrome(st,stars,anyDl){
    collapses into the wordmark. Shared by the app-open flourish and the
    downloads-complete celebration so the two are always identical. */
 let wipeBusy=false;
+let lfgWashed=false;
 function rainbowWipe(){
   const cel=$("#celebrate");
   if(perf||!cel||wipeBusy)return;         // performance mode: no theatre
   wipeBusy=true;
+  // the boot ritual: once per launch, "LFG, BITCH." washes over the
+  // hero right as the wordmark and version settle
+  if(!lfgWashed&&$("#hero")){
+    lfgWashed=true;
+    setTimeout(()=>{
+      const g=$("#lfg");
+      if(!g||!$("#hero"))return;
+      g.hidden=false;g.classList.add("wash");
+      setTimeout(()=>{g.hidden=true;g.classList.remove("wash");},2300);
+    },2350);
+  }
   cel.hidden=false;
   cel.innerHTML='<div class="sweep"></div>';
   // the wordmark flies in under the band. Measure first — once .flyin is on,

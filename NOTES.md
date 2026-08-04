@@ -1257,3 +1257,12 @@ that found all three: re-execute the page's own script text via
   go."). Purged per Patrick: "On God" (no church), "Let's ship
   something" / "move the needle" / "whiteboard" (no startup-speak).
   A plain-spoken handful stays for balance.
+
+## 3.10.2 — the boot wash
+- "LFG, BITCH." is a boot ritual now: once per launch, ~2.3s after the
+  rainbow wipe starts (right as the wordmark and version settle), it
+  washes across the hero — in from the left on a skew, a beat over
+  center, out the right, 2.2s total. Sits at top:64% (it originally
+  rode the greeting line at 47% and both went muddy — frozen-frame
+  check caught it). The loading-bar payoff pop still fires separately
+  after real downloads. Perf mode skips both.
