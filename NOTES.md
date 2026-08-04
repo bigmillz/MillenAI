@@ -1250,3 +1250,10 @@ that found all three: re-execute the page's own script text via
   self-removal (hotlink-hostile CDNs just disappear quietly).
 - Verified live: Lucali → closed-Tuesday verdict, lucali.com/yelp
   chips, the shop's own two photos, and a Henry Street pin on the map.
+
+## 3.10.1 — greetings, full NYC
+- The hero greetings rewritten NYC-majority: bodega warmth, subway
+  pace ("Bodega's open. What do you need?", "In a New York minute —
+  go."). Purged per Patrick: "On God" (no church), "Let's ship
+  something" / "move the needle" / "whiteboard" (no startup-speak).
+  A plain-spoken handful stays for balance.
