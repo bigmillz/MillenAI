@@ -132,7 +132,11 @@ SYSTEM_PROMPT = {
         "taco, $12-15 for a plate of three' over 'prices vary'. End when "
         "the answer is done — no summary paragraphs, no 'In conclusion', "
         "no offering to help further. Use a list only for truly "
-        "enumerable things. When you don't know, say so plainly. When "
+        "enumerable things. When you don't know, say so plainly. NEVER "
+        "invent verifiable specifics — phone numbers, street addresses, "
+        "business hours, prices at a specific place, URLs. If you don't "
+        "have real data for one, say exactly that and point at where to "
+        "check; a made-up phone number is worse than no answer. When "
         "stakes are real (health, money, code), be rigorous.\n\n"
         "Example of the register for a quick ask —\n"
         "Q: whats a good price for tacos in nyc\n"
@@ -1047,6 +1051,13 @@ _FRESH_WORDS = (
     "price", "stock", "market", "score", "standings", "election",
     "release date", "released", "just announced", "who won", "what happened",
     "trending", "live", "update", "version",
+    # LOCAL / LIVE FACTS — a business-hours question fabricated opening
+    # times and a 555 phone number (seen live). Over-searching is cheap;
+    # an invented phone number is not.
+    "hours", "open now", "near me", "phone number", "address",
+    "menu", "reservation", "showtimes", "tickets", "schedule",
+    "this weekend", "in stock", "wait time", "happening", "closes",
+    "closing time", "opening time",
 )
 _FRESH_PATTERNS = (
     re.compile(r"\b20[2-9]\d\b"),                 # a specific modern year
@@ -1055,6 +1066,8 @@ _FRESH_PATTERNS = (
     re.compile(r"\bwhat('?s| is)\s+(the\s+)?(latest|newest|current)\b"),
     re.compile(r"\bis\s+there\s+(a|an)\s+new\b"),
     re.compile(r"\b(out|available|released)\s+yet\b"),
+    re.compile(r"\b(is|are|when)\b.*\b(open|closed?)\b"),
+    re.compile(r"\bwhat\s+time\b.*\b(open|close)"),
 )
 # never search these — they're about the conversation, not the world
 _NO_SEARCH = re.compile(
@@ -4424,11 +4437,20 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 }
             else:
                 snippets = run_search(query)
+                placey = bool(re.search(
+                    r"\bhours\b|\bopen\b|\bclosed?\b|\bphone\b|"
+                    r"\baddress\b|\bmenu\b|\breservation", query, re.I))
+                strictness = (
+                    "These snippets are your ONLY source for hours, phone "
+                    "numbers, addresses and prices. If the specific fact "
+                    "asked for is not in them, say you couldn't verify it "
+                    "and suggest checking the business's own page — NEVER "
+                    "estimate or invent it.\n" if placey else "")
                 messages[-1] = {
                     "role": "user",
                     "content": (
                         "You have internet access. Using these live search "
-                        f"snippets, answer the prompt.\n"
+                        f"snippets, answer the prompt.\n{strictness}"
                         f"SNIPPETS FOR '{query}':\n{snippets}\n\nPROMPT: "
                         f"{query}"
                     ),

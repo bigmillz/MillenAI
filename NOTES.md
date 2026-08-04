@@ -993,3 +993,12 @@ that found all three: re-execute the page's own script text via
   cards don't have — so their buttons ran to the card edge. Scoped
   padding added via #update-veil/#new-veil #about-card. Renaming those
   ids is still the real fix.
+- 2.17.5 LIVE DATA: business-hours question got FABRICATED hours + a 555
+  phone number (seen live). Three-layer fix: (a) needs_search learns
+  local/live-fact triggers (hours, open now, phone number, address,
+  menu, showtimes…, plus is/when…open patterns) — over-searching is
+  cheap, an invented phone number is not; (b) system prompt bans
+  inventing verifiable specifics outright; (c) place-shaped searches get
+  the weather treatment — snippets are the ONLY source, unverified means
+  say so. Live: same query now cites real sources, flags their
+  disagreement, invents nothing.
