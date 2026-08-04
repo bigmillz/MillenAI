@@ -6626,6 +6626,10 @@ __AGENT_ROWS__
 <script>
 "use strict";
 const $=s=>document.querySelector(s), $$=s=>document.querySelectorAll(s);
+// a tunnel visitor (phone, friend's laptop) BORROWS this machine's
+// models — model management, GPU sharing and install nudges belong to
+// the owner sitting at it, never to the borrower
+const IS_LOCAL=location.hostname==="127.0.0.1"||location.hostname==="localhost";
 
 /* ------------------------------------------------------------- state */
 let messages=[], generating=false, abortCtl=null;
@@ -8143,11 +8147,13 @@ setupGo.addEventListener("click",async()=>{
 });
 $("#open-setup").addEventListener("click",()=>{aboutVeil.hidden=true;openSetup();});
 $("#models-up").addEventListener("click",openSetup);
+if(!IS_LOCAL)$("#models-up").hidden=true;   // borrowers can't install
 // ONE-TIME invitation, and never during the show: it waits for the
 // rainbow wipe to LAND (body.painted, wipeBusy clear) so the card never
 // crowds the boot flourish. Marked seen the moment it appears, so it is
 // genuinely once — answered or not.
 (async function shareInvite(){
+  if(!IS_LOCAL)return;
   try{
     const pr=await(await fetch("/api/prefs")).json();
     if(pr.seen_share||pr.contrib_on){
@@ -8295,9 +8301,10 @@ setTimeout(kickWipe,450);
     const st=await(await fetch("/api/setup")).json();
     // auto-open only when the app can't hold a conversation yet
     paintModelsFlag(st);
-    if(st.needs_setup){
-      // first run opens on the Basic / Pro / Max choice — the pick is
-      // the only decision, then everything is automatic
+    if(st.needs_setup&&IS_LOCAL){
+      // first run opens on the Fast / Pro / Max choice — the pick is
+      // the only decision, then everything is automatic. Remote
+      // visitors never see it: they use whatever the host has.
       openSetup();setupManual=false;
     }
   }catch(e){}
@@ -8398,6 +8405,7 @@ async function openAbout(){
 // opt-out. At most one card per launch, and never during first-run setup.
 const REMIND_GAP=20*60*60*1000;       // "daily", forgiving of launch times
 async function announceModels(){
+  if(!IS_LOCAL)return;
   try{
     const [st,prefs]=await Promise.all([
       (await fetch("/api/setup")).json(),

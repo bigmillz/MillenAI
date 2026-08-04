@@ -1196,3 +1196,12 @@ that found all three: re-execute the page's own script text via
 - The flat grey band across the bottom was #composer-wrap's opaque
   --bg gradient painting over the video — now a translucent scrim
   (rgba(5,6,10,.62)) so the backdrop runs to the window edge.
+
+## 3.8.2 — borrowers don't manage the host
+- The models nudge appeared on a PHONE visiting the tunnel (seen live:
+  "shouldn't the mobile app use my laptop's models?") — exactly right:
+  a remote visitor borrows the host's models. New IS_LOCAL gate
+  (hostname is 127.0.0.1/localhost) turns off, for borrowers: the
+  first-run installer, the daily models nudge, the share-GPU invite,
+  and the sidebar models-up button. Server-side admin lockdown already
+  blocked the actions; now the UI stops offering them.
