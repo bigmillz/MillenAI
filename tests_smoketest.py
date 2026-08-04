@@ -162,7 +162,11 @@ check("weather answer carries real data", ("°F" in t or "degrees" in t or " mph
 t = chat({"model": "", "models": [], "tier": "Fast", "auto_web": True,
           "messages": [{"role": "user", "content": "is qzxvbn cafe in bushwick open tonight"}]})
 check("unknown place gets helpful no-match answer",
-      len(t) > 100 and "?" in t and "⚠️" not in t, t[:160])
+      len(t) > 100 and "?" in t and "⚠️" not in t
+      # the shape is taught by a Milano's/Ridgewood worked example —
+      # its names leaking into the answer means the fence failed
+      and "milano" not in t.lower() and "ridgewood" not in t.lower(),
+      t[:160])
 
 
 print("== attached files ==")

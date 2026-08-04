@@ -1045,3 +1045,20 @@ that found all three: re-execute the page's own script text via
   when the copy got capitalized; ZEBRA-42 check normalized (models emit
   U+2011 non-breaking hyphens). New gauntlet check: unknown place must
   get a helpful no-match answer, not a shrug.
+
+## 3.3.1 — greetings out of queries, phrase-loop guard
+- "Yo is abes in bushwick open" produced an answer about a place called
+  "Yo is Abe's": needs_search stripped the greeting only for its own
+  judgment; the QUERY kept it. strip_greeting() factored out, applied to
+  the query itself, and it now PEELS STACKED greetings ("yo yo yo",
+  "whats good dawg") in a loop. Slang also backstopped in _PLACE_FILLER.
+- _looks_degenerate learned phrase loops: "…which is considered to be X
+  since the restaurant is not busy" seven times over sailed under every
+  uniqueness ratio because the varied nouns diluted it. New rule: any
+  4-gram repeated 6+ times is a collapse.
+- place_search page fetches ranked by authority: the place's own domain
+  (anchor in host) then yelp/tripadvisor/opentable, then the rest — a
+  blog post's stale hours once beat the official site to the fetch slot.
+- The Milano's/Ridgewood worked example leaked into a real answer
+  verbatim; the prompt now fences it ("belong to the example ONLY") and
+  the smoketest asserts the fence holds.

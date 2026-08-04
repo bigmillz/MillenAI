@@ -1093,17 +1093,32 @@ _NO_SEARCH = re.compile(
     r"write|draft|code|refactor|debug|fix)\b", re.I)
 
 
+def strip_greeting(p: str) -> str:
+    """'Yo is abes in bushwick open' -> 'is abes in bushwick open'.
+
+    New Yorkers open with a greeting; it must never reach a search
+    engine ("Yo is Abe's" was presented back as the place's NAME) nor
+    the no-search guard, which fires on greeting-prefixed messages.
+    """
+    rx = re.compile(r"^(hey|hi|hello|yo+|ayo|yerr+|sup|wass?up|whats\s+"
+                    r"(up|good)|good\s+(morning|afternoon|evening)|dawg|"
+                    r"bro|fam|dude|man|homie)\b[\s,!.\u2014-]*", re.I)
+    p = p.strip()
+    # "yo yo yo" and "whats good dawg" stack greetings \u2014 peel until quiet
+    for _ in range(4):
+        q = rx.sub("", p)
+        if q == p:
+            break
+        p = q
+    return p
+
+
 def needs_search(prompt: str) -> bool:
     """Heuristic: does answering this require information from after the
     model's training cutoff? Cheap and deliberately conservative."""
     if not HAS_SEARCH:
         return False
-    p = prompt.strip()
-    # "Hey is abe's open tonight" was never searched: the no-search guard
-    # fires on any message that STARTS with a greeting, and New Yorkers
-    # open with one. Strip the hello, judge the question. (Seen live.)
-    p = re.sub(r"^(hey|hi|hello|yo+|ayo|yerr+|sup|good\s+(morning|"
-               r"afternoon|evening))\b[\s,!.\u2014-]*", "", p, flags=re.I)
+    p = strip_greeting(prompt)
     if len(p) < 8 or _NO_SEARCH.match(p):
         return False
     low = p.lower()
@@ -2370,12 +2385,13 @@ def run_search_deep(query: str, pages: int = 2) -> str:
 # what's left after removing them is the entity + locality ("ables
 # bushwick"), which is what a search engine actually wants
 _PLACE_FILLER = frozenset("""
-    a an and are at book by call can close closed closes closing could
-    currently do does for from get hi hey hours hows how i if in is it its
-    me my near now number of on open or over phone please reservation
-    reservations right still take takes tell that the their there they this
-    time times to today tomorrow tonight until up wanna want was we what
-    whats when whens where wheres which who whos will would yall you your
+    a an and are at ayo book bro by call can close closed closes closing
+    could currently dawg do does fam for from get hello hey hi hours hows
+    how i if in is it its lol man me my near now number of on open or over
+    phone please reservation reservations right still sup take takes tell
+    that the their there they this time times to today tomorrow tonight
+    until up wanna want was wassup we what whats when whens where wheres
+    which who whos will would yall yerr yo you your
 """.split())
 
 
@@ -2426,9 +2442,19 @@ def place_search(query: str) -> tuple:
     ctx = "\n".join("- %s: %s" % (r.get("title") or "", r.get("body") or "")
                     for r in ordered[:8]) or "No snippets found."
     # pages are worth 7 seconds each ONLY when they're about the right
-    # place — reading listicles about the neighborhood is pure latency
-    urls = [(r.get("href") or "") for r in direct
-            if (r.get("href") or "").startswith("http")][:2]
+    # place — reading listicles about the neighborhood is pure latency.
+    # Authority first: the place's own site (name in the domain) or a
+    # listings page beats a blog post that may carry stale hours.
+    def _rank(u):
+        host = u.split("/")[2].lower() if u.count("/") >= 2 else ""
+        if anchor and anchor.replace("'", "") in host.replace("-", ""):
+            return 0                       # lucali.com for "lucali"
+        if any(d in host for d in ("yelp.", "tripadvisor.", "opentable.")):
+            return 1
+        return 2
+    urls = sorted(((r.get("href") or "") for r in direct
+                   if (r.get("href") or "").startswith("http")),
+                  key=_rank)[:2]
     extras = _fetch_pages(urls)
     if extras:
         ctx += "\n\n" + "\n\n".join(extras)
@@ -2753,6 +2779,16 @@ def _looks_degenerate(text: str) -> bool:
         t60 = words[-60:]
         if len(set(t60)) / len(t60) < 0.30:
             return True
+    # phrase loop: "…which is considered to be X since the restaurant is
+    # not busy" seven times over (seen live) sails under every uniqueness
+    # ratio — the varied nouns dilute it. No genuine answer repeats one
+    # 4-gram six times.
+    grams = {}
+    for i in range(len(words) - 3):
+        g = tuple(words[i:i + 4])
+        grams[g] = grams.get(g, 0) + 1
+    if grams and max(grams.values()) >= 6:
+        return True
     # a collapse AFTER a healthy start hides inside the whole-text
     # average: a real three-paragraph answer followed by "party" x600
     # still scored 0.33 and streamed to a phone (seen live). The TAIL
@@ -4561,7 +4597,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             query = prompt[7:].strip()
         elif (auto_web and needs_search(prompt)
               and not TIERS.get(tier, {}).get("research")):
-            query = prompt.strip()
+            # the greeting is chat, not query — "Yo is abes open" once
+            # produced an answer about a place called "Yo is Abe's"
+            query = strip_greeting(prompt) or prompt.strip()
 
         if query:
             snippets = None
@@ -4631,7 +4669,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         "genuinely similar (skip that beat otherwise); "
                         "one short question to pin it down. Under 80 "
                         "words. Never invent hours, phone numbers or "
-                        "addresses.\n")
+                        "addresses. Milano's, Milano Market and Ridgewood "
+                        "belong to the example ONLY — never mention them; "
+                        "use the place and neighborhood from the PROMPT "
+                        "below.\n")
                 else:
                     strictness = ""
                 # data FIRST, instructions LAST — an instruction buried
