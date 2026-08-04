@@ -3583,12 +3583,10 @@ def _sky_fetch(i: int):
         _faststart(tmp, _sky_path(i))
         with _sky_lock:
             _sky_jobs[i] = {"status": "ready", "pct": 100}
-        # THE WHOLE CATALOG lives on disk now (~20 GB), per Patrick ("i
-        # want all the apple ones") — the LRU only guards against a
-        # future catalog shrink. Orphans from old catalog hashes were
-        # silently eating gigabytes while never being playable: 34 files
-        # on disk, 16 valid (seen live) — delete anything whose name no
-        # current clip hashes to, plus day-old dead .dl partials.
+        # NO STOCKPILE (3.8, per Patrick): the bar plays every launch
+        # and the disk keeps only the playing clip and its predecessor
+        # — a re-pick of a recent clip is instant, nothing archives.
+        # Orphans from old catalog hashes get deleted too.
         try:
             valid = {os.path.basename(_sky_path(n))
                      for n in range(len(SKY_SOURCES))}
@@ -3598,7 +3596,7 @@ def _sky_fetch(i: int):
                 if os.path.basename(p) not in valid:
                     os.remove(p)
             clips = [p for p in clips if os.path.basename(p) in valid]
-            for old in clips[:-len(SKY_SOURCES)]:
+            for old in clips[:-2]:
                 os.remove(old)
             for part in glob.glob(os.path.join(_sky_dir(), "*.dl")):
                 if time.time() - os.path.getmtime(part) > 86400:
@@ -5567,12 +5565,23 @@ body.gen #skyline,body.gen #stars{filter:brightness(.7)}
   transform:translateX(-50%);
   z-index:4;width:min(440px,50vw);text-align:center;pointer-events:none}
 #skyload[hidden]{display:none}
-#skyload .track{height:10px;border-radius:5px;overflow:hidden;
-  background:rgba(255,255,255,.14)}
-#skyload .fill{height:100%;width:0;border-radius:5px;background:#d6d8de;
+#skyload .track{height:18px;border-radius:10px;overflow:hidden;
+  background:rgba(255,255,255,.09);
+  border:1px solid rgba(255,255,255,.25);
+  box-shadow:0 6px 30px -10px rgba(0,0,0,.7),
+             inset 0 1px 3px rgba(0,0,0,.35)}
+#skyload .fill{height:100%;width:0;border-radius:10px;
+  background:linear-gradient(90deg,#ffdede,#ffedcf,#fbf6cf,#d9f8e6,
+             #d3e9ff,#e0dcff,#ffdede);
+  background-size:220% 100%;
+  box-shadow:0 0 22px rgba(255,255,255,.4);
   transition:width .5s ease}
-#skyload .lbl{margin-top:10px;font-size:14px;letter-spacing:.16em;
-  text-transform:uppercase;color:#a8a8a8;font-family:var(--mono)}
+body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
+@keyframes skyshimmer{from{background-position:0% 0}
+                      to{background-position:220% 0}}
+#skyload .lbl{margin-top:13px;font-size:13px;letter-spacing:.24em;
+  text-transform:uppercase;color:#dfe3ee;font-family:var(--mono);
+  text-shadow:0 2px 14px rgba(0,0,0,.7)}
 /* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
    follows it edge-for-edge, unlike the wordmark's tighter window */
 body.painting #sky-color{
@@ -6074,25 +6083,27 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #turbo-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
   color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
   text-align:left}
-#turbo-row input,#contrib-row input,#nolimits-row input{
+#turbo-row input,#contrib-row input,#nolimits-row input,#share-row input{
   appearance:none;-webkit-appearance:none;
   width:17px;height:17px;flex:none;margin:0;border-radius:5px;
   border:1.5px solid var(--faint);background:rgba(255,255,255,.04);
   cursor:pointer;position:relative;transition:all .15s;
 }
-#turbo-row input:hover,#contrib-row input:hover,#nolimits-row input:hover{
+#turbo-row input:hover,#contrib-row input:hover,#nolimits-row input:hover,
+#share-row input:hover{
   border-color:var(--accent-hot)}
 #turbo-row input:checked,#contrib-row input:checked,
-#nolimits-row input:checked{
+#nolimits-row input:checked,#share-row input:checked{
   background:var(--accent);border-color:var(--accent)}
 #turbo-row input:checked::after,#contrib-row input:checked::after,
-#nolimits-row input:checked::after{
+#nolimits-row input:checked::after,#share-row input:checked::after{
   content:"";position:absolute;left:5px;top:1.5px;
   width:4px;height:9px;border:solid #14161c;
   border-width:0 2.2px 2.2px 0;transform:rotate(45deg)}
-#turbo-row,#contrib-row,#nolimits-row{
+#turbo-row,#contrib-row,#nolimits-row,#share-row{
   display:flex;align-items:center;gap:10px;font-size:13px;
   color:var(--text);padding:8px 2px;cursor:pointer;line-height:1.4}
+#share-row[hidden]{display:none}
 #turbo-row[hidden]{display:none}
 .hint{
   font-style:normal;width:15px;height:15px;flex:none;cursor:help;
@@ -6532,7 +6543,6 @@ __AGENT_ROWS__
       </details>
     </div>
     <div id="adv-grid">
-      <button class="about-btn" id="about-preload">Preload backdrops</button>
       <button class="about-btn" id="open-setup">Model updates&hellip;</button>
       <button class="about-btn" id="about-check">Check for updates</button>
       <button class="about-btn" id="about-forget">Forget me</button>
@@ -6577,6 +6587,9 @@ __AGENT_ROWS__
     <label id="nolimits-row"><input type="checkbox" id="nolimits">
       No limits — offer models beyond this machine&rsquo;s memory
       (can swap hard)</label>
+    <label id="share-row"><input type="checkbox" id="share-first">
+      &#9889; Share GPU power — when idle, your machine helps answer the
+      community&rsquo;s questions (off any time in Settings)</label>
     <div id="setup-note"></div>
     <div id="setup-foot">
       <button id="setup-later">Later</button>
@@ -7442,21 +7455,17 @@ pollEngines();setInterval(pollEngines,8000);
 // /sky/<i>.mov — the raw CDNs are unusable in a browser (phobos: http-only;
 // sylvan: moov atom after 370 MB of mdat, nothing plays until the whole
 // file lands). The server downloads once, remuxes fast-start, caches, and
-// streams with Range support. While it warms, the macOS-style #skyload bar
-// tracks the download; a different clip still plays every launch.
+// streams with Range support. While it downloads, the #skyload bar has
+// its moment; a different clip plays every launch, nothing stockpiles.
 const SKY_N=parseInt("__SKY_N__",10)||5;   // injected: len(SKY_SOURCES)
 const skyline=$("#skyline");
 async function bootSkyline(){
   if(perf||!skyline)return;
-  // PLAY FROM THE CACHE: picking blind across 89 clips meant nearly every
-  // launch hit an undownloaded one and sat behind the Loading bar. Now the
-  // pick comes from what's already on disk (instant), and ONE new clip
-  // warms silently in the background so variety keeps growing anyway.
+  // NO STOCKPILE, per Patrick: pick fresh every launch and let the bar
+  // play its moment — the loading bar IS part of the show. The server
+  // keeps only the last couple of files, never a 20 GB archive.
   const last=parseInt(localStorage.getItem("millen.sky")||"-1",10);
   const firstEver=last<0;
-  let cached=[];
-  try{cached=(await(await fetch("/api/sky/cached")).json()).cached||[];}
-  catch(e){}
   const darkSet=new Set(JSON.parse('__SKY_DARK__'));
   // THE POOL IS OPEN: all 89 Apple clips are eligible ("getting kinda
   // stale"). The dark set is only a first-run preference now — the warp
@@ -7488,18 +7497,6 @@ async function bootSkyline(){
   hist=[i].concat(hist.filter(x=>x!==i)).slice(0,32);
   localStorage.setItem("millen.skyhist",JSON.stringify(hist));
   localStorage.setItem("millen.sky",i);
-  // TRICKLE: keep pulling clips while the app is open until the whole
-  // catalogue is local — a machine that's on all day collects them all
-  const warmFresh=()=>{
-    const f2=[];
-    for(let n=0;n<SKY_N;n++)if(!cached.includes(n)&&n!==i)f2.push(n);
-    if(!f2.length)return;
-    const n=f2[Math.floor(Math.random()*f2.length)];
-    cached.push(n);           // don't re-pick it next tick
-    fetch("/api/sky/status?i="+n+"&warm=1").catch(()=>{});
-  };
-  setTimeout(warmFresh,20000);
-  setInterval(()=>{if(cached.length<SKY_N)warmFresh();},300000);
   const c=$("#sky-color");
   const bar=$("#skyload"),fill=$("#skyload .fill"),lbl=$("#skyload .lbl");
   c.preload="auto";
@@ -7968,7 +7965,7 @@ function setTitle(t,s){
 }
 function planCards(st){
   const rem=st.plans||{};
-  const meta=[["basic","Basic","Fast answers, tiny download"],
+  const meta=[["basic","Fast","Quick answers, tiny download"],
               ["pro","Pro","Great everyday quality"],
               ["max","Max","The best this machine can run"]];
   if((rem[setupPlan]||0)<=0){
@@ -8099,6 +8096,13 @@ function openSetup(){
 function closeSetup(){veil.hidden=true;if(setupTimer){clearInterval(setupTimer);setupTimer=null;}input.focus();}
 setupLater.addEventListener("click",closeSetup);
 setupGo.addEventListener("click",async()=>{
+  const sh=$("#share-first");
+  if(sh&&sh.checked){
+    fetch("/api/prefs",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({contrib_on:true,seen_share:true})});
+    sh.closest("#share-row").hidden=true;
+  }
   if(setupAllReady){closeSetup();return;}
   await fetch("/api/setup/install",{method:"POST",
     headers:{"Content-Type":"application/json"},
@@ -8106,38 +8110,6 @@ setupGo.addEventListener("click",async()=>{
   setupTick();
 });
 $("#open-setup").addEventListener("click",()=>{aboutVeil.hidden=true;openSetup();});
-// PRELOAD: warm a handful of uncached clips so later launches open fast
-// — the loading bar stays, it just has far less to do
-$("#about-preload").addEventListener("click",async()=>{
-  const btn=$("#about-preload");
-  if(btn.dataset.busy)return;
-  btn.dataset.busy="1";
-  try{
-    const have=new Set(((await(await fetch("/api/sky/cached")).json())
-      .cached)||[]);
-    const want=[];
-    for(let n=0;n<SKY_N&&want.length<6;n++)if(!have.has(n))want.push(n);
-    if(!want.length){
-      btn.textContent="All cached \u2713";
-    }else{
-      for(let k=0;k<want.length;k++){
-        btn.textContent="Preloading "+(k+1)+"/"+want.length+"\u2026";
-        // one download lane server-side: queue it, then wait for it
-        await fetch("/api/sky/status?i="+want[k]+"&warm=1").catch(()=>{});
-        for(let t=0;t<200;t++){
-          let st={status:"error"};
-          try{st=await(await fetch("/api/sky/status?i="+want[k])).json();}
-          catch(e){}
-          if(st.status==="ready"||st.status==="error")break;
-          await new Promise(r=>setTimeout(r,1500));
-        }
-      }
-      btn.textContent="Done \u2713";
-    }
-  }catch(e){btn.textContent="Preload backdrops";}
-  setTimeout(()=>{btn.textContent="Preload backdrops";
-    delete btn.dataset.busy;},3000);
-});
 $("#models-up").addEventListener("click",openSetup);
 // ONE-TIME invitation, and never during the show: it waits for the
 // rainbow wipe to LAND (body.painted, wipeBusy clear) so the card never
@@ -8146,7 +8118,10 @@ $("#models-up").addEventListener("click",openSetup);
 (async function shareInvite(){
   try{
     const pr=await(await fetch("/api/prefs")).json();
-    if(pr.seen_share||pr.contrib_on)return;
+    if(pr.seen_share||pr.contrib_on){
+      const row=$("#share-row");if(row)row.hidden=true;
+      return;
+    }
     const st=await(await fetch("/api/setup")).json();
     if(st.needs_setup||st.busy)return;      // let them finish setting up
     const t0=Date.now();

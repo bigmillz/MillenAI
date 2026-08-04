@@ -1170,3 +1170,20 @@ that found all three: re-execute the page's own script text via
 - Searched answers: off-topic results are invisible — never narrated
   ("Mental Floss mentions Generation Beta" appeared in a burnout
   answer; the reader must never learn what the search returned).
+
+## 3.8 — the bar gets its moment
+- BACKDROPS, final form (reverses 3.6's stockpile, per Patrick): pick
+  fresh every launch, ALWAYS ride the loading bar, keep only the
+  playing clip + its predecessor on disk (4.9 GB cache observed →
+  1.4 GB). Trickle, cache-pool pick and the Preload button are gone.
+  NYC bias and 32-deep history stay.
+- The bar itself: 18px tall, pastel-rainbow fill that shimmers (perf
+  mode: static), bordered glowing track, lighter tracking-wide label.
+- FIRST RUN: plan cards renamed Basic→Fast (matches the tier), and the
+  setup card carries a "Share GPU power" checkbox — ticking it at
+  Download arms Contribute and marks seen_share so the later one-time
+  invite never re-asks. Anyone who already decided has the row hidden.
+- Cloud GPU without signup: doesn't exist legitimately — any keyless
+  "free LLM API" is someone's abused proxy. The honest answers are the
+  Community GPU fleet (no signup, already built) and Turbo with a
+  2-minute free key. Documented here so we stop re-asking.
