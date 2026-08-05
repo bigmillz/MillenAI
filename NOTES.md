@@ -1351,3 +1351,28 @@ that found all three: re-execute the page's own script text via
 - The backdrop loading bar can no longer paint over an answer: every
   bar-show site is gated on hero-present + not-generating (plus a
   body.gen CSS kill switch).
+
+## 4.2 — free cloud (honest version), sliding tabs, softer boot
+- FREE CLOUD, the truth: scraping Gemini/Claude web UIs is out (their
+  terms, and dead-in-a-week endpoints). What exists legitimately:
+  pollinations.ai's ANONYMOUS tier (gpt-oss-20b, keyless, built for
+  this). Measured behavior: answers for a while, then 402s everything —
+  so it's wired as an opportunistic BONUS: Best tier (and keyless
+  turbo) tries it with a 15s cap; one failure buys an hour of cooldown;
+  never taxes the latency when it's down. Streaming SSE 402s on the
+  anonymous tier (measured) — take the whole answer, emit in slices.
+- The real "no effort, better answers" path: /api/cloud/set + a
+  Settings panel — pick Gemini/Groq/Claude, paste a key, it live-tests
+  before saving (0600), arms turbo. Owner-at-machine only. turbo.sh
+  still works; nobody needs it now.
+- AI|AGENTS is a real segmented control: one lit pill (#tab-glide)
+  SLIDES between tabs on a spring curve, Claude-style, labels cross-
+  fade. Grouped track, hairline border.
+- Backdrops FADE in on every source change (.swapping opacity ramp) —
+  boot, standby crossfade, error re-warm — never a hard cut.
+- "LFG, BITCH." → "LET'S FUCKING GO." — and after an update, the line
+  lives INSIDE the version splash (rainbow gradient, rises at 1.35s);
+  the boot wash skips that launch (__SPLASH_LFG__ flag) so it never
+  says it twice.
+- Web UI gets everything (same file serves both); cloud-key panel is
+  IS_LOCAL-gated like the rest of model management.

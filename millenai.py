@@ -379,6 +379,56 @@ OLLAMA_TAGS = {l: i["ollama"] for l, i in MODEL_INFO.items() if i["ollama"]}
 CLOUD_FILE = os.path.join(app_dir(), "cloud.json")
 
 
+# ZERO-SIGNUP BOOST, per Patrick: a public inference service that
+# publishes an "anonymous" tier — no key, no account, no scraping of
+# anyone's web UI (which would be both against their terms and dead
+# within a week). Used when Turbo has no key of its own; a real key
+# always wins because it's faster and has real quota.
+FREE_CLOUD = {"name": "Community cloud",
+              "base": "https://text.pollinations.ai/openai",
+              "model": "openai-fast"}
+
+
+_free_cold = [0.0]      # unix time until which the free tier is skipped
+
+
+def free_cloud_stream(messages: list, emit, timeout: int = 15) -> bool:
+    """Answer from the keyless public endpoint. False = fall back local.
+
+    NOT server-sent events: that path 402s and returns routing errors on
+    the anonymous tier (measured), while the plain POST is reliable. So
+    take the whole answer, then emit it in small slices — the reader
+    still sees it arrive, and nothing downstream can tell the
+    difference.
+    """
+    # MEASURED: the anonymous tier answers for a while, then 402s every
+    # request for a stretch. One failure buys an hour of silence so a
+    # dead free tier never taxes the latency of every question.
+    if time.time() < _free_cold[0]:
+        return False
+    payload = json.dumps({"model": FREE_CLOUD["model"], "messages": messages,
+                          "max_tokens": 2048, "temperature": 0.7}).encode()
+    req = urllib.request.Request(
+        FREE_CLOUD["base"], data=payload,
+        headers={"Content-Type": "application/json",
+                 "User-Agent": "MillenAI/%s" % APP_VERSION})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.load(r)
+        txt = ((d.get("choices") or [{}])[0].get("message") or {}
+               ).get("content") or ""
+    except Exception:
+        _free_cold[0] = time.time() + 3600
+        return False
+    txt = strip_think(txt).strip()
+    if len(txt) < 20 or _looks_degenerate(txt):
+        return False
+    for i in range(0, len(txt), 24):
+        emit(txt[i:i + 24])
+        time.sleep(0.012)
+    return True
+
+
 def cloud_conf():
     try:
         with open(CLOUD_FILE) as f:
@@ -4185,6 +4235,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     .replace("__SKY_N__", str(len(SKY_SOURCES)))
                     .replace("__SKY_DARK__", json.dumps(SKY_DARK))
                     .replace("__SKY_NYC__", json.dumps(SKY_NYC))
+                    .replace("__SPLASH_LFG__",
+                             "1" if _splash_shown[0] else "0")
                     .replace("__APP_VER__", short_version()))
             body = html.encode("utf-8")
             self.send_response(200)
@@ -4546,6 +4598,83 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+            return
+        if self.path == "/api/cloud/set":
+            # KEY SETUP IN-APP, per Patrick ("no extra user effort"):
+            # the owner pastes a key into their own running app; it is
+            # written 0600 next to the other config and never echoed
+            # back. Owner-at-the-machine only — a remote visitor must
+            # never be able to point the host at their endpoint.
+            if self._remote():
+                self._send_json({"ok": False, "err": "owner only"})
+                return
+            n2 = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                d = json.loads(self.rfile.read(n2)) if n2 else {}
+            except (ValueError, json.JSONDecodeError):
+                d = {}
+            key = str(d.get("key", "")).strip()
+            which = str(d.get("provider", "gemini")).strip().lower()
+            if which == "off":
+                try:
+                    os.remove(CLOUD_FILE)
+                except Exception:
+                    pass
+                p = load_prefs(None); p["turbo"] = False; store_prefs(p)
+                self._send_json({"ok": True, "off": True})
+                return
+            spec = {
+                "gemini": ("Gemini",
+                           "https://generativelanguage.googleapis.com"
+                           "/v1beta/openai", "gemini-2.5-flash"),
+                "groq": ("Groq 120B", "https://api.groq.com/openai/v1",
+                         "openai/gpt-oss-120b"),
+                "claude": ("Claude", "https://api.anthropic.com/v1",
+                           "claude-sonnet-4-5"),
+            }.get(which)
+            if not spec or len(key) < 12:
+                self._send_json({"ok": False, "err": "paste a full key"})
+                return
+            name, base, model = spec
+            # live-test before saving: a bad key must fail HERE, not
+            # silently on the user's next question
+            try:
+                if "anthropic" in base:
+                    tq = urllib.request.Request(
+                        base + "/messages",
+                        data=json.dumps({"model": model, "max_tokens": 8,
+                                         "messages": [{"role": "user",
+                                                       "content": "hi"}]}
+                                        ).encode(),
+                        headers={"x-api-key": key,
+                                 "anthropic-version": "2023-06-01",
+                                 "Content-Type": "application/json"})
+                else:
+                    tq = urllib.request.Request(
+                        base + "/chat/completions",
+                        data=json.dumps({"model": model, "max_tokens": 8,
+                                         "messages": [{"role": "user",
+                                                       "content": "hi"}]}
+                                        ).encode(),
+                        headers={"Authorization": "Bearer " + key,
+                                 "Content-Type": "application/json",
+                                 "User-Agent": "MillenAI/%s" % APP_VERSION})
+                urllib.request.urlopen(tq, timeout=25).read(400)
+            except Exception as exc:
+                self._send_json({"ok": False,
+                                 "err": "that key didn't work (%s)"
+                                        % str(exc)[:60]})
+                return
+            try:
+                with open(CLOUD_FILE, "w") as f:
+                    json.dump({"name": name, "base": base, "key": key,
+                               "model": model}, f)
+                os.chmod(CLOUD_FILE, 0o600)
+            except Exception as exc:
+                self._send_json({"ok": False, "err": str(exc)[:80]})
+                return
+            p = load_prefs(None); p["turbo"] = True; store_prefs(p)
+            self._send_json({"ok": True, "name": name})
             return
         if self.path == "/api/guest":
             # one tap, zero questions: a TEMPORARY pass — the cookie lives
@@ -5263,6 +5392,17 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         hb_stop.set()
                         return
                     status("turbo unavailable — running locally")
+                # NO KEY, STILL BOOSTED: the keyless community cloud gets
+                # the same shot before local silicon does. Best tier
+                # always tries it; Fast only when the user asked for
+                # cloud power and has no key of their own.
+                elif (tier == "Best"
+                      or load_prefs(None).get("turbo")) and not images:
+                    if time.time() >= _free_cold[0]:
+                        status("trying the free community cloud")
+                        if free_cloud_stream(full_messages, emit):
+                            hb_stop.set()
+                            return
                 ftext = fleet_run(lbl, full_messages, status) \
                     if not images else ""
                 # searched answers were EXCLUDED from the polish pass, so
@@ -5595,17 +5735,27 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 .tier:hover{color:var(--text);background:var(--panel2)}
 /* the library tabs + agent radio rows */
-#mode-tabs{display:flex;gap:6px;margin:5px 0 6px}
+#mode-tabs{display:flex;gap:0;margin:5px 0 6px;position:relative;
+  background:rgba(255,255,255,.05);border-radius:11px;padding:3px;
+  border:1px solid rgba(255,255,255,.07)}
+/* the glide: one lit pill that SLIDES between tabs, Claude-style */
+#tab-glide{position:absolute;top:3px;bottom:3px;left:3px;
+  width:calc(50% - 3px);border-radius:9px;
+  background:rgba(240,242,248,.94);
+  box-shadow:0 2px 10px -3px rgba(0,0,0,.5);
+  transition:transform .34s cubic-bezier(.34,1.3,.44,1);
+  pointer-events:none}
+#mode-tabs.agents #tab-glide{transform:translateX(100%)}
+body.perf #tab-glide{transition:none}
 #mode-tabs .ltab{
+  position:relative;z-index:1;
   flex:1;text-align:center;font-family:var(--mono);font-size:11px;
   letter-spacing:.12em;text-transform:uppercase;color:var(--faint);
-  padding:5px 0;border:1px solid var(--line-soft);border-radius:9px;
-  cursor:pointer;user-select:none;
+  padding:6px 0;border:none;border-radius:9px;
+  cursor:pointer;user-select:none;transition:color .22s ease;
 }
 #mode-tabs .ltab:hover{color:var(--dim)}
-#mode-tabs .ltab{border-color:rgba(255,255,255,.09)}
-#mode-tabs .ltab.on{color:#111;background:rgba(240,242,248,.92);
-  border-color:transparent;font-weight:700}
+#mode-tabs .ltab.on{color:#111;background:none;font-weight:700}
 #agents-wrap{margin:6px 0 4px}
 .agent{
   display:flex;align-items:center;gap:9px;padding:6px 10px;margin-bottom:2px;
@@ -6177,6 +6327,24 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
   border:1px solid rgba(255,255,255,.22);
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 .mapcard a:hover{background:rgba(24,27,36,.92)}
+/* cloud key box in Settings */
+#cloudkey-box{margin:8px 2px 2px;padding:10px 12px;border-radius:12px;
+  background:rgba(255,255,255,.045);
+  border:1px solid rgba(255,255,255,.08)}
+#cloudkey-box[hidden]{display:none}
+#cloudkey-head{font-family:var(--mono);font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--faint);
+  margin-bottom:8px}
+#cloudkey-row{display:flex;gap:6px;align-items:center}
+#ck-provider{background:rgba(18,20,26,.7);color:var(--text);
+  border:1px solid rgba(255,255,255,.12);border-radius:8px;
+  font-size:12px;padding:6px 6px;outline:none}
+#ck-key{flex:1;background:rgba(18,20,26,.7);color:var(--text);
+  border:1px solid rgba(255,255,255,.12);border-radius:8px;
+  font-size:12px;padding:6px 9px;outline:none;min-width:80px}
+#ck-key:focus{border-color:rgba(143,157,255,.6)}
+#ck-note{font-size:11px;color:var(--faint);margin-top:7px;
+  line-height:1.5;min-height:14px}
 /* the places module: dark multi-pin map + card rail */
 .placesmod{margin:14px 0 2px;border-radius:14px;overflow:hidden;
   border:1px solid rgba(255,255,255,.14);
@@ -6211,8 +6379,10 @@ body:not(.perf) .caret{animation:blink .9s step-end infinite}
   background:linear-gradient(transparent,rgba(5,6,10,.62) 78%);
 }
 body.perf #composer-wrap{background:var(--bg);border-top:1px solid var(--line-soft);padding-top:14px}
-#skyline video{transition:transform 1.1s cubic-bezier(.22,.61,.36,1);
-  will-change:transform}
+#skyline video{transition:transform 1.1s cubic-bezier(.22,.61,.36,1),
+  opacity .9s ease;will-change:transform,opacity}
+/* a new city FADES in — never a hard cut (per Patrick) */
+#skyline video.swapping{opacity:0}
 /* thinking: the city steps back so the words own the screen */
 #skyline{transition:filter .9s ease,opacity .9s ease}
 body.gen #skyline{filter:brightness(.62) saturate(.9)}
@@ -6704,6 +6874,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 
 
   <div id="mode-tabs">
+    <i id="tab-glide"></i>
     <span class="ltab" data-m="ai">AI</span>
     <span class="ltab" data-m="agents">Agents</span>
   </div>
@@ -6750,7 +6921,7 @@ __AGENT_ROWS__
     <div class="track"><div class="fill"></div></div>
     <div class="lbl">loading the backdrop</div>
   </div>
-<div id="lfg" hidden>LFG, BITCH.</div>
+<div id="lfg" hidden>LET&rsquo;S FUCKING GO.</div>
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
@@ -6857,6 +7028,20 @@ __AGENT_ROWS__
     <label id="turbo-row" hidden><input type="checkbox" id="turbo">
       <span>Use cloud power</span><i class="hint" id="turbo-hint"
       title="Answers come from a cloud GPU instead of this Mac — much faster, but your prompts leave this computer while it is on.">i</i></label>
+    <div id="cloudkey-box">
+      <div id="cloudkey-head">Frontier cloud — free key, 2 minutes</div>
+      <div id="cloudkey-row">
+        <select id="ck-provider">
+          <option value="gemini">Gemini (free tier)</option>
+          <option value="groq">Groq (free tier)</option>
+          <option value="claude">Claude (paid)</option>
+        </select>
+        <input id="ck-key" type="password" autocomplete="off"
+               placeholder="paste API key">
+        <button class="about-btn" id="ck-save">Save</button>
+      </div>
+      <div id="ck-note"></div>
+    </div>
     <div id="fleet-box">
       <div id="fleet-own" hidden><span id="fleet-n"></span></div>
       <div id="fleet-pending"></div>
@@ -7070,6 +7255,7 @@ function modeShow(which){
   $("#agents-wrap").hidden=which!=="agents";
   $$("#mode-tabs .ltab").forEach(t=>
     t.classList.toggle("on",t.dataset.m===which));
+  $("#mode-tabs").classList.toggle("agents",which==="agents");
 }
 $$("#mode-tabs .ltab").forEach(t=>
   t.addEventListener("click",()=>modeShow(t.dataset.m)));
@@ -7995,9 +8181,11 @@ async function bootSkyline(){
       skyline.style.transition="opacity .55s ease";
       skyline.style.opacity="0.22";
       setTimeout(()=>{
+        c.classList.add("swapping");
         c.src="/sky/"+i+".mov";
         const p=c.play();if(p&&p.catch)p.catch(()=>{});
-        const up=()=>{skyline.style.opacity="1";};
+        const up=()=>{skyline.style.opacity="1";
+                      c.classList.remove("swapping");};
         c.addEventListener("canplay",up,{once:true});
         setTimeout(up,1600);   // belt and braces
       },560);
@@ -8046,8 +8234,12 @@ async function bootSkyline(){
     }
     buf();
     setTimeout(reveal,10000);   // 10 seconds, tops — then play with what we have
+    c.classList.add("swapping");
     c.src="/sky/"+i+".mov";
     const pr=c.play(); if(pr&&pr.catch)pr.catch(()=>{});
+    const fadeUp=()=>c.classList.remove("swapping");
+    c.addEventListener("canplay",fadeUp,{once:true});
+    setTimeout(fadeUp,2200);
   }
   let rotations=0;
   function poll(){
@@ -8532,7 +8724,14 @@ function rainbowWipe(){
   wipeBusy=true;
   // the boot ritual: once per launch, "LFG, BITCH." washes over the
   // hero right as the wordmark and version settle
-  if(!lfgWashed&&$("#hero")){
+  // the version splash carries the line after an update — don't say it
+  // twice in ten seconds (per Patrick: "so it's not redundant")
+  let splashSaidIt="__SPLASH_LFG__"==="1";
+  try{splashSaidIt=splashSaidIt
+    ||sessionStorage.getItem("millen.splashlfg")==="1";
+    if(splashSaidIt)sessionStorage.setItem("millen.splashlfg","1");}
+  catch(e){}
+  if(!lfgWashed&&$("#hero")&&!splashSaidIt){
     lfgWashed=true;
     setTimeout(()=>{
       const g=$("#lfg");
@@ -8664,6 +8863,21 @@ function shareDone(on){
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contrib_on:true})});
 }
+$("#ck-save").addEventListener("click",async()=>{
+  const note=$("#ck-note"),key=$("#ck-key").value.trim();
+  if(!key){note.textContent="paste a key first";return;}
+  note.textContent="testing the key…";
+  try{
+    const d=await(await fetch("/api/cloud/set",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({provider:$("#ck-provider").value,key:key})})).json();
+    if(d.ok){note.textContent="✓ "+d.name+" is live — Best tier now "
+      +"answers from the frontier cloud.";$("#ck-key").value="";
+      $("#turbo-row").hidden=false;$("#turbo").checked=true;}
+    else note.textContent=d.err||"that didn't work";
+  }catch(e){note.textContent="network error — try again";}
+});
+if(!IS_LOCAL){const b=$("#cloudkey-box");if(b)b.hidden=true;}
 $("#dlhelp-ok").addEventListener("click",()=>{
   $("#dlhelp-veil").hidden=true;});
 $("#share-no").addEventListener("click",()=>shareDone(false));
@@ -9134,6 +9348,16 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
      drop-shadow(10px 0 rgba(60,170,255,.7))}
   100%{opacity:1;transform:scale(1);filter:blur(0)
      drop-shadow(0 4px 30px rgba(120,140,255,.45))}}
+#lfgline{font-family:'Helvetica Neue',sans-serif;font-weight:800;
+  font-size:3.1vw;letter-spacing:.09em;margin-top:1.4vh;opacity:0;
+  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 3px 22px rgba(140,150,255,.45));
+  animation:lfgline .8s cubic-bezier(.16,.8,.24,1) 1.35s both}
+@keyframes lfgline{
+  0%{opacity:0;transform:translateY(14px) scale(.94);filter:blur(9px)}
+  100%{opacity:1;transform:none;filter:blur(0)}}
 @keyframes helloIn{to{opacity:1}}
 @keyframes sweep{0%{opacity:1;background-position:120% 0}
   100%{opacity:0;background-position:-20% 0}}
@@ -9158,7 +9382,8 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
   100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.3)}}
 </style></head><body>
 <div id="aura"></div>
-<div id="w"><div id="hello">Welcome to</div><div id="v">__V__</div></div>
+<div id="w"><div id="hello">Welcome to</div><div id="v">__V__</div>
+<div id="lfgline">LET&rsquo;S FUCKING GO.</div></div>
 <div id="flash"></div>
 <script>
 for(let i=0;i<30;i++){
@@ -9174,6 +9399,9 @@ for(let i=0;i<30;i++){
 </body></html>"""
 
 
+_splash_shown = [False]
+
+
 def maybe_version_splash():
     """Show the WELCOME splash on the first launch of a NEW version."""
     try:
@@ -9185,6 +9413,7 @@ def maybe_version_splash():
         store_prefs(prefs)
         if last is None or not (HAS_WEBVIEW and IS_MAC):
             return          # fresh install gets the boot wipe, not this
+        _splash_shown[0] = True
         # the WHOLE screen, per Patrick — the version zoom is the
         # marquee moment after an update, not a little box
         try:
