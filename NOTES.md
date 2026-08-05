@@ -1376,3 +1376,27 @@ that found all three: re-execute the page's own script text via
   says it twice.
 - Web UI gets everything (same file serves both); cloud-key panel is
   IS_LOCAL-gated like the rest of model management.
+
+## 4.3 — "hub offline" fixed, and the map is guaranteed
+- THE HUB BUG: the contribute loop's POSTs carried a bare
+  "Python-urllib" User-Agent, which the edge 403s — every knock failed
+  and Settings read "hub offline — retrying" forever. curl worked;
+  we didn't. Same fingerprint that bit us with Groq in 3.x. Fixed by
+  sending a real UA; register+poll verified against the live hub.
+- "whats a good bar in bushwick" NEVER SEARCHED (no verb for
+  _BOOKING_RX) so the model invented three bars from memory (seen
+  live). New _ASKY_RX: a quality word (good/best/great/top/worth/
+  hidden gem…) plus a place noun is a recommendation ask too. It feeds
+  needs_search AND the bookish path, so those answers get grounded,
+  deep-searched, photographed and mapped.
+- THE MODULE NO LONGER DEPENDS ON MODEL COMPLIANCE. Measured: the
+  [[PLACES]] trailer appears maybe half the time, and some answers
+  carry no bold spans either — so both the trailer and text-mining
+  fail silently. Now a short EXTRACTION PASS runs after the answer on
+  the already-resident model ("list the venues this text recommends,
+  JSON only"), verifies each name appears in the answer, and emits
+  PLACES2. Live: "good bar in bushwick" → The Cobra Club, duckduck,
+  House of Yes, Old Stanley's, pinned on the dark map.
+  NOTE: use the RESIDENT model, never the smallest — reaching for the
+  1B swaps engines and evicts the model that just answered.
+- Settings: fleet status block and the button grid get real spacing.

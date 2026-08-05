@@ -637,6 +637,10 @@ def _contrib_loop(url: str, key: str):
         req = urllib.request.Request(
             url.rstrip("/") + path, data=json.dumps(data).encode(),
             headers={"Content-Type": "application/json",
+                     # MEASURED: the edge 403s a bare "Python-urllib"
+                     # UA, so every knock failed and the panel read
+                     # "hub offline" forever. curl worked; we didn't.
+                     "User-Agent": "MillenAI/%s" % APP_VERSION,
                      "X-Fleet-Key": key})
         with urllib.request.urlopen(req, timeout=40) as r:
             return json.loads(r.read())
@@ -1177,6 +1181,22 @@ _FRESH_WORDS = (
 # "recommend a sorting algorithm" stays local. Named so the answer path
 # can also route these to the DEEP search — real program names and
 # prices live in listing pages, not 200-char snippets.
+_PLACE_NOUNS = (r"(retreats?|hostels?|hotels?|"
+                r"resorts?|airbnbs?|tours?|trips?|flights?|restaurants?|"
+                r"bars?|caf[eé]s?|classes|workshops?|events?|festivals?|"
+                r"concerts?|spas?|gyms?|studios?|coworking|spots?|places?|"
+                r"joints?|shops?|diners?|delis?|bakeries|pizzerias?|"
+                r"venues?|bodegas?|pubs?|clubs?|breweries|taquerias?|"
+                r"museums?|galleries|parks?|markets?|bookstores?)")
+
+# "what's a good bar in bushwick" carries no verb at all — it went
+# UNSEARCHED and the model invented three bars from memory (seen live).
+# A quality word plus a place noun is just as much a recommendation ask.
+_ASKY_RX = re.compile(
+    r"\b(good|best|great|favorite|favourite|top|cool|nice|solid|decent|"
+    r"worth|must[- ]?(see|try|visit)|underrated|hidden\s+gem)\b.*?"
+    + _PLACE_NOUNS + r"\b", re.I | re.S)
+
 _BOOKING_RX = re.compile(
     r"\b(arrange|book|recommend|suggest|find|plan|help\s+me\s+"
     r"(find|pick|choose))\b.*\b(retreats?|hostels?|hotels?|"
@@ -1195,6 +1215,7 @@ _FRESH_PATTERNS = (
     re.compile(r"\b(out|available|released)\s+yet\b"),
     re.compile(r"\b(is|are|when)\b.*\b(open|closed?)\b"),
     re.compile(r"\bwhat\s+time\b.*\b(open|close)"),
+    _ASKY_RX,
     _BOOKING_RX,
 )
 # never search these — they're about the conversation, not the world
@@ -2662,6 +2683,41 @@ def place_search(query: str) -> tuple:
 # handler turns them into a clickable sources row under the answer.
 # Thread-local because ThreadingTCPServer runs one thread per request.
 _tl_search = threading.local()
+
+
+_SITE_WORDS = re.compile(
+    r"\b(yelp|tripadvisor|opentable|google|maps|facebook|instagram|"
+    r"menu|menus|reviews?|photos?|order|online|delivery|nyc|new\s+york|"
+    r"brooklyn|updated|best|top\s*\d+|the\s+infatuation|eater|"
+    r"official\s+site|home|hours|directions)\b", re.I)
+
+
+def _place_names(rows: list, loc: str = "") -> list:
+    """Venue names mined from result titles — the module must not depend
+    on a 4-bit model remembering to emit its trailer (it forgets)."""
+    out, seen = [], set()
+    for r in rows:
+        t = (r.get("title") or r.get("t") or "").strip()
+        # titles read "Lucali - Brooklyn, NY | Yelp" — the venue is the
+        # first chunk before a separator
+        head = re.split(r"\s*[|\u2013\u2014\-\u00b7:,]\s*", t)[0].strip()
+        head = re.sub(r"\s*\(.*?\)\s*", " ", head).strip(" .\u2019'\"")
+        if not (2 < len(head) < 42):
+            continue
+        if _SITE_WORDS.fullmatch(head) or _SITE_WORDS.match(head):
+            continue
+        if loc and head.lower() == loc.lower():
+            continue
+        if len(head.split()) > 5:
+            continue
+        k = head.lower()
+        if k in seen:
+            continue
+        seen.add(k)
+        out.append({"n": head, "d": "", "h": ""})
+        if len(out) >= 4:
+            break
+    return out
 
 
 def _stash_sources(rows: list):
@@ -5001,6 +5057,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
         # "/search …" forces a lookup; otherwise auto-search decides.
         bookish = False
+        placey = False
         query, forced = None, prompt.lower().startswith("/search")
         if forced:
             query = prompt[7:].strip()
@@ -5055,7 +5112,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     r"\bhours\b|\bopen\b|\bclosed?\b|\bphone\b|"
                     r"\baddress\b|\bmenu\b|\breservation", query, re.I))
                 matched = True
-                bookish = bool(_BOOKING_RX.search(query.lower()))
+                bookish = bool(_BOOKING_RX.search(query.lower())
+                               or _ASKY_RX.search(query))
                 if placey:
                     snippets, matched = place_search(query)
                     pt_ = _place_terms(query).split()
@@ -5077,7 +5135,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     # arrange a retreat in southeast asia" searched whole
                     # surfaced burnout clinics in Switzerland, not Bali
                     srch = next((s for s in re.split(r"(?<=[.?!])\s+", query)
-                                 if _BOOKING_RX.search(s.lower())), query)
+                                 if _BOOKING_RX.search(s.lower())
+                                 or _ASKY_RX.search(s)), query)
                     snippets = run_search_deep(srch, pages=3)
                 else:
                     snippets = run_search(query)
@@ -5307,11 +5366,14 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
 
         sent = [0]
 
+        answer_buf = []
+
         def emit(chunk: str):
             chunk = strip_special(chunk)
             if not chunk:
                 return
             sent[0] += len(chunk)
+            answer_buf.append(chunk)
             _write(chunk.encode("utf-8"))
 
         def status(text: str):
@@ -5345,6 +5407,14 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             if geo:
                 try:
                     _write((NUL + "MAP:" + json.dumps(geo) + NUL)
+                           .encode("utf-8"))
+                except Exception:
+                    pass
+            hint = _place_names(getattr(_tl_search, "rows", []) or [],
+                                getattr(_tl_search, "locq", ""))
+            if hint:
+                try:
+                    _write((NUL + "PLACEHINT:" + json.dumps(hint) + NUL)
                            .encode("utf-8"))
                 except Exception:
                     pass
@@ -5485,6 +5555,47 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                      "didn't answer either. Ask again — it usually "
                      "comes straight back.")
         finally:
+            # THE MODULE MUST NOT DEPEND ON THE BIG MODEL REMEMBERING a
+            # trailer (it forgets ~half the time, and doesn't always
+            # bold names either — both seen live). A tiny model reads
+            # the finished answer and names the venues. Cheap, and it
+            # only runs for place-shaped questions that searched.
+            try:
+                if (query and sent[0] > 120
+                        and (placey or bookish) and not images):
+                    ans = "".join(answer_buf)[-2400:]
+                    # the model that JUST answered is already resident —
+                    # reaching for the 1B would swap engines and evict it
+                    small = route_label or model_name
+                    if small:
+                        got2 = []
+                        run_model(small, [
+                            {"role": "user", "content":
+                             "From the text below, list the real venue "
+                             "names it recommends (bars, restaurants, "
+                             "cafes, shops). Output ONLY a JSON array of "
+                             "strings, max 4, nothing else. If there are "
+                             "none, output [].\n\nTEXT:\n" + ans}],
+                            got2.append)
+                        raw2 = strip_think("".join(got2))
+                        m2 = re.search(r"\[[^\[\]]*\]", raw2, re.S)
+                        names = []
+                        if m2:
+                            try:
+                                names = [str(x)[:42] for x in
+                                         json.loads(m2.group(0))
+                                         if isinstance(x, str)][:4]
+                            except Exception:
+                                names = []
+                        low = ans.lower()
+                        names = [x for x in names
+                                 if 2 < len(x) < 42 and x.lower() in low]
+                        if names:
+                            _write((NUL + "PLACES2:" + json.dumps(
+                                [{"n": x, "d": "", "h": ""} for x in names])
+                                + NUL).encode("utf-8"))
+            except Exception:
+                pass
             hb_stop.set()
             # the quality ledger: one line per answer, so "make it
             # better" has numbers instead of vibes (grep-able JSONL)
@@ -6605,7 +6716,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 .hint:hover{color:var(--text);border-color:var(--dim)}
 
-#fleet-box{margin:14px 0 4px;text-align:left}
+#fleet-box{margin:10px 2px 4px;margin:14px 0 4px;text-align:left}
 #fleet-own{font-family:var(--mono);font-size:10.5px;color:var(--dim);
   margin-bottom:8px;line-height:1.6}
 #contrib-state{font-family:var(--mono);font-size:10px;color:var(--faint);
@@ -6615,7 +6726,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #fleet-pending .preq button{margin-left:auto;padding:5px 12px;
   border-radius:8px;border:none;background:var(--accent);color:#1a1a1a;
   font-weight:600;cursor:pointer}
-#adv-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+#adv-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
 #adv-grid .about-btn{margin-top:0}
 #fleet-adv{margin-top:6px}
 #fleet-adv summary{font-family:var(--mono);font-size:9.5px;
@@ -7673,7 +7784,7 @@ async function send(){
   body.innerHTML='<span class="caret"></span>';
 
   abortCtl=new AbortController();
-  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[],sources=null,photos=null,mapd=null,locCtx="",places=null;
+  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[],sources=null,photos=null,mapd=null,locCtx="",places=null,placeHint=null;
   lastModels="";
 
   try{
@@ -7716,7 +7827,15 @@ async function send(){
               .replace(/\u0000CTX:(.*?)\u0000/g,(_,j)=>{
                  try{locCtx=(JSON.parse(j).loc)||"";}catch(e){}
                  return "";})
-              .replace(/\u0000CTX:[^\u0000]*$/,"");
+              .replace(/\u0000CTX:[^\u0000]*$/,"")
+              .replace(/\u0000PLACEHINT:(.*?)\u0000/g,(_,j)=>{
+                 try{placeHint=JSON.parse(j);}catch(e){}
+                 return "";})
+              .replace(/\u0000PLACEHINT:[^\u0000]*$/,"")
+              .replace(/\u0000PLACES2:(.*?)\u0000/g,(_,j)=>{
+                 try{places=JSON.parse(j);}catch(e){}
+                 return "";})
+              .replace(/\u0000PLACES2:[^\u0000]*$/,"");
       if(drafts.length||(status&&/of \d+/.test(status)))
         paintDrafts(aiDiv,drafts,true,status);
       // a merge that collapsed mid-stream sends RESET \u2014 discard
@@ -7756,8 +7875,23 @@ async function send(){
   const pm=full.match(/\[\[PLACES\]\]\s*(\[[\s\S]*?\])\s*$/);
   if(pm){
     try{places=JSON.parse(pm[1]).slice(0,4);}catch(e){places=null;}
-    full=full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,"").trim();
-  }else{full=full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,"").trim();}
+  }
+  full=full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,"").trim();
+  // the 4-bit model forgets its trailer maybe half the time. The answer
+  // itself is the better signal: our own format rules BOLD the venue
+  // names, so mine those. Anything that fails to geocode into the right
+  // neighborhood is dropped later by mountPlaces, so a bolded price or
+  // verdict costs nothing.
+  if((!places||!places.length)&&(searched||placeHint)){
+    const bold=[...full.matchAll(/\*\*([^*\n]{3,42})\*\*/g)]
+      .map(m=>m[1].trim().replace(/[.,;:!?]+$/,""))
+      .filter(s=>/^[A-Z\u00c0-\u017f]/.test(s)          // a proper noun
+        &&!/^\$/.test(s)&&!/\d\s*(am|pm)/i.test(s)
+        &&!/^(open|closed|note|heads|tip|hours|today|tonight|monday|tuesday|wednesday|thursday|friday|saturday|sunday|yes|no)\b/i.test(s)
+        &&s.split(/\s+/).length<=5);
+    const uniq=[...new Set(bold)].slice(0,4).map(s=>({n:s,d:"",h:""}));
+    if(uniq.length)places=uniq;
+  }
   body.innerHTML=(searched&&full?srcRow(sources):"")
     +renderMD(full||(wasAborted?"*(stopped)*":
     "⚠️ The engine returned nothing. Is the model server for **"+model+"** actually running?"))
