@@ -674,6 +674,21 @@ TIERS = {
                   "Llama 3.2 3B", "Gemma 2 2B", "Llama 3.2 1B"],
         "count": 1,
     },
+    "Best": {
+        # THE FABLE LEVER, per Patrick ("as smart as claude fable or
+        # opus"): this tier ALWAYS answers from the configured frontier
+        # cloud (Gemini/Groq/Claude via the Turbo config) — local
+        # silicon is the fallback, never the ceiling. Same ladder as
+        # Fast when no cloud is configured, so the tier resolves offline.
+        "icon": "\U0001f451", "desc": "frontier cloud \u2014 the smartest",
+        "picks": ["Qwen 3 235B MoE", "GPT-OSS 120B", "Llama 4 Scout",
+                  "Llama 3.3 70B", "Gemma 4 26B", "Qwen 3.6 27B",
+                  "Qwen 3.6 35B MoE", "GPT-OSS 20B", "Gemma 4 12B",
+                  "Phi-4 14B", "Mistral Nemo 12B", "Llama 3.1 8B",
+                  "Llama 3.2 3B", "Gemma 2 2B", "Llama 3.2 1B"],
+        "count": 1,
+        "cloud": True,
+    },
     "Thinking": {
         "icon": "\U0001f9e0", "desc": "reasons it through, blended",
         # strongest-first ladder: whatever the machine holds and the user
@@ -1169,6 +1184,45 @@ def needs_search(prompt: str) -> bool:
     if any(w in low for w in _FRESH_WORDS):
         return True
     return any(rx.search(low) for rx in _FRESH_PATTERNS)
+
+# words that mean "same subject, different day" — they carry no entity
+_REL_WORDS = frozenset("""
+    tomorrow today tonight now weekend weekends monday tuesday wednesday
+    thursday friday saturday sunday morning afternoon evening late later
+    early weekday weekdays holiday holidays
+""".split())
+
+_FOLLOWUP_RX = re.compile(
+    r"\b(what about|how about|and (on|the|for)\b|do they|are they|is it|"
+    r"was it|it'?s|there|that place|the menu|the price|the hours|book it|"
+    r"tomorrow|tonight|today|this weekend)\b", re.I)
+
+
+def _entity_thin(q: str) -> bool:
+    """True when a query names no actual thing — "is it open tomorrow"
+    boils down to relative-time words only."""
+    toks = [w for w in _place_terms(q).split() if w not in _REL_WORDS]
+    return not toks
+
+
+def _thread_terms(messages) -> str:
+    """The entity of the most recent searchable USER turn — so a
+    follow-up ("what about tomorrow?") inherits the place it's about
+    instead of searching for the word 'tomorrow'."""
+    try:
+        for m in reversed(list(messages)[:-1]):
+            if m.get("role") != "user":
+                continue
+            c = strip_greeting(str(m.get("content", ""))[:300])
+            toks = [w for w in _place_terms(c).split()
+                    if w not in _REL_WORDS]
+            if toks and (needs_search(c)
+                         or _BOOKING_RX.search(c.lower())):
+                return " ".join(toks[:4])
+    except Exception:
+        pass
+    return ""
+
 
 # ------------------------------------------------------- managed engines
 # The app can run its own model servers, so a fresh machine needs nothing
@@ -2473,7 +2527,7 @@ def run_search_deep(query: str, pages: int = 2) -> str:
 # what's left after removing them is the entity + locality ("ables
 # bushwick"), which is what a search engine actually wants
 _PLACE_FILLER = frozenset("""
-    a an and are at ayo book bro by call can close closed closes closing
+    a about an and are at ayo book bro by call can close closed closes closing
     could currently dawg do does fam for from get hello hey hi hours hows
     how i if in is it its lol man me my near now number of on open or over
     phone please reservation reservations right still sup take takes tell
@@ -4815,6 +4869,22 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             # the greeting is chat, not query — "Yo is abes open" once
             # produced an answer about a place called "Yo is Abe's"
             query = strip_greeting(prompt) or prompt.strip()
+            # FOLLOW-UP THREADING: "is it open tomorrow" names no place —
+            # borrow the entity from the previous searched turn so the
+            # conversation keeps its thread
+            if _entity_thin(query):
+                prev = _thread_terms(messages)
+                if prev:
+                    query = prev + " " + query
+        elif (auto_web and not TIERS.get(tier, {}).get("research")):
+            # didn't trigger search on its own — but a short lean-on-the-
+            # last-turn message ("what about saturday?") inherits the
+            # previous entity and searches WITH it
+            p2 = strip_greeting(prompt)
+            if p2 and len(p2.split()) <= 10 and _FOLLOWUP_RX.search(p2):
+                prev = _thread_terms(messages)
+                if prev:
+                    query = prev + " " + p2
 
         if query:
             _tl_search.rows = []   # keep-alive reuses threads — no stale rows
@@ -4898,7 +4968,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         "3. One practical heads-up if the data supports one. "
                         "Nothing else: no 'best bet is to check', no filler, "
                         "under 120 words. If the data truly lacks the answer, "
-                        "say that in ONE sentence and stop.\n")
+                        "say that in ONE sentence and stop.\n"
+                        "When you state hours, a price or a phone number, "
+                        "credit the source in-line — 'per their site', "
+                        "'per Yelp' — so the reader knows whose word it "
+                        "is.\n")
                 elif placey:
                     # nothing in any engine mentions the place — a flat
                     # "couldn't find any information" is a dead end for the
@@ -5035,7 +5109,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
         self.send_header("X-Web-Search", "1" if query else "0")
-        self.send_header("X-Models", ", ".join(council)[:300])
+        xm = ", ".join(council)[:300]
+        if tier == "Best" and cloud_conf():
+            xm = (cloud_conf().get("name") or "cloud")[:60]
+        self.send_header("X-Models", xm)
         self.end_headers()
 
         # Cloudflare drops a proxied response after ~100s without bytes,
@@ -5134,8 +5211,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                             peer=(tier == "Power"))
             else:
                 lbl = route_label or model_name
-                turbo = (load_prefs(None).get("turbo") and cloud_conf()
-                         and not images)
+                # Best ALWAYS goes to the frontier cloud when one is
+                # configured — the turbo pref only governs Fast
+                turbo = (((load_prefs(None).get("turbo") and tier != "Best")
+                          or (tier == "Best"
+                              and TIERS.get(tier, {}).get("cloud")))
+                         and cloud_conf() and not images)
                 if turbo:
                     status(f"turbo \u2014 {cloud_conf().get('name','cloud')}")
                     if cloud_stream(full_messages, emit):
@@ -5225,6 +5306,21 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                      "comes straight back.")
         finally:
             hb_stop.set()
+            # the quality ledger: one line per answer, so "make it
+            # better" has numbers instead of vibes (grep-able JSONL)
+            try:
+                qpath = os.path.join(app_dir(), "quality.jsonl")
+                if os.path.exists(qpath) and \
+                        os.path.getsize(qpath) > 2_000_000:
+                    os.remove(qpath)
+                with open(qpath, "a", encoding="utf-8") as qf:
+                    qf.write(json.dumps({
+                        "ts": int(time.time()), "tier": tier,
+                        "model": route_label or model_name,
+                        "searched": bool(query), "chars": sent[0],
+                    }) + "\n")
+            except Exception:
+                pass
             plain = prompt[8:] if prompt.lower().startswith("/search") \
                 else prompt
             if plain and len(plain) > 12:

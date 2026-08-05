@@ -1303,3 +1303,20 @@ that found all three: re-execute the page's own script text via
 - CLAUDE-STYLE CHAT: user messages are compact right-aligned pills (no
   "YOU" label); answers are flat serif prose (ui-serif/Georgia 16.5px)
   straight on the backdrop. Code/pre stay mono inside the serif flow.
+
+## 3.13 — the Fable lever
+- BEST TIER: always answers from the configured frontier cloud (the
+  Turbo config — Gemini free tier is the roomy default) with the model
+  chip naming the provider; falls back to the Fast ladder offline. The
+  turbo pref now governs Fast only. Honest architecture: local silicon
+  is the floor, frontier cloud is the ceiling, the user picks per query.
+- FOLLOW-UP THREADING: "what about tomorrow?" / "do they take
+  reservations?" inherit the entity from the last searched turn
+  (_thread_terms scans user history; _entity_thin spots queries that
+  name nothing — "about" had to join _PLACE_FILLER or "what about
+  tomorrow" searched for a BOOK by that name, seen in test). Verified
+  three turns deep on Lucali.
+- Facts credit their source in-line ("per their website") — the
+  attribution rule showed up unprompted in the reservations answer.
+- QUALITY LEDGER: app_dir()/quality.jsonl gets one line per answer
+  (tier, model, searched, chars) — "make it better" gets numbers.
