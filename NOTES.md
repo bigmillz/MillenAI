@@ -1320,3 +1320,16 @@ that found all three: re-execute the page's own script text via
   attribution rule showed up unprompted in the reservations answer.
 - QUALITY LEDGER: app_dir()/quality.jsonl gets one line per answer
   (tier, model, searched, chars) — "make it better" gets numbers.
+
+## 4.0 — the sexy-clean pass
+- One design language, per Patrick ("crazy sexy UI... not just vfx but
+  cleanliness"): a single glass recipe (rgba(13-15,15-17,20-23) + 26px
+  blur + hairline rgba(255,255,255,.07-.13) + 1px inner top highlight)
+  unifies sidebar, composer and telemetry. Light does the work borders
+  used to do: chat rows are borderless quiet text with soft light-fill
+  hover/active; the active mode tab is a bright light pill (dark text)
+  — the one pop of contrast in the chrome.
+- The composer is the jewel: 24px radius, deep drop shadow, calm
+  4px-halo focus ring. Micro-motion: buttons compress (scale .94).
+  Scrollbars are 6px glass. Hero greeting wraps balanced. The who
+  labels whisper; the rainbow stays exclusive to wordmark/hero/wash.

@@ -5424,8 +5424,9 @@ html.winwipe.winwipe-run body{
 }
 
 ::selection{background:var(--accent-dim);color:var(--accent-hot)}
-::-webkit-scrollbar{width:8px}
-::-webkit-scrollbar-thumb{background:var(--line);border-radius:4px}
+::-webkit-scrollbar{width:6px}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:3px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.3)}
 ::-webkit-scrollbar-track{background:transparent}
 
 /* ---------------------------------------------------------------- sidebar */
@@ -5438,11 +5439,12 @@ html.winwipe.winwipe-run body{
   width:384px;min-width:384px;height:100%;
   /* real frosted glass, per Patrick: ~30% panel, heavy blur carrying the
      legibility instead of the tint */
-  background:rgba(21,23,29,.24);
-  -webkit-backdrop-filter:blur(18px) saturate(1.4);
-          backdrop-filter:blur(18px) saturate(1.4);
-  border-right:1px solid var(--line-soft);
-  display:flex;flex-direction:column;padding:14px 18px 18px;gap:6px;
+  background:rgba(13,15,20,.34);
+  -webkit-backdrop-filter:blur(26px) saturate(1.45);
+          backdrop-filter:blur(26px) saturate(1.45);
+  border-right:1px solid rgba(255,255,255,.07);
+  box-shadow:inset -1px 0 0 rgba(0,0,0,.25);
+  display:flex;flex-direction:column;padding:16px 16px;gap:8px;
 }
 body.perf #sidebar{
   background:var(--panel);
@@ -5561,8 +5563,9 @@ body.resizing{cursor:col-resize;user-select:none}
   cursor:pointer;user-select:none;
 }
 #mode-tabs .ltab:hover{color:var(--dim)}
-#mode-tabs .ltab.on{color:var(--text);background:var(--panel2);
-  border-color:var(--line)}
+#mode-tabs .ltab{border-color:rgba(255,255,255,.09)}
+#mode-tabs .ltab.on{color:#111;background:rgba(240,242,248,.92);
+  border-color:transparent;font-weight:700}
 #agents-wrap{margin:6px 0 4px}
 .agent{
   display:flex;align-items:center;gap:9px;padding:6px 10px;margin-bottom:2px;
@@ -5606,14 +5609,15 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 .chat-item{
   margin-bottom:1px;
-  display:flex;align-items:center;gap:6px;padding:5px 11px;
-  border-radius:8px;cursor:pointer;color:var(--dim);font-size:13.5px;
-  border:1px solid transparent;user-select:none;
+  display:flex;align-items:center;gap:6px;padding:6px 10px;
+  border-radius:10px;cursor:pointer;color:var(--dim);font-size:13px;
+  border:none;user-select:none;
+  transition:background .14s ease,color .14s ease;
 }
-.chat-item:hover{color:var(--text);background:var(--panel2)}
+.chat-item:hover{color:var(--text);background:rgba(255,255,255,.06)}
 .chat-item.active{
-  color:var(--text);background:var(--accent-dim);
-  border-color:rgba(255,255,255,.22);
+  color:var(--text);background:rgba(255,255,255,.11);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07);
 }
 .chat-item .ct{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chat-item .cx{color:var(--faint);visibility:hidden;font-size:13px;padding:0 3px}
@@ -5670,9 +5674,11 @@ body.resizing{cursor:col-resize;user-select:none}
 
 /* telemetry — the instrument cluster */
 #telemetry{
-  margin-top:12px;background:rgba(21,23,29,.8);border:1px solid var(--line-soft);
-  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
-  border-radius:var(--radius);padding:12px 12px 11px;
+  margin-top:12px;background:rgba(13,15,20,.44);
+  border:1px solid rgba(255,255,255,.07);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
+  -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+  border-radius:14px;padding:12px 12px 11px;
   font-family:var(--mono);
 }
 #telemetry .t-head{
@@ -5806,6 +5812,7 @@ body.perf #chat-scroll{scroll-behavior:auto}
   -webkit-user-select:text;user-select:text;   /* chat is copyable */
 }
 
+#hero .greet{text-wrap:balance}
 #hero{
   min-height:60vh;display:flex;flex-direction:column;
   align-items:center;justify-content:center;text-align:center;gap:10px;
@@ -5904,8 +5911,7 @@ body.perf .msg{animation:none}
   font-family:var(--mono);font-size:10px;letter-spacing:.14em;
   text-transform:uppercase;margin-bottom:7px;color:var(--faint);
 }
-.msg.user .who{color:var(--teal)}
-.msg.ai .who{color:var(--accent)}
+.msg.ai .who{color:var(--faint);letter-spacing:.17em}
 .msg .body{
   font-family:var(--helv);font-size:15.5px;line-height:1.75;
   letter-spacing:.002em;
@@ -6167,11 +6173,22 @@ body.perf .msg.ai .body{animation:none}
   box-shadow:0 4px 16px -6px var(--accent-hot)}
 #composer{
   max-width:780px;margin:0 auto;pointer-events:auto;
-  background:var(--panel2);border:1px solid var(--line);
-  border-radius:20px;display:flex;align-items:flex-end;gap:6px;
-  padding:9px 10px;transition:border-color .15s;
+  background:rgba(15,17,23,.60);
+  -webkit-backdrop-filter:blur(26px) saturate(1.4);
+          backdrop-filter:blur(26px) saturate(1.4);
+  border:1px solid rgba(255,255,255,.13);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),
+             0 18px 50px -22px rgba(0,0,0,.85);
+  border-radius:24px;display:flex;align-items:flex-end;gap:6px;
+  padding:10px 12px;
+  transition:border-color .18s ease,box-shadow .25s ease;
 }
-#composer:focus-within{border-color:var(--accent)}
+#composer:focus-within{
+  border-color:rgba(255,255,255,.32);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.09),
+             0 0 0 4px rgba(255,255,255,.05),
+             0 18px 50px -22px rgba(0,0,0,.85);
+}
 body.gen #composer{
   border-color:var(--accent);
   box-shadow:0 0 34px rgba(255,255,255,.10),0 0 90px rgba(255,255,255,.05);
@@ -6186,8 +6203,10 @@ body.perf #composer{box-shadow:none}
 #input::placeholder{color:var(--faint)}
 #cbtns{display:flex;align-items:center;gap:2px;flex-shrink:0;
   margin-left:auto;padding-left:4px}
+.cbtn:active{transform:scale(.94)}
 .cbtn{
-  width:34px;height:34px;border-radius:9px;border:none;cursor:pointer;
+  transition:transform .12s ease,background .15s ease;
+  width:34px;height:34px;border-radius:10px;border:none;cursor:pointer;
   display:flex;align-items:center;justify-content:center;font-size:15px;
   background:none;color:rgba(255,255,255,.78);transition:all .13s;
   flex-shrink:0;
