@@ -5360,7 +5360,7 @@ body.perf #sidebar{
 body.resizing{cursor:col-resize;user-select:none}
 /* the 34px brand outgrew a single row (clipped to "lenAI" beside the
    buttons): the name owns its line now, controls sit beneath it */
-#brand-wrap{padding:0 6px 12px}
+#brand-wrap{padding:0 6px 5px}
 #brand-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 #brand-row #newchat{margin-left:2px}
 #update-flag{margin-top:4px}
@@ -5457,11 +5457,11 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 .tier:hover{color:var(--text);background:var(--panel2)}
 /* the library tabs + agent radio rows */
-#mode-tabs{display:flex;gap:6px;margin:12px 0 8px}
+#mode-tabs{display:flex;gap:6px;margin:5px 0 6px}
 #mode-tabs .ltab{
   flex:1;text-align:center;font-family:var(--mono);font-size:11px;
   letter-spacing:.12em;text-transform:uppercase;color:var(--faint);
-  padding:7px 0;border:1px solid var(--line-soft);border-radius:9px;
+  padding:5px 0;border:1px solid var(--line-soft);border-radius:9px;
   cursor:pointer;user-select:none;
 }
 #mode-tabs .ltab:hover{color:var(--dim)}
@@ -7676,8 +7676,18 @@ async function bootSkyline(){
   let hist=[];
   try{hist=JSON.parse(localStorage.getItem("millen.skyhist"))||[];}
   catch(e){}
-  const all=[];
+  let all=[];
   for(let n=0;n<SKY_N;n++)if(mood(n))all.push(n);
+  // BORROWERS GET THE INSTANT CITY: a tunnel visitor picks from what
+  // the host already has on disk — no download ritual, no blank wall
+  // (seen live: incognito web showed a black void while a 250 MB pull
+  // crawled). The fresh-pick ceremony stays a local-only pleasure.
+  if(!IS_LOCAL){
+    try{
+      const c=(await(await fetch("/api/sky/cached")).json()).cached||[];
+      if(c.length)all=c;
+    }catch(e){}
+  }
   let pool=all.filter(x=>hist.indexOf(x)<0);
   if(!pool.length)pool=all.filter(x=>x!==last);
   if(!pool.length)pool=all.length?all.slice():[...Array(SKY_N).keys()];

@@ -1285,3 +1285,12 @@ that found all three: re-execute the page's own script text via
   profiles untouched for a week (every ~6h). Sign-in copy says so.
 - +25 NYC greetings (bodega-core, transit pain, street wisdom, pure
   attitude — "Showtime. What time is it? SHOWTIME.").
+
+## 3.11.1 — instant city for borrowers, snugger header
+- WEB BACKDROP was a black void (seen live in incognito): a tunnel
+  visitor's blind pick meant a 250 MB server download + tunnel stream
+  before anything showed. Borrowers now pick from the host's CACHED
+  clips — instant playback, no ritual; the fresh-pick ceremony stays
+  local-only. Blind pick only if the cache is somehow empty.
+- Sidebar top consolidated Claude-snug: brand-wrap 12→5px bottom pad,
+  mode-tabs margins 12/8→5/6, tab pads 7→5px.
