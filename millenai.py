@@ -1132,7 +1132,9 @@ _BOOKING_RX = re.compile(
     r"(find|pick|choose))\b.*\b(retreats?|hostels?|hotels?|"
     r"resorts?|airbnbs?|tours?|trips?|flights?|restaurants?|"
     r"bars?|caf[eé]s?|classes|workshops?|events?|festivals?|"
-    r"concerts?|spas?|gyms?|studios?|coworking)\b", re.S)
+    r"concerts?|spas?|gyms?|studios?|coworking|spots?|places?|"
+    r"joints?|shops?|diners?|delis?|bakeries|pizzerias?|"
+    r"venues?|bodegas?)\b", re.S)
 
 _FRESH_PATTERNS = (
     re.compile(r"\b20[2-9]\d\b"),                 # a specific modern year
@@ -3081,6 +3083,9 @@ REVISE_INSTRUCTION = (
     "'live data' — the reader never sees those; state the facts as "
     "your own knowledge\n"
     "- keep it flowing prose in a confident, natural voice\n"
+    "If the draft ends with a [[PLACES]] line, keep that line EXACTLY "
+    "as written, still the very last line — it is machine-read, not "
+    "filler.\n"
     "Output ONLY the improved answer itself. Never begin with a preamble "
     "like 'Here is the improved answer' or 'Here's a rewritten version' — "
     "start directly with the substance.\n\n")
@@ -4248,6 +4253,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                       % str(exc)[:80]))
                 return
             self._set_user_cookie(_user_id("google", email))
+        elif self.path.startswith("/api/geo"):
+            # pin lookups for the places module — proxied so the browser
+            # never talks to Nominatim (no CORS, shared cache, one UA)
+            q = urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query).get("q", [""])[0]
+            self._send_json(_geocode(q[:120]) or {})
         elif self.path == "/api/sky/cached":
             self._send_json({"cached": [
                 i for i in range(len(SKY_SOURCES))
@@ -4890,6 +4901,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             _tl_search.rows = []   # keep-alive reuses threads — no stale rows
             _tl_search.photos = []
             _tl_search.geo = None
+            _tl_search.locq = ""
             snippets = None
             is_weather = bool(re.search(
                 r"\bweather\b|\bforecast\b|\btemperature\b", query, re.I))
@@ -4917,10 +4929,20 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 bookish = bool(_BOOKING_RX.search(query.lower()))
                 if placey:
                     snippets, matched = place_search(query)
+                    pt_ = _place_terms(query).split()
+                    _tl_search.locq = pt_[-1] if len(pt_) > 1 else ""
                     if matched:
-                        # the map card: a real place gets pinned
-                        _tl_search.geo = _geocode(_place_terms(query))
+                        # a pin only counts when the geocoder actually
+                        # landed in the right neighborhood — "food
+                        # bushwick" once pinned Edinburgh (seen live)
+                        g_ = _geocode(_place_terms(query))
+                        lt_ = _tl_search.locq.lower()
+                        if g_ and (not lt_ or lt_ in
+                                   (g_.get("name") or "").lower()):
+                            _tl_search.geo = g_
                 elif bookish:
+                    pt_ = _place_terms(query).split()
+                    _tl_search.locq = pt_[-1] if len(pt_) > 1 else ""
                     # search the SENTENCE with the ask, not the whole
                     # message — "I'm chronically burned out. can you
                     # arrange a retreat in southeast asia" searched whole
@@ -4972,7 +4994,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         "When you state hours, a price or a phone number, "
                         "credit the source in-line — 'per their site', "
                         "'per Yelp' — so the reader knows whose word it "
-                        "is.\n")
+                        "is.\n"
+                        "THEN, as the very last line, write [[PLACES]] "
+                        "followed by a compact JSON array of the real "
+                        "places you named — like [[PLACES]] [{\"n\":"
+                        "\"Lucali\",\"d\":\"thin-crust pizza, BYOB\","
+                        "\"h\":\"5-11pm\"}] — max 4, only places from "
+                        "the data, nothing after it.\n")
                 elif placey:
                     # nothing in any engine mentions the place — a flat
                     # "couldn't find any information" is a dead end for the
@@ -5025,7 +5053,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         "meet it in a clause; never open with a heading "
                         "or a listing. Then the real options, honestly "
                         "labeled. Close by asking for the one or two "
-                        "details you'd need to narrow it down.\n")
+                        "details you'd need to narrow it down.\n"
+                        "If you named real venues, add as the very last "
+                        "line [[PLACES]] followed by compact JSON — "
+                        "[{\"n\":\"name\",\"d\":\"five words\","
+                        "\"h\":\"hours or ''\"}] — max 4, data only, "
+                        "nothing after it.\n")
                 else:
                     strictness = ""
                 # data FIRST, instructions LAST — an instruction buried
@@ -5183,6 +5216,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             if geo:
                 try:
                     _write((NUL + "MAP:" + json.dumps(geo) + NUL)
+                           .encode("utf-8"))
+                except Exception:
+                    pass
+            locq = getattr(_tl_search, "locq", "")
+            if locq:
+                try:
+                    _write((NUL + "CTX:" + json.dumps({"loc": locq}) + NUL)
                            .encode("utf-8"))
                 except Exception:
                     pass
@@ -5756,6 +5796,9 @@ body.gen #skyline,body.gen #stars{filter:brightness(.7)}
   transform:translateX(-50%);
   z-index:4;width:min(440px,50vw);text-align:center;pointer-events:none}
 #skyload[hidden]{display:none}
+/* never over an answer: a mid-session backdrop download must not paint
+   its bar across streaming text (seen live) */
+body.gen #skyload{display:none!important}
 #skyload .track{height:18px;border-radius:10px;overflow:hidden;
   background:rgba(255,255,255,.09);
   border:1px solid rgba(255,255,255,.25);
@@ -6134,6 +6177,25 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
   border:1px solid rgba(255,255,255,.22);
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 .mapcard a:hover{background:rgba(24,27,36,.92)}
+/* the places module: dark multi-pin map + card rail */
+.placesmod{margin:14px 0 2px;border-radius:14px;overflow:hidden;
+  border:1px solid rgba(255,255,255,.14);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.05),
+             0 16px 44px -20px rgba(0,0,0,.85)}
+.placesmod .lmap{height:250px;background:#0d0f14}
+.placesmod.nomap .lmap{display:none}
+.prail{display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
+  gap:1px;background:rgba(255,255,255,.08)}
+.pcard{background:rgba(13,15,20,.94);padding:11px 13px;display:flex;
+  flex-direction:column;gap:3px}
+.pcard b{font-family:var(--sans);font-size:13.5px;letter-spacing:.01em}
+.pcard .pd{color:var(--dim);font-size:12px;line-height:1.45;
+  font-family:var(--sans)}
+.pcard .ph{font-family:var(--mono);font-size:10.5px;color:#a8d9b2}
+.lmap.leaflet-container{background:#0d0f14;font-family:var(--sans)}
+.lmap .leaflet-popup-content-wrapper,.lmap .leaflet-popup-tip{
+  background:#171a21;color:#ececec}
 .caret{
   display:inline-block;width:8px;height:15px;background:var(--accent);
   vertical-align:-2px;margin-left:2px;border-radius:1px;
@@ -7186,6 +7248,70 @@ function srcRow(srcs){
   }
   return h;
 }
+// THE CLAUDE TREATMENT, per Patrick: a place answer renders as a dark
+// multi-pin map with a card rail — the model hands over structured
+// places in a [[PLACES]] trailer, pins geocode through /api/geo, and
+// Leaflet + CARTO dark tiles (keyless) draw the city.
+let LMAP_SEQ=0;
+function placesModule(places,loc,mapd){
+  if(!places||!places.length)return mapCard(mapd);
+  const id="lmap"+(++LMAP_SEQ);
+  const cards=places.map(p=>'<div class="pcard"><b>'+esc(p.n||"")+'</b>'
+    +(p.d?'<span class="pd">'+esc(p.d)+'</span>':"")
+    +(p.h?'<span class="ph">'+esc(p.h)+'</span>':"")+'</div>').join("");
+  setTimeout(()=>mountPlaces(id,places,loc,mapd),40);
+  return '<div class="placesmod"><div class="lmap" id="'+id+'"></div>'
+    +'<div class="prail">'+cards+'</div></div>';
+}
+function leafletReady(){
+  if(window.L)return Promise.resolve(true);
+  if(!window._lfP){
+    window._lfP=new Promise(res=>{
+      const l=document.createElement("link");l.rel="stylesheet";
+      l.href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+      document.head.appendChild(l);
+      const s=document.createElement("script");
+      s.src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+      s.onload=()=>res(true);s.onerror=()=>res(false);
+      document.head.appendChild(s);
+    });
+  }
+  return window._lfP;
+}
+async function mountPlaces(id,places,loc,mapd){
+  const el=document.getElementById(id);
+  if(!el)return;
+  const ok=await leafletReady();
+  const bail=()=>{const w=el.closest(".placesmod");if(w)w.classList.add("nomap");};
+  if(!ok){bail();return;}
+  const pins=[];
+  for(const p of places.slice(0,4)){
+    try{
+      const g=await(await fetch("/api/geo?q="
+        +encodeURIComponent((p.n||"")+" "+(loc||"")))).json();
+      if(g&&typeof g.lat==="number"
+         &&(!loc||(g.name||"").toLowerCase().includes(loc.toLowerCase())))
+        pins.push({p:p,g:g});
+    }catch(e){}
+  }
+  if(!pins.length&&mapd&&typeof mapd.lat==="number")
+    pins.push({p:{n:mapd.name||""},g:mapd});
+  if(!pins.length){bail();return;}
+  try{
+    const m=L.map(id,{scrollWheelZoom:false,attributionControl:true});
+    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
+      {attribution:"&copy; OSM &copy; CARTO",maxZoom:19}).addTo(m);
+    const pts=[];
+    pins.forEach(x=>{
+      L.marker([x.g.lat,x.g.lon]).addTo(m)
+        .bindPopup("<b>"+esc(x.p.n||"")+"</b>"
+          +(x.p.h?"<br>"+esc(x.p.h):""));
+      pts.push([x.g.lat,x.g.lon]);
+    });
+    if(pts.length===1)m.setView(pts[0],15);
+    else m.fitBounds(pts,{padding:[30,30]});
+  }catch(e){bail();}
+}
 // the Fable treatment: real photos from the pages the answer read,
 // and a live pinned map when the answer is about a place
 function photoRow(ph){
@@ -7204,14 +7330,14 @@ function mapCard(m){
     +'&q='+encodeURIComponent((m.name||"").split(",")[0]||"pin")
     +'" target="_blank" rel="noopener">Open in Maps \u2197</a></div>';
 }
-function addMsg(role,text,drafts,srcs,mapd,ph){
+function addMsg(role,text,drafts,srcs,mapd,ph,places,loc){
   const hero=$("#hero"); if(hero)hero.remove();
   const div=document.createElement("div");
   div.className="msg "+(role==="user"?"user":"ai");
   const who=role==="user"?"you":(whoLabel(lastModels)||tier);
   div.innerHTML='<div class="who">'+who+'</div><div class="body"></div>';
   const body=div.querySelector(".body");
-  if(role==="user")body.textContent=text; else body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text)+photoRow(ph)+mapCard(mapd);
+  if(role==="user")body.textContent=text; else body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text)+photoRow(ph)+(places&&places.length?placesModule(places,loc,mapd):mapCard(mapd));
   if(role!=="user"&&drafts&&drafts.length)paintDrafts(div,drafts,false);
   inner.appendChild(div);
   scroller.scrollTop=scroller.scrollHeight;
@@ -7361,7 +7487,7 @@ async function send(){
   body.innerHTML='<span class="caret"></span>';
 
   abortCtl=new AbortController();
-  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[],sources=null,photos=null,mapd=null;
+  let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[],sources=null,photos=null,mapd=null,locCtx="",places=null;
   lastModels="";
 
   try{
@@ -7400,7 +7526,11 @@ async function send(){
               .replace(/\u0000MAP:(.*?)\u0000/g,(_,j)=>{
                  try{mapd=JSON.parse(j);}catch(e){}
                  return "";})
-              .replace(/\u0000MAP:[^\u0000]*$/,"");
+              .replace(/\u0000MAP:[^\u0000]*$/,"")
+              .replace(/\u0000CTX:(.*?)\u0000/g,(_,j)=>{
+                 try{locCtx=(JSON.parse(j).loc)||"";}catch(e){}
+                 return "";})
+              .replace(/\u0000CTX:[^\u0000]*$/,"");
       if(drafts.length||(status&&/of \d+/.test(status)))
         paintDrafts(aiDiv,drafts,true,status);
       // a merge that collapsed mid-stream sends RESET \u2014 discard
@@ -7415,7 +7545,7 @@ async function send(){
       body.innerHTML=(status&&!full&&!hasBar
           ?'<span class="statusline">◇ '+esc(status)+'…</span>':"")
         +(searched?srcRow(sources):"")
-        +renderMD(full)+'<span class="caret"></span>';
+        +renderMD(full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,""))+'<span class="caret"></span>';
       if(curChat===myChat)autoScroll();
     }
   }catch(err){
@@ -7437,10 +7567,16 @@ async function send(){
     const rescued=drafts.filter(x=>!/^\(no answer/.test(x.t));
     if(rescued.length)full=rescued[0].t;
   }
+  const pm=full.match(/\[\[PLACES\]\]\s*(\[[\s\S]*?\])\s*$/);
+  if(pm){
+    try{places=JSON.parse(pm[1]).slice(0,4);}catch(e){places=null;}
+    full=full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,"").trim();
+  }else{full=full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,"").trim();}
   body.innerHTML=(searched&&full?srcRow(sources):"")
     +renderMD(full||(wasAborted?"*(stopped)*":
     "⚠️ The engine returned nothing. Is the model server for **"+model+"** actually running?"))
-    +(full&&!wasAborted?photoRow(photos)+mapCard(mapd):"");
+    +(full&&!wasAborted?photoRow(photos)
+      +(places&&places.length?placesModule(places,locCtx,mapd):mapCard(mapd)):"");
   const secs=((performance.now()-t0)/1000);
   const isErr=full.trim().startsWith("⚠️")||full.includes("\n⚠️");
   if(full&&!isErr){
@@ -7452,6 +7588,7 @@ async function send(){
     if(sources&&sources.length)rec.sources=sources;
     if(photos&&photos.length)rec.photos=photos;
     if(mapd)rec.map=mapd;
+    if(places&&places.length){rec.places=places;rec.loc=locCtx;}
     myMessages.push(rec);
     persistChat(myChat,myMessages);
     // viewing the owning chat but the live bubble was detached by a
@@ -7460,7 +7597,7 @@ async function send(){
       messages=myMessages;
       inner.innerHTML="";
       myMessages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",
-        m.content,m.drafts,m.sources,m.map,m.photos));
+        m.content,m.drafts,m.sources,m.map,m.photos,m.places,m.loc));
     }
   }else{
     // error or empty: keep it out of the model's context, refresh the dots
@@ -7634,7 +7771,7 @@ function loadChat(id){
   curChat=id;
   messages=c.messages.slice();
   inner.innerHTML="";
-  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",m.content,m.drafts,m.sources,m.map,m.photos));
+  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",m.content,m.drafts,m.sources,m.map,m.photos,m.places,m.loc));
   renderChats();
 }
 renderChats();
@@ -7832,6 +7969,9 @@ async function bootSkyline(){
   const bar=$("#skyload"),fill=$("#skyload .fill"),lbl=$("#skyload .lbl");
   c.preload="auto";
   function hideBar(){if(bar)bar.hidden=true;}
+  // the bar belongs to the EMPTY stage only — once a chat is on screen
+  // (hero gone) or an answer is streaming, it stays out of the way
+  const barOK=()=>$("#hero")&&!document.body.classList.contains("gen");
   // NEVER A BLANK WALL, per Patrick ("shows a progress bar but doesn't
   // take forever"): while the fresh pick downloads behind the bar, a
   // clip already on disk plays UNDERNEATH it — then a soft fade swaps
@@ -7888,14 +8028,14 @@ async function bootSkyline(){
     },{once:true});
     function buf(){
       if(shown)return;
-      if(bar){bar.hidden=false;}   // visible from the FIRST moment
+      if(bar&&barOK()){bar.hidden=false;}   // visible from the FIRST moment
       try{
         const d=c.duration,e=c.buffered.length?c.buffered.end(0):0;
         // STREAM as it loads: ~6s of runway is enough cushion to play
         // smoothly while the rest keeps downloading — on a decent
         // connection the city is on screen in well under 10 seconds
         if(d>0&&e>=Math.min(6,d*.25)){reveal();return;}
-        if(bar&&d>0){
+        if(bar&&d>0&&barOK()){
           bar.hidden=false;
           const p=Math.min(99,Math.round(e/Math.min(d,6)*100));
           fill.style.width=p+"%";
@@ -7920,7 +8060,7 @@ async function bootSkyline(){
         i=(i+1)%SKY_N;localStorage.setItem("millen.sky",i);
         poll();return;
       }
-      if(bar){
+      if(bar&&barOK()){
         bar.hidden=false;
         fill.style.width=(st.pct||0)+"%";
         lbl.textContent=(st.status==="remuxing"?"Loading":

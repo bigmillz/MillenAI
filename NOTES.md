@@ -1333,3 +1333,21 @@ that found all three: re-execute the page's own script text via
   4px-halo focus ring. Micro-motion: buttons compress (scale .94).
   Scrollbars are 6px glass. Hero greeting wraps balanced. The who
   labels whisper; the rainbow stays exclusive to wordmark/hero/wash.
+
+## 4.1 — the places module (answers like Claude's)
+- Place/recommendation answers now end with a machine-read [[PLACES]]
+  JSON trailer (max 4 real venues; the client strips it from display).
+  The client renders a MODULE: dark multi-pin Leaflet map (CARTO dark
+  tiles + OSM, keyless) over a card rail (name, descriptor, hours).
+  Pins geocode through the new /api/geo proxy (shared Nominatim cache,
+  no CORS). Persisted per message (m.places/m.loc).
+- LESSONS: (a) the two-pass reviser DELETED the trailer as filler —
+  REVISE_INSTRUCTION now preserves a trailing [[PLACES]] line exactly;
+  (b) "pizza spots" wasn't bookish — the noun list gained spots/places/
+  joints/shops/diners/delis/bakeries/pizzerias/venues/bodegas;
+  (c) geocode sanity: "food bushwick" once pinned EDINBURGH — a pin
+  only counts when the result name contains the locality (both the
+  server MAP pin and the client module pins).
+- The backdrop loading bar can no longer paint over an answer: every
+  bar-show site is gated on hero-present + not-generating (plus a
+  body.gen CSS kill switch).
