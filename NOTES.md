@@ -1294,3 +1294,12 @@ that found all three: re-execute the page's own script text via
   local-only. Blind pick only if the cache is somehow empty.
 - Sidebar top consolidated Claude-snug: brand-wrap 12→5px bottom pad,
   mode-tabs margins 12/8→5/6, tab pads 7→5px.
+
+## 3.12 — the standby city, and Claude's chat
+- BACKDROPS never blank now: while the fresh pick downloads behind the
+  bar, a cached clip plays UNDERNEATH — when the new clip is ready the
+  city dips to 22% opacity, swaps src, and fades back up. Progress bar
+  + variety + zero wait, all three at once.
+- CLAUDE-STYLE CHAT: user messages are compact right-aligned pills (no
+  "YOU" label); answers are flat serif prose (ui-serif/Georgia 16.5px)
+  straight on the backdrop. Code/pre stay mono inside the serif flow.

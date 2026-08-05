@@ -5816,13 +5816,24 @@ body.perf .msg{animation:none}
   font-kerning:normal;text-rendering:optimizeLegibility;
   -webkit-font-smoothing:antialiased;
 }
+/* CLAUDE-STYLE CHAT, per Patrick: the user speaks in a compact pill on
+   the right; the answer is flat serif prose on the backdrop */
+.msg.user{display:flex;flex-direction:column;align-items:flex-end}
+.msg.user .who{display:none}
 .msg.user .body{
-  background:rgba(12,13,17,.38);border:1px solid rgba(255,255,255,.10);
+  background:rgba(12,13,17,.44);border:1px solid rgba(255,255,255,.10);
   -webkit-backdrop-filter:blur(16px) saturate(1.2);
           backdrop-filter:blur(16px) saturate(1.2);
-  border-radius:var(--radius);padding:12px 16px;white-space:pre-wrap;
+  border-radius:18px;padding:11px 16px;white-space:pre-wrap;
+  max-width:78%;
 }
-.msg.ai .body{padding:0 2px}
+.msg.ai .body{
+  padding:0 2px;
+  font-family:ui-serif,Georgia,'Times New Roman',serif;
+  font-size:16.5px;line-height:1.68;letter-spacing:.001em;
+}
+/* code, tables and chips stay in their own faces inside the serif flow */
+.msg.ai .body code,.msg.ai .body pre{font-family:var(--mono)}
 .msg .meta{
   font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:8px;
 }
@@ -7706,7 +7717,37 @@ async function bootSkyline(){
   const bar=$("#skyload"),fill=$("#skyload .fill"),lbl=$("#skyload .lbl");
   c.preload="auto";
   function hideBar(){if(bar)bar.hidden=true;}
+  // NEVER A BLANK WALL, per Patrick ("shows a progress bar but doesn't
+  // take forever"): while the fresh pick downloads behind the bar, a
+  // clip already on disk plays UNDERNEATH it — then a soft fade swaps
+  // the new city in the moment it's ready.
+  let standby=false;
+  if(IS_LOCAL){
+    try{
+      const cc=(await(await fetch("/api/sky/cached")).json()).cached||[];
+      const alt=cc.filter(x=>x!==i);
+      if(alt.length){
+        c.src="/sky/"+alt[Math.floor(Math.random()*alt.length)]+".mov";
+        const pr0=c.play();if(pr0&&pr0.catch)pr0.catch(()=>{});
+        skyline.hidden=false;standby=true;
+      }
+    }catch(e){}
+  }
   function attach(){
+    if(standby){
+      // the fresh clip is ready: dip the city, swap, come back up
+      hideBar();
+      skyline.style.transition="opacity .55s ease";
+      skyline.style.opacity="0.22";
+      setTimeout(()=>{
+        c.src="/sky/"+i+".mov";
+        const p=c.play();if(p&&p.catch)p.catch(()=>{});
+        const up=()=>{skyline.style.opacity="1";};
+        c.addEventListener("canplay",up,{once:true});
+        setTimeout(up,1600);   // belt and braces
+      },560);
+      return;
+    }
     // the bar rides the BUFFER now: unhiding on the first frame let
     // playback race the network and stutter ("super jittery") — wait for
     // canplaythrough, showing buffered % meanwhile. A 12s cap means a
