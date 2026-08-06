@@ -1446,3 +1446,28 @@ Five gaps that read as backyard-project, all closed:
 - NOTE: the Browser pane swallows real ⌘K before the page sees it —
   the handler is fine (verified by dispatching the event); test with a
   synthetic KeyboardEvent, not a real keypress.
+
+## 5.1 — full send
+- ONE BACKDROP PER LAUNCH: the standby-then-swap (cached clip playing
+  while the real pick downloaded, then flipping) read as the app
+  changing its mind — gone. The picker now leans 60% toward clips
+  already on disk so most launches are instant, and when it does
+  download, the bar waits for the ONE chosen clip.
+- LIVE ACTIVITY TREE: STEP markers stream from the real pipeline
+  (searched N sources / read pages / located on map / drafting /
+  sharpening / finding places) into a Claude-style panel with a
+  shimmer progress bar; it collapses to "› N steps · done" and
+  re-expands on click. The tree DOUBLES AS A LIE DETECTOR: "best pizza
+  in williamsburg" showed only 2 steps — no search — because "pizza"
+  wasn't a trigger noun, and the memory-answer had put pizza on
+  Lilia's menu. Food nouns (pizza, tacos, coffee, ramen…) now count.
+- SETTINGS REBUILT: PERSONALITY / POWER / MAINTENANCE sections with
+  micro-headers, the cloud-key card gridded so nothing truncates,
+  maintenance as a full-width stacked list, pinned Close.
+- WORKSPACE (the Claude-Code seed): owner-only, read-only. Point it at
+  a folder (/api/workspace/set), the Workspace agent ranks files
+  against the question and pastes the best windows under the prompt.
+  Window anchor = the RAREST matching word — anchoring on the earliest
+  hit put the window at the top of the file where "file" and
+  "function" live (seen live). Verified: explained place_search from
+  millenai.py accurately, citing the file.

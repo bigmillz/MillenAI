@@ -776,6 +776,27 @@ TIERS = {
 # system prompt married to the best installed model for that craft —
 # radio-selected in the sidebar against "Standard model".
 AGENTS = {
+    "Workspace": {
+        # Claude-Code-shaped, honestly scoped: it READS the folder you
+        # point it at and answers about YOUR code. No writes, no shell.
+        "icon": "\U0001f5c2\ufe0f", "desc": "answers about your own code",
+        "picks": ["Qwen 2.5 Coder 14B", "Gemma 4 26B",
+                  "Qwen 3.6 35B MoE", "GPT-OSS 20B", "Qwen 2.5 Coder 7B",
+                  "Gemma 4 12B", "Llama 3.1 8B"],
+        "workspace": True,
+        "system": (
+            "You are a senior engineer reading the user's actual "
+            "codebase. Files from their workspace are included below the "
+            "question — treat them as ground truth and NEVER invent a "
+            "file, function or line that is not in them.\n"
+            "Cite what you used as `path/to/file.py` inline. When you "
+            "propose a change, show it as a fenced diff or a complete "
+            "replacement block for the smallest region that works, and "
+            "say exactly which file it belongs in.\n"
+            "If the files provided don't contain the answer, say which "
+            "file or folder you'd need to see — never guess at code you "
+            "cannot see."),
+    },
     "Coding": {
         "icon": "💻", "desc": "working code, tight explanations",
         "picks": ["Qwen 2.5 Coder 14B", "Qwen 2.5 Coder 7B",
@@ -1187,7 +1208,15 @@ _PLACE_NOUNS = (r"(retreats?|hostels?|hotels?|"
                 r"concerts?|spas?|gyms?|studios?|coworking|spots?|places?|"
                 r"joints?|shops?|diners?|delis?|bakeries|pizzerias?|"
                 r"venues?|bodegas?|pubs?|clubs?|breweries|taquerias?|"
-                r"museums?|galleries|parks?|markets?|bookstores?)")
+                r"museums?|galleries|parks?|markets?|bookstores?|"
+                # the FOOD ITSELF is how people actually ask — "best
+                # pizza in williamsburg" answered from memory and put
+                # pizza on Lilia's menu (it's a pasta place, seen live)
+                r"pizza|slices?|tacos?|coffee|ramen|sushi|burgers?|"
+                r"bagels?|brunch|breakfast|lunch|dinner|cocktails?|"
+                r"drinks?|bbq|barbecue|wings|dumplings|pho|falafel|"
+                r"shawarma|pastrami|donuts?|desserts?|ice\s+cream|"
+                r"beer|wine|espresso|matcha|pastries|croissants?)")
 
 # "what's a good bar in bushwick" carries no verb at all — it went
 # UNSEARCHED and the model invented three bars from memory (seen live).
@@ -2545,6 +2574,91 @@ def _fetch_pages(urls: list, cap: int = 1600, meta: list = None) -> list:
     for t in threads:
         t.join(timeout=9)
     return [x for x in out if x]
+
+
+# ---------------------------------------------------------- workspace
+# A folder the owner points MillenAI at, so questions can be answered
+# about THEIR code. Read-only by design: no writes, no execution.
+_WS_OK = (".py", ".js", ".ts", ".tsx", ".jsx", ".json", ".md", ".txt",
+          ".html", ".css", ".sh", ".yml", ".yaml", ".toml", ".rs",
+          ".go", ".java", ".rb", ".c", ".h", ".cpp", ".swift", ".sql")
+_WS_SKIP = {".git", "node_modules", "__pycache__", ".venv", "venv",
+            "dist", "build", ".next", "target", ".cache", "vendor"}
+
+
+def _ws_files(root: str, cap: int = 4000) -> list:
+    """Every readable source file under root — skipping the usual
+    machine-generated mountains."""
+    out = []
+    if not root or not os.path.isdir(root):
+        return out
+    for base, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs
+                   if d not in _WS_SKIP and not d.startswith(".")]
+        for f in files:
+            if os.path.splitext(f)[1].lower() in _WS_OK:
+                p = os.path.join(base, f)
+                try:
+                    if os.path.getsize(p) <= 4_000_000:
+                        out.append(p)
+                except OSError:
+                    pass
+            if len(out) >= cap:
+                return out
+    return out
+
+
+def workspace_context(question: str, budget: int = 14000) -> str:
+    """The slice of the workspace worth showing for THIS question.
+
+    Ranks files by name and content hits, then pastes the best few whole
+    (small ones) or their most relevant window (large ones).
+    """
+    root = (load_prefs(None).get("workspace") or "")
+    if not root:
+        return ""
+    words = [w for w in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}",
+                                   question.lower())][:12]
+    if not words:
+        return ""
+    scored = []
+    for p in _ws_files(root):
+        rel = os.path.relpath(p, root)
+        score = sum(3 for w in words if w in rel.lower())
+        body = ""
+        try:
+            with open(p, "r", encoding="utf-8", errors="replace") as fh:
+                body = fh.read(2_000_000)
+        except OSError:
+            continue
+        low = body.lower()
+        for w in words:
+            score += min(low.count(w), 6)
+        if score:
+            scored.append((score, rel, body))
+    if not scored:
+        return ""
+    scored.sort(key=lambda x: -x[0])
+    parts, used = [], 0
+    for score, rel, body in scored[:6]:
+        if used >= budget:
+            break
+        room = min(4200, budget - used)
+        if len(body) > room:
+            # centre the window on the RAREST word (the longest one that
+            # hits) — centering on the earliest hit of any word put the
+            # window at the top of the file, where "file" and "function"
+            # live, and missed the identifier entirely (seen live)
+            low2 = body.lower()
+            anchor = max((w for w in words if low2.find(w) >= 0),
+                         key=len, default="")
+            at = low2.find(anchor) if anchor else 0
+            start = max(0, at - room // 2)
+            body = body[start:start + room]
+        parts.append("--- %s\n%s" % (rel, body))
+        used += len(body)
+    return ("FILES FROM THE USER'S WORKSPACE (%s):\n\n" % root
+            + "\n\n".join(parts))
 
 
 _geo_cache = {}
@@ -4361,6 +4475,38 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                       % str(exc)[:80]))
                 return
             self._set_user_cookie(_user_id("google", email))
+        elif self.path.startswith("/api/workspace"):
+            # WORKSPACE: point MillenAI at a folder and ask about the
+            # code in it. Owner-at-the-machine ONLY, and READ-ONLY —
+            # a remote visitor must never be able to read the host's
+            # disk, and nothing here writes or executes anything.
+            if self._remote():
+                self._send_json({"ok": False, "err": "owner only"})
+                return
+            q = urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query)
+            if self.path.startswith("/api/workspace/set"):
+                root = os.path.expanduser((q.get("root", [""])[0]).strip())
+                if not root or not os.path.isdir(root):
+                    self._send_json({"ok": False,
+                                     "err": "that folder doesn't exist"})
+                    return
+                p = load_prefs(None)
+                p["workspace"] = os.path.realpath(root)
+                store_prefs(p)
+                self._send_json({"ok": True, "root": p["workspace"],
+                                 "files": len(_ws_files(p["workspace"]))})
+                return
+            if self.path.startswith("/api/workspace/off"):
+                p = load_prefs(None)
+                p.pop("workspace", None)
+                store_prefs(p)
+                self._send_json({"ok": True})
+                return
+            root = (load_prefs(None).get("workspace") or "")
+            self._send_json({"ok": bool(root), "root": root,
+                             "files": len(_ws_files(root)) if root else 0})
+            return
         elif self.path.startswith("/api/geo"):
             # pin lookups for the places module — proxied so the browser
             # never talks to Nominatim (no CORS, shared cache, one UA)
@@ -5289,6 +5435,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if tier == "Thinking" and messages:
             messages[-1] = dict(messages[-1])
             messages[-1]["content"] += "\n\n" + THINK_HINT
+        # WORKSPACE: the chosen agent reads the user's own folder — the
+        # files ride under the question so they can't be mistaken for
+        # instructions, and only ever for the owner at the machine
+        if (agent_name and AGENTS.get(agent_name, {}).get("workspace")
+                and not self._remote() and messages):
+            wsx = workspace_context(prompt)
+            if wsx:
+                messages[-1] = dict(messages[-1])
+                messages[-1]["content"] = (
+                    wsx + "\n\nQUESTION: " + str(messages[-1]["content"]))
         user_base = self._data_base()      # whose memory/persona this is
         mem = memory_text(user_base)
         if mem:
@@ -5376,6 +5532,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             answer_buf.append(chunk)
             _write(chunk.encode("utf-8"))
 
+        def step(sid: str, label: str, state: str = "run",
+                 detail: str = ""):
+            """One node of the live activity tree the UI draws."""
+            try:
+                _write((NUL + "STEP:" + json.dumps(
+                    {"id": sid, "l": label, "s": state,
+                     "d": str(detail)[:70]}) + NUL).encode("utf-8"))
+            except Exception:
+                pass
+
         def status(text: str):
             # sentinel-wrapped so the UI can show progress without it
             # ending up inside the answer text
@@ -5385,6 +5551,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         # the search ran earlier on THIS thread — hand the client its
         # structured hits so the answer carries a clickable sources row
         if query:
+            nsrc = len(getattr(_tl_search, "rows", []) or [])
+            step("search", "Searched the web", "done",
+                 "%d source%s" % (nsrc, "" if nsrc == 1 else "s"))
+            nph = len(getattr(_tl_search, "photos", []) or [])
+            if nph:
+                step("read", "Read the pages", "done",
+                     "%d image%s found" % (nph, "" if nph == 1 else "s"))
+            if getattr(_tl_search, "geo", None):
+                step("geo", "Located it on the map", "done",
+                     (getattr(_tl_search, "geo") or {}).get("name", ""))
             src_rows = getattr(_tl_search, "rows", [])[:5]
             if src_rows:
                 try:
@@ -5486,6 +5662,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 if ftext:
                     emit(ftext)
                 elif polish:
+                    step("draft", "Drafting the answer", "run", lbl)
                     # TWO PASS: draft in silence, then stream the rewrite.
                     # The reader waits a little longer and gets a visibly
                     # better answer instead of a first-take one.
@@ -5498,6 +5675,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     except Exception:
                         draft = ""
                     if draft and not _looks_degenerate(draft):
+                        step("draft", "Drafted the answer", "done",
+                             "%d chars" % len(draft))
+                        step("polish", "Sharpening it", "run", "")
                         status(f"{lbl} is sharpening the answer")
                         # for a searched OR doc-carrying answer the
                         # "question" is the full grounded message — a
@@ -5523,6 +5703,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                         None,
                                         "kept the part before it wandered")
                 else:
+                    step("draft", "Writing the answer", "run", lbl)
                     # guarded like every other path: a lone model that
                     # collapses into repetition gets cut back to its
                     # coherent prefix instead of streaming the loop
@@ -5561,8 +5742,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             # the finished answer and names the venues. Cheap, and it
             # only runs for place-shaped questions that searched.
             try:
+                if sent[0]:
+                    step("draft", "Answer written", "done",
+                         "%d chars" % sent[0])
+                    step("polish", "Sharpened", "done", "")
                 if (query and sent[0] > 120
                         and (placey or bookish) and not images):
+                    step("places", "Finding the places", "run", "")
                     ans = "".join(answer_buf)[-2400:]
                     # the model that JUST answered is already resident —
                     # reaching for the 1B would swap engines and evict it
@@ -5590,6 +5776,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         low = ans.lower()
                         names = [x for x in names
                                  if 2 < len(x) < 42 and x.lower() in low]
+                        step("places", "Found the places", "done",
+                             "%d pinned" % len(names))
                         if names:
                             _write((NUL + "PLACES2:" + json.dumps(
                                 [{"n": x, "d": "", "h": ""} for x in names])
@@ -6317,6 +6505,48 @@ body.perf .msg{animation:none}
 }
 /* code, tables and chips stay in their own faces inside the serif flow */
 .msg.ai .body code,.msg.ai .body pre{font-family:var(--mono)}
+/* workspace folder bar (Workspace agent only) */
+#ws-bar{margin:8px 2px 2px;padding:10px 12px;border-radius:12px;
+  background:rgba(255,255,255,.045);
+  border:1px solid rgba(255,255,255,.08)}
+#ws-bar[hidden]{display:none}
+#ws-row{display:flex;gap:7px;align-items:center}
+#ws-row .about-btn.slim{margin-top:0}
+#ws-path{flex:1;background:rgba(18,20,26,.7);color:var(--text);
+  border:1px solid rgba(255,255,255,.12);border-radius:8px;
+  font:12px var(--mono);padding:7px 9px;outline:none;min-width:0}
+#ws-path:focus{border-color:rgba(143,157,255,.6)}
+#ws-note{font-size:11px;color:var(--faint);margin-top:7px;min-height:13px}
+/* the working tree — progress plus what it's actually doing */
+.worktree{margin:0 0 14px;padding:11px 13px;border-radius:12px;
+  background:rgba(13,15,20,.5);border:1px solid rgba(255,255,255,.09);
+  -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
+  font-family:var(--sans)}
+.wtbar{height:3px;border-radius:2px;background:rgba(255,255,255,.09);
+  overflow:hidden;margin-bottom:10px}
+.wtbar i{display:block;height:100%;border-radius:2px;
+  background:linear-gradient(90deg,#ffdede,#fbf6cf,#d9f8e6,#d3e9ff,#e0dcff);
+  background-size:220% 100%;transition:width .45s ease}
+body:not(.perf) .wtbar i{animation:skyshimmer 3s linear infinite}
+.wtrow{display:flex;align-items:center;gap:9px;padding:3px 0;
+  font-size:12.5px;color:var(--faint)}
+.wtrow.ok{color:var(--dim)}
+.wtdot{width:6px;height:6px;border-radius:50%;flex:none;
+  background:rgba(255,255,255,.25)}
+.wtrow.ok .wtdot{background:#8fe0a8}
+.wtrow.run .wtdot{background:#e6d48f}
+body:not(.perf) .wtrow.run .wtdot{animation:blink 1s ease-in-out infinite}
+.wtl{flex:none}
+.wtd{flex:1;min-width:0;color:var(--faint);opacity:.75;font-size:11.5px;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.worktree.folded{padding:7px 11px;background:rgba(13,15,20,.36)}
+.wtsum{background:none;border:none;cursor:pointer;color:var(--faint);
+  font:11.5px var(--mono);letter-spacing:.06em;padding:0;
+  display:flex;align-items:center;gap:7px}
+.wtsum:hover{color:var(--dim)}
+.wtchev{display:inline-block;transition:transform .18s ease}
+.worktree.open .wtchev{transform:rotate(90deg)}
+.worktree.folded .wtlist{margin-top:8px}
 .mact{display:flex;gap:2px;margin-top:6px;opacity:0;
   transition:opacity .16s ease}
 .msg:hover .mact,.mact:focus-within{opacity:1}
@@ -6536,6 +6766,19 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
   -webkit-backdrop-filter:blur(8px);backdrop-filter:blur(8px)}
 .mapcard a:hover{background:rgba(24,27,36,.92)}
 /* cloud key box in Settings */
+/* SECTIONED SETTINGS — headers, one card language, a real footer */
+.set-sec{padding:14px 0 4px;border-top:1px solid rgba(255,255,255,.07);
+  display:flex;flex-direction:column}
+.set-sec:first-child{border-top:none;padding-top:2px}
+.set-h{font-family:var(--mono);font-size:9px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--faint);opacity:.8;
+  margin-bottom:10px}
+.about-btn.slim{padding:7px 14px;font-size:12px;margin-top:8px;
+  align-self:flex-start}
+.about-btn.danger:hover{border-color:rgba(226,109,90,.5);
+  color:#e8907e}
+#cloudkey-head em{font-style:normal;opacity:.65;font-size:9px;
+  margin-left:8px;letter-spacing:.1em}
 #cloudkey-box{margin:8px 2px 2px;padding:10px 12px;border-radius:12px;
   background:rgba(255,255,255,.045);
   border:1px solid rgba(255,255,255,.08)}
@@ -6543,7 +6786,10 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 #cloudkey-head{font-family:var(--mono);font-size:10px;
   letter-spacing:.12em;text-transform:uppercase;color:var(--faint);
   margin-bottom:8px}
-#cloudkey-row{display:flex;gap:6px;align-items:center}
+#cloudkey-row{display:grid;gap:8px;
+  grid-template-columns:1fr auto;align-items:center}
+#ck-provider{grid-column:1 / -1;width:100%}
+#cloudkey-row .about-btn.slim{margin-top:0}
 #ck-provider{background:rgba(18,20,26,.7);color:var(--text);
   border:1px solid rgba(255,255,255,.12);border-radius:8px;
   font-size:12px;padding:6px 6px;outline:none}
@@ -6823,7 +7069,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #fleet-pending .preq button{margin-left:auto;padding:5px 12px;
   border-radius:8px;border:none;background:var(--accent);color:#1a1a1a;
   font-weight:600;cursor:pointer}
-#adv-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:14px}
+#adv-grid{display:flex;flex-direction:column;gap:8px;margin-top:2px}
+#adv-grid .about-btn{width:100%;text-align:left;padding:11px 14px;
+  font-size:13px}
+#adv-grid .about-btn.danger{margin-top:6px}
 #adv-grid .about-btn{margin-top:0}
 #fleet-adv{margin-top:6px}
 #fleet-adv summary{font-family:var(--mono);font-size:9.5px;
@@ -7093,6 +7342,15 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div id="tier-rows">__TIER_ROWS__</div>
   <div id="agents-wrap" hidden>
 __AGENT_ROWS__
+    <div id="ws-bar" hidden>
+      <div class="set-h">Workspace folder</div>
+      <div id="ws-row">
+        <input id="ws-path" placeholder="~/code/my-project"
+               autocomplete="off" spellcheck="false">
+        <button class="about-btn slim" id="ws-set">Use</button>
+      </div>
+      <div id="ws-note"></div>
+    </div>
   </div>
 
   <div id="model-list">
@@ -7240,39 +7498,47 @@ __AGENT_ROWS__
     <div id="about-facts"></div>
     </div>
     <div id="about-body">
-    <div id="persona-label">How should MillenAI reply?</div>
-    <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
-      placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
-    <button class="about-btn" id="persona-save">Save preferences</button>
-    <label id="contrib-row"><input type="checkbox" id="contrib">
-      <span>Contribute GPU power</span><i class="hint" id="contrib-hint"
-      title="When this machine is idle, it answers questions for friends on MillenAI — and theirs answer yours. Nothing runs while you are using it.">i</i></label>
-    <label id="turbo-row" hidden><input type="checkbox" id="turbo">
-      <span>Use cloud power</span><i class="hint" id="turbo-hint"
-      title="Answers come from a cloud GPU instead of this Mac — much faster, but your prompts leave this computer while it is on.">i</i></label>
-    <div id="cloudkey-box">
-      <div id="cloudkey-head">Frontier cloud — free key, 2 minutes</div>
-      <div id="cloudkey-row">
-        <select id="ck-provider">
-          <option value="gemini">Gemini (free tier)</option>
-          <option value="groq">Groq (free tier)</option>
-          <option value="claude">Claude (paid)</option>
-        </select>
-        <input id="ck-key" type="password" autocomplete="off"
-               placeholder="paste API key">
-        <button class="about-btn" id="ck-save">Save</button>
+    <div class="set-sec">
+      <div class="set-h">Personality</div>
+      <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
+        placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
+      <button class="about-btn slim" id="persona-save">Save</button>
+    </div>
+    <div class="set-sec">
+      <div class="set-h">Power</div>
+      <label id="contrib-row"><input type="checkbox" id="contrib">
+        <span>Contribute GPU power</span><i class="hint" id="contrib-hint"
+        title="When this machine is idle, it answers questions for friends on MillenAI — and theirs answer yours. Nothing runs while you are using it.">i</i></label>
+      <div id="fleet-box">
+        <div id="fleet-own" hidden><span id="fleet-n"></span></div>
+        <div id="fleet-pending"></div>
+        <div id="contrib-state"></div>
       </div>
-      <div id="ck-note"></div>
+      <label id="turbo-row" hidden><input type="checkbox" id="turbo">
+        <span>Use cloud power</span><i class="hint" id="turbo-hint"
+        title="Answers come from a cloud GPU instead of this Mac — much faster, but your prompts leave this computer while it is on.">i</i></label>
+      <div id="cloudkey-box">
+        <div id="cloudkey-head">Frontier cloud <em>free key &middot; 2 minutes</em></div>
+        <div id="cloudkey-row">
+          <select id="ck-provider">
+            <option value="gemini">Gemini (free tier)</option>
+            <option value="groq">Groq (free tier)</option>
+            <option value="claude">Claude (paid)</option>
+          </select>
+          <input id="ck-key" type="password" autocomplete="off"
+                 placeholder="paste API key">
+          <button class="about-btn slim" id="ck-save">Save</button>
+        </div>
+        <div id="ck-note"></div>
+      </div>
     </div>
-    <div id="fleet-box">
-      <div id="fleet-own" hidden><span id="fleet-n"></span></div>
-      <div id="fleet-pending"></div>
-      <div id="contrib-state"></div>
-    </div>
-    <div id="adv-grid">
-      <button class="about-btn" id="open-setup">Model updates&hellip;</button>
-      <button class="about-btn" id="about-check">Check for updates</button>
-      <button class="about-btn" id="about-forget">Forget me</button>
+    <div class="set-sec">
+      <div class="set-h">Maintenance</div>
+      <div id="adv-grid">
+        <button class="about-btn" id="open-setup">Model updates&hellip;</button>
+        <button class="about-btn" id="about-check">Check for updates</button>
+        <button class="about-btn danger" id="about-forget">Forget me</button>
+      </div>
     </div>
     </div>
     <div id="about-foot">
@@ -7496,6 +7762,7 @@ function paintAgents(){
 function setAgent(name){
   agent=name;localStorage.setItem("millen.agent",name);
   paintAgents();
+  if(typeof wsRefresh==="function")wsRefresh();
 }
 const agentsWrap=$("#agents-wrap");
 agentsWrap.classList.add("closed");
@@ -7738,6 +8005,59 @@ function mapCard(m){
     +'&q='+encodeURIComponent((m.name||"").split(",")[0]||"pin")
     +'" target="_blank" rel="noopener">Open in Maps \u2197</a></div>';
 }
+// THE WORKING TREE: what it's actually doing, live — a step list with
+// a progress bar, instead of one vague spinner line.
+let steps=[],stepHost=null;
+const STEP_ORDER=["search","read","geo","draft","polish","places"];
+function resetSteps(host){steps=[];stepHost=host;}
+function addStep(s){
+  if(!s||!s.id)return;
+  const at=steps.findIndex(x=>x.id===s.id);
+  if(at>=0)steps[at]=s; else steps.push(s);
+  paintSteps();
+}
+function paintSteps(){
+  if(!stepHost)return;
+  let box=stepHost.querySelector(".worktree");
+  if(!box){
+    box=document.createElement("div");box.className="worktree";
+    stepHost.insertBefore(box,stepHost.firstChild);
+  }
+  const done=steps.filter(s=>s.s==="done").length;
+  const pct=steps.length?Math.round(done/steps.length*100):0;
+  const ordered=steps.slice().sort((a,b)=>
+    STEP_ORDER.indexOf(a.id)-STEP_ORDER.indexOf(b.id));
+  box.innerHTML=
+    '<div class="wtbar"><i style="width:'+pct+'%"></i></div>'
+    +'<div class="wtlist">'+ordered.map(s=>
+      '<div class="wtrow '+(s.s==="done"?"ok":"run")+'">'
+      +'<span class="wtdot"></span>'
+      +'<span class="wtl">'+esc(s.l||"")+'</span>'
+      +(s.d?'<span class="wtd">'+esc(s.d)+'</span>':"")
+      +'</div>').join("")+'</div>';
+}
+function collapseSteps(){
+  if(!stepHost)return;
+  const box=stepHost.querySelector(".worktree");
+  if(!box)return;
+  if(!steps.length){box.remove();stepHost=null;return;}
+  const n=steps.length;
+  box.classList.add("folded");
+  box.innerHTML='<button class="wtsum">'
+    +'<span class="wtchev">\u203a</span>'+n+' step'+(n===1?"":"s")
+    +' \u00b7 done</button><div class="wtlist" hidden>'
+    +steps.slice().sort((a,b)=>STEP_ORDER.indexOf(a.id)-STEP_ORDER.indexOf(b.id))
+      .map(s=>'<div class="wtrow ok"><span class="wtdot"></span>'
+      +'<span class="wtl">'+esc(s.l||"")+'</span>'
+      +(s.d?'<span class="wtd">'+esc(s.d)+'</span>':"")+'</div>').join("")
+    +'</div>';
+  const btn=box.querySelector(".wtsum"),list=box.querySelector(".wtlist");
+  btn.addEventListener("click",()=>{
+    list.hidden=!list.hidden;
+    box.classList.toggle("open",!list.hidden);
+  });
+  stepHost=null;
+}
 const ICO={
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
   redo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>',
@@ -7955,6 +8275,7 @@ async function send(){
   aiDiv.classList.add("live");     // soft mask on the newest line
   body.innerHTML='<span class="caret"></span>';
 
+  resetSteps(body);
   abortCtl=new AbortController();
   let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[],sources=null,photos=null,mapd=null,locCtx="",places=null,placeHint=null;
   const seenStatus=[];
@@ -8011,7 +8332,11 @@ async function send(){
               .replace(/\u0000PLACES2:(.*?)\u0000/g,(_,j)=>{
                  try{places=JSON.parse(j);}catch(e){}
                  return "";})
-              .replace(/\u0000PLACES2:[^\u0000]*$/,"");
+              .replace(/\u0000PLACES2:[^\u0000]*$/,"")
+              .replace(/\u0000STEP:(.*?)\u0000/g,(_,j)=>{
+                 try{addStep(JSON.parse(j));}catch(e){}
+                 return "";})
+              .replace(/\u0000STEP:[^\u0000]*$/,"");
       if(drafts.length||(status&&/of \d+/.test(status)))
         paintDrafts(aiDiv,drafts,true,status);
       // a merge that collapsed mid-stream sends RESET \u2014 discard
@@ -8023,7 +8348,9 @@ async function send(){
       lastRate=secs>0.3?tokEst/secs:0;
       setToks(lastRate,"streaming");
       const hasBar=!!aiDiv.querySelector(".blendprog");
-      body.innerHTML=(status&&!full&&!hasBar
+      const treeHTML=(body.querySelector(".worktree")||{}).outerHTML||"";
+      body.innerHTML=treeHTML
+        +(status&&!full&&!hasBar
           ?'<span class="statusline">◇ '+esc(status)+'…</span>':"")
         +(searched?srcRow(sources):"")
         +renderMD(full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,""))+'<span class="caret"></span>';
@@ -8041,6 +8368,7 @@ async function send(){
   }
 
   aiDiv.classList.remove("live");
+  collapseSteps();
   paintDrafts(aiDiv,drafts,false);   // merge done: collapse (or clear bar)
   // the stream died but good drafts exist — the best one IS the answer;
   // never show "engine returned nothing" over a usable draft
@@ -8068,7 +8396,8 @@ async function send(){
     const uniq=[...new Set(bold)].slice(0,4).map(s=>({n:s,d:"",h:""}));
     if(uniq.length)places=uniq;
   }
-  body.innerHTML=(searched&&full?srcRow(sources):"")
+  const treeKeep=(body.querySelector(".worktree")||{}).outerHTML||"";
+  body.innerHTML=treeKeep+(searched&&full?srcRow(sources):"")
     +renderMD(full||(wasAborted?"*(stopped)*":
     "That answer didn\u2019t come through \u2014 the model was still "
     +"warming up. Try again and it usually lands."))
@@ -8370,6 +8699,35 @@ renderChats();
 loadChatsFromDisk();
 $("#undobtn").addEventListener("click",undoDelete);
 
+/* ------------------------------------------------- workspace picker */
+async function wsRefresh(){
+  const bar=$("#ws-bar");if(!bar)return;
+  const on=agent==="Workspace"&&IS_LOCAL;
+  bar.hidden=!on;
+  if(!on)return;
+  try{
+    const st=await(await fetch("/api/workspace")).json();
+    if(st.ok){
+      $("#ws-path").value=st.root;
+      $("#ws-note").textContent=st.files+" readable files indexed";
+    }else{
+      $("#ws-note").textContent="point it at a folder to ask about your code";
+    }
+  }catch(e){}
+}
+$("#ws-set").addEventListener("click",async()=>{
+  const root=$("#ws-path").value.trim();
+  if(!root)return;
+  $("#ws-note").textContent="checking…";
+  try{
+    const st=await(await fetch("/api/workspace/set?root="
+      +encodeURIComponent(root))).json();
+    $("#ws-note").textContent=st.ok
+      ?st.files+" readable files indexed"
+      :(st.err||"that didn't work");
+  }catch(e){$("#ws-note").textContent="couldn't reach the app";}
+});
+
 /* ------------------------------------------------- command palette */
 // Search every chat — titles AND message bodies — plus the handful of
 // actions worth reaching without the mouse.
@@ -8670,6 +9028,11 @@ async function bootSkyline(){
   catch(e){}
   let all=[];
   for(let n=0;n<SKY_N;n++)if(mood(n))all.push(n);
+  // a clip already on disk starts instantly and still counts as new to
+  // the eye — only reach for a download when the local set is thin
+  let onDisk=[];
+  try{onDisk=(await(await fetch("/api/sky/cached")).json()).cached||[];}
+  catch(e){}
   // BORROWERS GET THE INSTANT CITY: a tunnel visitor picks from what
   // the host already has on disk — no download ritual, no blank wall
   // (seen live: incognito web showed a black void while a 250 MB pull
@@ -8690,6 +9053,8 @@ async function bootSkyline(){
   const nyc=new Set(JSON.parse('__SKY_NYC__'));
   const nycAvail=all.filter(x=>nyc.has(x)&&hist.slice(0,3).indexOf(x)<0);
   if(nycAvail.length&&Math.random()<0.5)pool=nycAvail;
+  const localPool=pool.filter(x=>onDisk.indexOf(x)>=0);
+  if(localPool.length&&Math.random()<0.6)pool=localPool;
   i=pool[Math.floor(Math.random()*pool.length)];
   hist=[i].concat(hist.filter(x=>x!==i)).slice(0,32);
   localStorage.setItem("millen.skyhist",JSON.stringify(hist));
@@ -8701,39 +9066,11 @@ async function bootSkyline(){
   // the bar belongs to the EMPTY stage only — once a chat is on screen
   // (hero gone) or an answer is streaming, it stays out of the way
   const barOK=()=>$("#hero")&&!document.body.classList.contains("gen");
-  // NEVER A BLANK WALL, per Patrick ("shows a progress bar but doesn't
-  // take forever"): while the fresh pick downloads behind the bar, a
-  // clip already on disk plays UNDERNEATH it — then a soft fade swaps
-  // the new city in the moment it's ready.
-  let standby=false;
-  if(IS_LOCAL){
-    try{
-      const cc=(await(await fetch("/api/sky/cached")).json()).cached||[];
-      const alt=cc.filter(x=>x!==i);
-      if(alt.length){
-        c.src="/sky/"+alt[Math.floor(Math.random()*alt.length)]+".mov";
-        const pr0=c.play();if(pr0&&pr0.catch)pr0.catch(()=>{});
-        skyline.hidden=false;standby=true;
-      }
-    }catch(e){}
-  }
+  // ONE BACKDROP PER LAUNCH, per Patrick: an earlier build played a
+  // cached clip while the real pick downloaded, then swapped — which
+  // read as the app changing its mind. Now the bar simply waits for
+  // the ONE clip we chose, and that clip is what you get.
   function attach(){
-    if(standby){
-      // the fresh clip is ready: dip the city, swap, come back up
-      hideBar();
-      skyline.style.transition="opacity .55s ease";
-      skyline.style.opacity="0.22";
-      setTimeout(()=>{
-        c.classList.add("swapping");
-        c.src="/sky/"+i+".mov";
-        const p=c.play();if(p&&p.catch)p.catch(()=>{});
-        const up=()=>{skyline.style.opacity="1";
-                      c.classList.remove("swapping");};
-        c.addEventListener("canplay",up,{once:true});
-        setTimeout(up,1600);   // belt and braces
-      },560);
-      return;
-    }
     // the bar rides the BUFFER now: unhiding on the first frame let
     // playback race the network and stutter ("super jittery") — wait for
     // canplaythrough, showing buffered % meanwhile. A 12s cap means a
