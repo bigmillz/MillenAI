@@ -113,6 +113,18 @@ check("tier dropdown js present", "tierRows.classList" in page)
 check("arena removed", "arena" not in page.lower())
 check("blend progress bar css", ".blendprog" in page)
 check("serene entrance css", "heroIn 2.6s" in page and "shockOut" not in page)
+# 5.2 surface
+check("three-tab selector, glide in thirds",
+      'data-m="code"' in page and "translateX(200%)" in page)
+check("code tab carries Coding + Workspace",
+      'data-agent="Coding"' in page and 'data-agent="Workspace"' in page)
+check("query pinwheel css", ".wtspin" in page and "wtspin 1.5s" in page)
+# NB: the JS boolean `lfgWashed` legitimately survives — only the old
+# keyframes must be gone
+check("centered LFG drop replaces the drive-by",
+      "lfgOut" in page and "lfgBloom" in page
+      and "keyframes lfgWash{" not in page)
+check("backdrop prefetch js", "millen.skynext" in page)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)

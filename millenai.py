@@ -892,11 +892,31 @@ def resolve_agent(name):
     return None, a
 
 
+# The CODE tab owns the two code specialists (5.2, per Patrick: "pull
+# coding from agents and make it into a 3rd tab"); Agents keeps the rest.
+CODE_AGENTS = ("Coding", "Workspace")
+
+
 def build_agent_rows() -> str:
     out = ['  <div class="agent" data-agent="">'
            '<span class="radio"></span><span class="ico">🤖</span>'
            'Standard model</div>']
     for name, a in AGENTS.items():
+        if name in CODE_AGENTS:
+            continue
+        out.append(
+            f'  <div class="agent" data-agent="{name}" title="{a["desc"]}">'
+            f'<span class="radio"></span><span class="ico">{a["icon"]}</span>'
+            f'{name}</div>')
+    return "\n".join(out)
+
+
+def build_code_rows() -> str:
+    out = []
+    for name in CODE_AGENTS:
+        a = AGENTS.get(name)
+        if not a:
+            continue
         out.append(
             f'  <div class="agent" data-agent="{name}" title="{a["desc"]}">'
             f'<span class="radio"></span><span class="ico">{a["icon"]}</span>'
@@ -2346,7 +2366,10 @@ def setup_status() -> dict:
         # nag on first run only: once a couple of models work, the welcome
         # screen is opt-in via "Add models…"
         "needs_setup": ready_n < 2,
-        "mem_gb": round(psutil.virtual_memory().total / 1e9),
+        # the ONE bare psutil call in the file killed /api/setup (and the
+        # header download strip with it) on any python without psutil
+        "mem_gb": (round(psutil.virtual_memory().total / 1e9)
+                   if HAS_PSUTIL else 0),
         "plans": {pl: round(sum(
             MODEL_INFO[l]["gb"] for l in plan_labels(pl)
             if not model_cached(l, pulled)), 1)
@@ -4396,6 +4419,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 return
             html = (HTML_CONTENT
                     .replace("__AGENT_ROWS__", build_agent_rows())
+                    .replace("__CODE_ROWS__", build_code_rows())
                     .replace("__APP_BETA__",
                              'VERSION <b class="vnum">%s</b>' % short_version())
                     .replace("__TIER_ROWS__", build_tier_rows())
@@ -6053,14 +6077,17 @@ body:not(.perf) #dlstrip .dlfill{animation:skyshimmer 3.2s linear infinite}
 #mode-tabs{display:flex;gap:0;margin:5px 0 6px;position:relative;
   background:rgba(255,255,255,.05);border-radius:11px;padding:3px;
   border:1px solid rgba(255,255,255,.07)}
-/* the glide: one lit pill that SLIDES between tabs, Claude-style */
+/* the glide: one lit pill that SLIDES between tabs, Claude-style.
+   translateX(%) is relative to the pill's OWN width, so 100%/200% land
+   exactly on the 2nd/3rd third — no container math needed. */
 #tab-glide{position:absolute;top:3px;bottom:3px;left:3px;
-  width:calc(50% - 3px);border-radius:9px;
+  width:calc(33.334% - 2px);border-radius:9px;
   background:rgba(240,242,248,.94);
   box-shadow:0 2px 10px -3px rgba(0,0,0,.5);
   transition:transform .34s cubic-bezier(.34,1.3,.44,1);
   pointer-events:none}
-#mode-tabs.agents #tab-glide{transform:translateX(100%)}
+#mode-tabs.code #tab-glide{transform:translateX(100%)}
+#mode-tabs.agents #tab-glide{transform:translateX(200%)}
 body.perf #tab-glide{transition:none}
 #mode-tabs .ltab{
   position:relative;z-index:1;
@@ -6071,7 +6098,7 @@ body.perf #tab-glide{transition:none}
 }
 #mode-tabs .ltab:hover{color:var(--dim)}
 #mode-tabs .ltab.on{color:#111;background:none;font-weight:700}
-#agents-wrap{margin:6px 0 4px}
+#agents-wrap,#code-wrap{margin:6px 0 4px}
 .agent{
   display:flex;align-items:center;gap:9px;padding:6px 10px;margin-bottom:2px;
   border-radius:9px;color:var(--dim);font-size:13.5px;cursor:pointer;
@@ -6342,10 +6369,13 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
 #skyload .lbl{margin-top:13px;font-size:13px;letter-spacing:.24em;
   text-transform:uppercase;color:#dfe3ee;font-family:var(--mono);
   text-shadow:0 2px 14px rgba(0,0,0,.7)}
-/* the payoff line: pops the instant the bar finishes, wipes itself
-   away — fast enough to catch, never long enough to stick */
-#lfg{position:fixed;left:calc(50% + var(--sbw,384px)/2);top:57%;
-  transform:translateX(-50%);z-index:5;pointer-events:none;
+/* THE DROP (5.2, per Patrick: "insane yet clean", "vertically and
+   horizontally center"): dead center of the WINDOW, both axes. Letters
+   slam in one after another with a chromatic flash, an aurora blooms
+   behind them, an elliptical ring detonates as the word completes,
+   sparks eject, and the whole line pulls through the camera on exit. */
+#lfg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
+  z-index:5;pointer-events:none;
   font-family:'Space Grotesk',sans-serif;font-weight:700;
   font-size:clamp(34px,4.6vw,58px);letter-spacing:.04em;
   white-space:nowrap;
@@ -6355,18 +6385,62 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
   filter:drop-shadow(0 4px 26px rgba(140,150,255,.5))}
 #lfg[hidden]{display:none}
 
-/* boot ritual: washes across the hero as the version settles — in from
-   the left on a skew, a beat over center, out the right */
-#lfg.wash{top:64%;font-size:clamp(46px,7vw,96px);
-  animation:lfgWash 2.2s cubic-bezier(.22,.61,.36,1) forwards}
-@keyframes lfgWash{
-  0%{opacity:0;transform:translateX(calc(-50% - 46vw)) skewX(-9deg)
-     scale(.92);filter:blur(16px)}
-  20%{opacity:1;filter:blur(0)}
-  46%{transform:translateX(-50%) skewX(0) scale(1.05)}
-  64%{opacity:1;transform:translateX(-50%) scale(1)}
-  100%{opacity:0;transform:translateX(calc(-50% + 46vw)) skewX(7deg);
-     filter:blur(14px)}}
+/* wash mode: the parent's own gradient goes dark — each letter carries
+   its slice of the palette instead, because animating children under a
+   parent background-clip:text repaints unreliably */
+#lfg.wash{background:none;font-size:clamp(46px,7vw,96px);
+  animation:lfgOut .55s cubic-bezier(.5,0,.9,.4) 2.05s forwards}
+@keyframes lfgOut{
+  from{opacity:1;transform:translate(-50%,-50%) scale(1);filter:blur(0)}
+  to{opacity:0;transform:translate(-50%,-50%) scale(1.65);
+     filter:blur(18px)}}
+#lfg.wash .ch{display:inline-block;color:transparent;
+  background:linear-gradient(120deg,var(--c1,#ff8f8f),var(--c2,#8f9dff));
+  -webkit-background-clip:text;background-clip:text;
+  animation:chIn .5s cubic-bezier(.18,.9,.28,1.18) both;
+  animation-delay:var(--d,0s)}
+@keyframes chIn{
+  0%{opacity:0;transform:translateY(.55em) scale(1.6) rotate(6deg);
+     filter:blur(14px) drop-shadow(-8px 0 rgba(255,60,90,.8))
+            drop-shadow(8px 0 rgba(60,170,255,.8))}
+  62%{opacity:1;transform:translateY(-.04em) scale(1);
+     filter:blur(0) drop-shadow(-3px 0 rgba(255,60,90,.5))
+            drop-shadow(3px 0 rgba(60,170,255,.5))}
+  100%{opacity:1;transform:none;filter:blur(0)}}
+/* aurora bloom behind the line, screen-blended so the city glows through */
+#lfg.wash::before{content:"";position:absolute;left:50%;top:50%;
+  width:2.4em;height:2.4em;border-radius:50%;z-index:-1;
+  background:conic-gradient(from 40deg,rgba(255,143,143,.5),
+    rgba(255,196,110,.5),rgba(245,230,99,.5),rgba(126,240,166,.5),
+    rgba(110,199,255,.5),rgba(143,157,255,.5),rgba(201,143,255,.5),
+    rgba(255,143,143,.5));
+  filter:blur(46px);mix-blend-mode:screen;
+  transform:translate(-50%,-50%) scale(.3);opacity:0;
+  animation:lfgBloom 2.1s cubic-bezier(.16,.8,.3,1) .1s forwards}
+@keyframes lfgBloom{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(.3)}
+  30%{opacity:.85}
+  70%{opacity:.7;transform:translate(-50%,-50%) scale(1.5)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(1.7)}}
+/* the shockwave: an ellipse hugging the line, detonating as it lands */
+#lfg.wash::after{content:"";position:absolute;left:50%;top:50%;
+  width:112%;height:2.6em;border-radius:50%;
+  border:2px solid rgba(255,255,255,.85);
+  box-shadow:0 0 30px rgba(160,170,255,.8),
+             inset 0 0 20px rgba(160,170,255,.5);
+  transform:translate(-50%,-50%) scale(.25);opacity:0;
+  animation:lfgRing 1s cubic-bezier(.1,.7,.2,1) .95s forwards}
+@keyframes lfgRing{
+  0%{opacity:.9;transform:translate(-50%,-50%) scale(.25)}
+  100%{opacity:0;transform:translate(-50%,-50%) scale(2.6)}}
+#lfg.wash .lspk{position:absolute;left:50%;top:50%;width:6px;height:6px;
+  border-radius:50%;mix-blend-mode:screen;opacity:0;
+  animation:lspkOut 1s cubic-bezier(.1,.75,.2,1) forwards;
+  animation-delay:var(--d,1s)}
+@keyframes lspkOut{
+  0%{opacity:0;transform:translate(0,0) scale(1)}
+  12%{opacity:1}
+  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.25)}}
 
 /* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
    follows it edge-for-edge, unlike the wordmark's tighter window */
@@ -6528,6 +6602,18 @@ body.perf .msg{animation:none}
   background:linear-gradient(90deg,#ffdede,#fbf6cf,#d9f8e6,#d3e9ff,#e0dcff);
   background-size:220% 100%;transition:width .45s ease}
 body:not(.perf) .wtbar i{animation:skyshimmer 3s linear infinite}
+/* the living pinwheel (5.2): Claude has its flower — ours spins the
+   identity gradient beside whatever is in motion */
+.wthead{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.wthead .wtbar{flex:1;margin-bottom:0}
+.wtspin{display:inline-block;flex:none;font-style:normal;font-size:14px;
+  line-height:1;
+  background:linear-gradient(120deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
+             #6ec7ff,#8f9dff,#c98fff);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  filter:drop-shadow(0 0 8px rgba(140,150,255,.35))}
+body:not(.perf) .wtspin{animation:wtspin 1.5s linear infinite}
+@keyframes wtspin{to{transform:rotate(360deg)}}
 .wtrow{display:flex;align-items:center;gap:9px;padding:3px 0;
   font-size:12.5px;color:var(--faint)}
 .wtrow.ok{color:var(--dim)}
@@ -7337,11 +7423,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div id="mode-tabs">
     <i id="tab-glide"></i>
     <span class="ltab" data-m="ai">AI</span>
+    <span class="ltab" data-m="code">Code</span>
     <span class="ltab" data-m="agents">Agents</span>
   </div>
   <div id="tier-rows">__TIER_ROWS__</div>
-  <div id="agents-wrap" hidden>
-__AGENT_ROWS__
+  <div id="code-wrap" hidden>
+__CODE_ROWS__
     <div id="ws-bar" hidden>
       <div class="set-h">Workspace folder</div>
       <div id="ws-row">
@@ -7351,6 +7438,9 @@ __AGENT_ROWS__
       </div>
       <div id="ws-note"></div>
     </div>
+  </div>
+  <div id="agents-wrap" hidden>
+__AGENT_ROWS__
   </div>
 
   <div id="model-list">
@@ -7736,24 +7826,35 @@ document.addEventListener("click",e=>{
 });
 setTier(tier);
 
-// AI | Agents: the primary selector is tabbed — AI shows the tier
-// dropdown, Agents shows the specialist radio list
+// AI | Code | Agents: the primary selector is tabbed — AI shows the tier
+// dropdown, Code the two code specialists, Agents the rest of the list
 function modeShow(which){
   $("#tier-rows").hidden=which!=="ai";
+  $("#code-wrap").hidden=which!=="code";
   $("#agents-wrap").hidden=which!=="agents";
   $$("#mode-tabs .ltab").forEach(t=>
     t.classList.toggle("on",t.dataset.m===which));
+  $("#mode-tabs").classList.toggle("code",which==="code");
   $("#mode-tabs").classList.toggle("agents",which==="agents");
 }
 $$("#mode-tabs .ltab").forEach(t=>
-  t.addEventListener("click",()=>modeShow(t.dataset.m)));
+  t.addEventListener("click",()=>{
+    const m=t.dataset.m;modeShow(m);
+    // each tab owns its lane: opening CODE activates a code specialist
+    // on the spot (the tab IS the mode); leaving it drops back to the
+    // standard path so the chip never says "Coding" under the AI tab
+    const codey=agent==="Coding"||agent==="Workspace";
+    if(m==="code"&&!codey)
+      setAgent(localStorage.getItem("millen.codeagent")||"Coding");
+    else if(m!=="code"&&codey)setAgent("");
+  }));
 
 /* ------------------------------------------------------------ agents */
 // radio choice: a task specialist (Coding, Resumes…) or the standard
 // model path. Picking a tier or model flips back to Standard.
 agent="";localStorage.setItem("millen.agent","");   // AI is the default view
 function paintAgents(){
-  $$("#agents-wrap .agent").forEach(el=>
+  $$("#agents-wrap .agent, #code-wrap .agent").forEach(el=>
     el.classList.toggle("on",(el.dataset.agent||"")===agent));
   const chip=$("#chip-model");
   if(agent&&chip)chip.textContent=agent+" agent";
@@ -7761,6 +7862,9 @@ function paintAgents(){
 }
 function setAgent(name){
   agent=name;localStorage.setItem("millen.agent",name);
+  // the CODE tab reopens on whichever specialist was used last
+  if(name==="Coding"||name==="Workspace")
+    localStorage.setItem("millen.codeagent",name);
   paintAgents();
   if(typeof wsRefresh==="function")wsRefresh();
 }
@@ -7774,6 +7878,9 @@ $$("#agents-wrap .agent").forEach(el=>
     setAgent(el.dataset.agent||"");
     agentsWrap.classList.add("closed");
   }));
+// the CODE tab's two rows: always visible, plain radio behavior
+$$("#code-wrap .agent").forEach(el=>
+  el.addEventListener("click",()=>setAgent(el.dataset.agent||"")));
 paintAgents();
 modeShow("ai");
 
@@ -8028,7 +8135,8 @@ function paintSteps(){
   const ordered=steps.slice().sort((a,b)=>
     STEP_ORDER.indexOf(a.id)-STEP_ORDER.indexOf(b.id));
   box.innerHTML=
-    '<div class="wtbar"><i style="width:'+pct+'%"></i></div>'
+    '<div class="wthead"><i class="wtspin">✱</i>'
+    +'<div class="wtbar"><i style="width:'+pct+'%"></i></div></div>'
     +'<div class="wtlist">'+ordered.map(s=>
       '<div class="wtrow '+(s.s==="done"?"ok":"run")+'">'
       +'<span class="wtdot"></span>'
@@ -8351,7 +8459,8 @@ async function send(){
       const treeHTML=(body.querySelector(".worktree")||{}).outerHTML||"";
       body.innerHTML=treeHTML
         +(status&&!full&&!hasBar
-          ?'<span class="statusline">◇ '+esc(status)+'…</span>':"")
+          ?'<span class="statusline"><i class="wtspin">✱</i> '
+           +esc(status)+'…</span>':"")
         +(searched?srcRow(sources):"")
         +renderMD(full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,""))+'<span class="caret"></span>';
       if(curChat===myChat)autoScroll();
@@ -9021,8 +9130,8 @@ async function bootSkyline(){
   // loading bar for just the current one"): every launch draws from all
   // 89 clips, played-recently excluded. A cached pick starts instantly;
   // an uncached one shows the loading bar with real progress — that IS
-  // the special part. The trickle still backfills the disk so launches
-  // get more instant over time.
+  // the special part. The prepared-clip prefetch (below) backfills the
+  // disk so most launches start instantly.
   let hist=[];
   try{hist=JSON.parse(localStorage.getItem("millen.skyhist"))||[];}
   catch(e){}
@@ -9043,19 +9152,30 @@ async function bootSkyline(){
       if(c.length)all=c;
     }catch(e){}
   }
-  let pool=all.filter(x=>hist.indexOf(x)<0);
-  if(!pool.length)pool=all.filter(x=>x!==last);
-  if(!pool.length)pool=all.length?all.slice():[...Array(SKY_N).keys()];
-  // HOME-TEAM BIAS: half the launches lean New York (the N-series
-  // aerials + the NY-at-night ISS pass), everything else still rotates.
-  // NYC only dodges the LAST THREE played, not the whole history —
-  // five clips against a 32-deep history would never resurface.
   const nyc=new Set(JSON.parse('__SKY_NYC__'));
-  const nycAvail=all.filter(x=>nyc.has(x)&&hist.slice(0,3).indexOf(x)<0);
-  if(nycAvail.length&&Math.random()<0.5)pool=nycAvail;
-  const localPool=pool.filter(x=>onDisk.indexOf(x)>=0);
-  if(localPool.length&&Math.random()<0.6)pool=localPool;
-  i=pool[Math.floor(Math.random()*pool.length)];
+  // PREPARED CITY (5.2, per Patrick: "shows a backdrop, but prepares
+  // another for next time — no flip"): last session quietly downloaded
+  // tonight's clip after its own backdrop was up. If it's still on
+  // disk, that's the pick — instant start, usually no bar at all.
+  const prepared=parseInt(localStorage.getItem("millen.skynext")||"-1",10);
+  try{localStorage.removeItem("millen.skynext");}catch(e){}
+  if(prepared>=0&&prepared<SKY_N&&onDisk.indexOf(prepared)>=0
+     &&prepared!==last&&mood(prepared)){
+    i=prepared;
+  }else{
+    let pool=all.filter(x=>hist.indexOf(x)<0);
+    if(!pool.length)pool=all.filter(x=>x!==last);
+    if(!pool.length)pool=all.length?all.slice():[...Array(SKY_N).keys()];
+    // HOME-TEAM BIAS: half the launches lean New York (the N-series
+    // aerials + the NY-at-night ISS pass), everything else still rotates.
+    // NYC only dodges the LAST THREE played, not the whole history —
+    // five clips against a 32-deep history would never resurface.
+    const nycAvail=all.filter(x=>nyc.has(x)&&hist.slice(0,3).indexOf(x)<0);
+    if(nycAvail.length&&Math.random()<0.5)pool=nycAvail;
+    const localPool=pool.filter(x=>onDisk.indexOf(x)>=0);
+    if(localPool.length&&Math.random()<0.6)pool=localPool;
+    i=pool[Math.floor(Math.random()*pool.length)];
+  }
   hist=[i].concat(hist.filter(x=>x!==i)).slice(0,32);
   localStorage.setItem("millen.skyhist",JSON.stringify(hist));
   localStorage.setItem("millen.sky",i);
@@ -9066,6 +9186,32 @@ async function bootSkyline(){
   // the bar belongs to the EMPTY stage only — once a chat is on screen
   // (hero gone) or an answer is streaming, it stays out of the way
   const barOK=()=>$("#hero")&&!document.body.classList.contains("gen");
+  // PREPARE TOMORROW (5.2): once tonight's clip is up and playing, pull
+  // ONE different clip in the background and remember it — the next
+  // launch opens on it instantly. The playing backdrop never changes;
+  // the server's keep-two LRU (mtime-touched on serve) holds exactly
+  // the playing clip and this prepared one.
+  function prefetchNext(){
+    if(!IS_LOCAL)return;               // visitors never grow the disk
+    let cand=all.filter(x=>x!==i&&hist.slice(0,3).indexOf(x)<0);
+    if(!cand.length)cand=all.filter(x=>x!==i);
+    if(!cand.length)return;
+    // the home-team bias applies HERE too — the prepared clip IS the
+    // next launch's pick, so tomorrow leans New York the same 50%
+    const ny=cand.filter(x=>nyc.has(x));
+    if(ny.length&&Math.random()<0.5)cand=ny;
+    const n=cand[Math.floor(Math.random()*cand.length)];
+    let tries=0;
+    (function warm(){
+      fetch("/api/sky/status?i="+n+"&warm=1").then(r=>r.json()).then(st=>{
+        if(st.status==="ready"){
+          localStorage.setItem("millen.skynext",String(n));return;}
+        if(st.status==="error")return;
+        // "busy" = something else owns the line; try again in a while
+        if(++tries<90)setTimeout(warm,st.status==="busy"?30000:4000);
+      }).catch(()=>{});
+    })();
+  }
   // ONE BACKDROP PER LAUNCH, per Patrick: an earlier build played a
   // cached clip while the real pick downloaded, then swapped — which
   // read as the app changing its mind. Now the bar simply waits for
@@ -9079,6 +9225,7 @@ async function bootSkyline(){
     function reveal(){
       if(shown)return;shown=true;
       hideBar();skyline.hidden=false;
+      setTimeout(prefetchNext,9000);   // let playback settle first
     }
     c.addEventListener("canplaythrough",reveal,{once:true});
     c.addEventListener("error",()=>{
@@ -9618,8 +9765,34 @@ function rainbowWipe(){
     setTimeout(()=>{
       const g=$("#lfg");
       if(!g||!$("#hero"))return;
+      // THE DROP: each char is its own span carrying a slice of the
+      // palette and a stagger delay; ring + sparks detonate as the
+      // last letters land (~0.95s in), exit pulls through the camera
+      const txt="LET’S FUCKING GO.";
+      const pal=["#ff8f8f","#ffc46e","#f5e663","#7ef0a6",
+                 "#6ec7ff","#8f9dff","#c98fff"];
+      let html="";
+      for(let k=0;k<txt.length;k++){
+        const f=k/Math.max(1,txt.length-1)*(pal.length-1);
+        const c1=pal[Math.floor(f)];
+        const c2=pal[Math.min(pal.length-1,Math.floor(f)+1)];
+        html+='<span class="ch" style="--d:'+(k*38)+'ms;--c1:'+c1
+          +';--c2:'+c2+'">'+(txt[k]===" "?"&nbsp;":esc(txt[k]))
+          +'</span>';
+      }
+      for(let k=0;k<16;k++){
+        const a=Math.random()*Math.PI*2,d=90+Math.random()*240;
+        const hue=Math.round(Math.random()*360);
+        html+='<i class="lspk" style="--dx:'+Math.round(Math.cos(a)*d)
+          +'px;--dy:'+Math.round(Math.sin(a)*d*.55)
+          +'px;--d:'+Math.round(920+Math.random()*260)+'ms;'
+          +'background:hsl('+hue+' 100% 72%);'
+          +'box-shadow:0 0 12px 2px hsl('+hue+' 100% 62%)"></i>';
+      }
+      g.innerHTML=html;
       g.hidden=false;g.classList.add("wash");
-      setTimeout(()=>{g.hidden=true;g.classList.remove("wash");},2300);
+      setTimeout(()=>{g.hidden=true;g.classList.remove("wash");
+        g.textContent="LET’S FUCKING GO.";},2700);
     },2350);
   }
   cel.hidden=false;

@@ -1471,3 +1471,45 @@ Five gaps that read as backyard-project, all closed:
   hit put the window at the top of the file where "file" and
   "function" live (seen live). Verified: explained place_search from
   millenai.py accurately, citing the file.
+
+## 5.2 — the drop
+- THE DROP: the boot LFG line is dead-center of the WINDOW both axes
+  (was hero-area, top:64%, offset by the sidebar). Letters slam in one
+  by one — per-char spans, each carrying its own two-stop slice of the
+  palette, staggered 38ms — because animating children under a parent
+  background-clip:text repaints unreliably; per-char gradients are the
+  workaround. An aurora conic bloom breathes behind (::before), an
+  elliptical ring shockwave detonates at ~0.95s (::after), 16 sparks
+  eject, and the exit pulls THROUGH the camera (scale+blur+fade), not
+  off to the side. Gauntlet gotcha: the JS flag `lfgWashed` contains
+  the substring "lfgWash" — assert on "keyframes lfgWash{", not the
+  bare name.
+- PREPARED CITY: after the backdrop reveals (+9s), the client warms
+  ONE different clip (same NYC bias — the prepared clip IS tomorrow's
+  pick) and records it in millen.skynext only once READY. Next launch
+  short-circuits the picker to it: instant start, no bar, never a
+  flip. Server unchanged: _send_sky already touches mtime on serve, so
+  the keep-two LRU holds exactly {playing, prepared}. Borrowers never
+  prefetch (IS_LOCAL gate) — web visitors must not grow the disk.
+- CODE IS A TAB: AI | Code | Agents. The Code tab owns Coding +
+  Workspace (CODE_AGENTS); Agents keeps the rest. Opening Code
+  activates the last-used code specialist (millen.codeagent) on the
+  spot; leaving it drops back to Standard so the chip never says
+  "Coding" under the AI tab. The glide pill generalizes to thirds:
+  width calc(33.334% - 2px), translateX(100%/200%) — %-transforms are
+  relative to the pill's own width, so no container math.
+- PINWHEEL: ✱ spinning the identity gradient (background-clip:text +
+  rotate) sits left of the activity-tree bar (.wthead) and replaces ◇
+  in the statusline. perf mode stills it.
+- ICON: the old artwork painted its tile edge-to-edge on the 1024
+  canvas; modern macOS shrinks non-conforming icons into the system
+  squircle — THAT's why it read smaller than neighbours. New icon
+  (make_icon.py) draws on the real Apple grid: 824×824 squircle,
+  r=185, margins 100 — plus glowing rainbow M (Condensed Black, 66%),
+  starfield, aurora, amber horizon, rim light. Same art → MillenAI.ico.
+- LATENT BUG FIXED: setup_status had the ONE bare psutil call in the
+  file — /api/setup died (and the header download strip with it) on
+  any python without psutil. Found because the bare Homebrew 3.14 test
+  instance also lacks ddgs → HAS_SEARCH=False → "no search step" red
+  herring. Test instances must run on the app venv:
+  ~/Library/Application Support/MillenAI/venv/bin/python3.
