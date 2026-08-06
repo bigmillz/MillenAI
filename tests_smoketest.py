@@ -129,8 +129,11 @@ check("backdrop prefetch js", "millen.skynext" in page)
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)
 tiers = json.loads(b)
-check("every tier resolves", all(t.get("models") for n, t in tiers.items()
-                                 if n != "Power"), str({n: t.get("models") for n, t in tiers.items()}))
+# 5.3: no skip list — Pro (all-models) must resolve like everything else
+check("every tier resolves", all(t.get("models") for t in tiers.values()),
+      str({n: t.get("models") for n, t in tiers.items()}))
+check("Best and Power tiers are gone",
+      "Best" not in tiers and "Power" not in tiers, str(list(tiers)))
 s, h, b = req("/api/stats", cookie=K)
 st = json.loads(b)
 check("stats has users + memory", "users_total" in st and "mem_total_gb" in st)

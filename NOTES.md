@@ -1513,3 +1513,27 @@ Five gaps that read as backyard-project, all closed:
   instance also lacks ddgs → HAS_SEARCH=False → "no search step" red
   herring. Test instances must run on the app venv:
   ~/Library/Application Support/MillenAI/venv/bin/python3.
+
+## 5.3 — housekeeping with teeth
+- THE DEAD BUTTON was a missing </div>: the 5.1 Settings rebuild never
+  closed #about-veil, so the PARSER adopted every veil below it
+  (#dlhelp, #share, #setup) as children of the hidden modal —
+  position:fixed inside a display:none ancestor renders at 0x0, so
+  openSetup() "ran" invisibly. Computed style looked perfect
+  (display:flex, opacity:1); only getBoundingClientRect told the
+  truth. When a fixed overlay opens at 0x0, count your closing tags.
+- TIERS: Best removed (without a cloud key it WAS Fast — same ladder,
+  same answer); Power removed, Pro absorbed it whole: all:True,
+  count:99, peer review on, and the merge pass now prefers the LARGEST
+  Gemma 4 that fits (26B before 12B — the old order quietly picked the
+  small one on big machines). Old clients aliased server- AND
+  client-side: Smart→Fast, Best→Fast, Power→Pro.
+- SETTINGS: MAINTENANCE header gone, the three rows compressed
+  (7px 12px, 5px gap). Header wordmark switched to the hero's Space
+  Grotesk (tracking -.012em), greys untouched; the version keeps mono.
+- METERS: t-head 11px, labels 10.5px with align-items:center +
+  min-height so the MODELS caption sits centered against the ↑ chip
+  (it hung off baseline before), card padding tightened.
+- ICON: greyscale — brushed-silver M on charcoal, faint stars, quiet
+  glow. Same Apple-grid envelope as 5.2 (that part was right); the
+  rainbow was the problem, not the size.

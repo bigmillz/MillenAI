@@ -728,21 +728,10 @@ TIERS = {
                   "Llama 3.2 3B", "Gemma 2 2B", "Llama 3.2 1B"],
         "count": 1,
     },
-    "Best": {
-        # THE FABLE LEVER, per Patrick ("as smart as claude fable or
-        # opus"): this tier ALWAYS answers from the configured frontier
-        # cloud (Gemini/Groq/Claude via the Turbo config) — local
-        # silicon is the fallback, never the ceiling. Same ladder as
-        # Fast when no cloud is configured, so the tier resolves offline.
-        "icon": "\U0001f451", "desc": "frontier cloud \u2014 the smartest",
-        "picks": ["Qwen 3 235B MoE", "GPT-OSS 120B", "Llama 4 Scout",
-                  "Llama 3.3 70B", "Gemma 4 26B", "Qwen 3.6 27B",
-                  "Qwen 3.6 35B MoE", "GPT-OSS 20B", "Gemma 4 12B",
-                  "Phi-4 14B", "Mistral Nemo 12B", "Llama 3.1 8B",
-                  "Llama 3.2 3B", "Gemma 2 2B", "Llama 3.2 1B"],
-        "count": 1,
-        "cloud": True,
-    },
+    # "Best" is gone (5.3, per Patrick: "same as fast") — without a
+    # configured cloud key it resolved to the identical ladder, and the
+    # turbo pref already gives Fast the cloud when one exists. Old
+    # clients still sending Best are aliased to Fast in do_POST.
     "Thinking": {
         "icon": "\U0001f9e0", "desc": "reasons it through, blended",
         # strongest-first ladder: whatever the machine holds and the user
@@ -754,16 +743,12 @@ TIERS = {
                   "Qwen 2.5 Coder 14B", "Gemma 4 12B"],
         "count": 3,
     },
+    # Pro absorbed Power (5.3, per Patrick): every model that fits takes
+    # part — peer review included — and the largest Gemma 4 the machine
+    # holds writes the final answer. Old clients sending Power are
+    # aliased to Pro in do_POST.
     "Pro": {
-        "icon": "\u2728", "desc": "several models, blended",
-        "picks": ["Qwen 3.6 35B MoE", "Qwen 3.6 27B", "GPT-OSS 20B",
-                  "Gemma 4 12B", "Mistral Nemo 12B", "Gemma 2 9B IT",
-                  "Qwen 2.5 7B", "Llama 3.1 8B"],
-        "count": 5,
-    },
-    "Power": {
-        "icon": "\u269b\ufe0f", "name": "Power Mode",
-        "desc": "every model that fits, blended",
+        "icon": "\u2728", "desc": "every model that fits, blended",
         "picks": [],          # purely memory-driven
         "count": 99,
         # no quality filtering — if it can run, it takes part
@@ -3460,8 +3445,9 @@ def run_council(labels: list, messages: list, emit, status,
     answered = [l for l, _t in good]
     merger = next((l for l in MERGE_RANK
                    if l in answered and model_fits_memory(l)), answered[0])
-    # Gemma writes the merge; prefer the newest generation that's installed
-    for pref in ("Gemma 4 12B", "Gemma 4 26B", "Gemma 2 9B IT"):
+    # Gemma writes the merge — the LARGEST Gemma 4 this machine can hold
+    # (5.3, per Patrick), falling down the ladder only when it must
+    for pref in ("Gemma 4 26B", "Gemma 4 12B", "Gemma 2 9B IT"):
         if model_cached(pref) and model_fits_memory(pref):
             merger = pref
             break
@@ -5154,6 +5140,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         tier = req_json.get("tier") or ""
         if tier == "Smart":
             tier = "Fast"   # merged tiers (1.20) — old clients still send Smart
+        if tier == "Best":
+            tier = "Fast"   # Best retired (5.3) — it was Fast in a crown
+        if tier == "Power":
+            tier = "Pro"    # Pro absorbed Power (5.3)
         if tier in TIERS:
             council = resolve_tier(tier)
         else:
@@ -5511,8 +5501,6 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.send_header("X-Web-Search", "1" if query else "0")
         xm = ", ".join(council)[:300]
-        if tier == "Best" and cloud_conf():
-            xm = (cloud_conf().get("name") or "cloud")[:60]
         self.send_header("X-Models", xm)
         self.end_headers()
 
@@ -5647,14 +5635,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             elif len(council) > 1:
                 run_council(council, full_messages, emit, status,
                             reflect=(tier == "Thinking"),
-                            peer=(tier == "Power"))
+                            peer=(tier == "Pro"))
             else:
                 lbl = route_label or model_name
-                # Best ALWAYS goes to the frontier cloud when one is
-                # configured — the turbo pref only governs Fast
-                turbo = (((load_prefs(None).get("turbo") and tier != "Best")
-                          or (tier == "Best"
-                              and TIERS.get(tier, {}).get("cloud")))
+                # cloud is a pref, not a tier (Best retired in 5.3)
+                turbo = (load_prefs(None).get("turbo")
                          and cloud_conf() and not images)
                 if turbo:
                     status(f"turbo \u2014 {cloud_conf().get('name','cloud')}")
@@ -5663,11 +5648,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         return
                     status("turbo unavailable — running locally")
                 # NO KEY, STILL BOOSTED: the keyless community cloud gets
-                # the same shot before local silicon does. Best tier
-                # always tries it; Fast only when the user asked for
-                # cloud power and has no key of their own.
-                elif (tier == "Best"
-                      or load_prefs(None).get("turbo")) and not images:
+                # the same shot before local silicon does, whenever the
+                # user asked for cloud power without a key of their own.
+                elif load_prefs(None).get("turbo") and not images:
                     if time.time() >= _free_cold[0]:
                         status("trying the free community cloud")
                         if free_cloud_stream(full_messages, emit):
@@ -6006,15 +5989,17 @@ body.resizing{cursor:col-resize;user-select:none}
 #update-flag[hidden]{display:none}
 /* centred, not baseline-aligned: the version pill is a bordered box, so
    sitting it on the wordmark's baseline hangs it low against the taller type */
+/* same face as the startup wordmark (5.3, per Patrick) — Space Grotesk
+   with the hero's tight tracking; the greys stay exactly as they were */
 .vghost{
-  font-family:var(--mono);font-size:21.5px;letter-spacing:.04em;
+  font-family:var(--sans);font-size:22px;letter-spacing:-.012em;
   color:rgba(255,255,255,.62);user-select:none;cursor:pointer;
   padding-top:0;margin-right:auto;line-height:1.1;
   display:flex;align-items:baseline;gap:8px;
 }
 .vghost b{font-weight:700}
 .vghost i{font-style:normal;font-weight:400;font-size:.82em;
-  color:rgba(255,255,255,.42)}
+  font-family:var(--mono);color:rgba(255,255,255,.42)}
 .vghost:hover{color:rgba(255,255,255,.85)}
 
 #newchat,#settings-btn{
@@ -6271,26 +6256,28 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
   border:1px solid rgba(255,255,255,.07);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
   -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
-  border-radius:14px;padding:12px 12px 11px;
+  border-radius:14px;padding:10px 12px 9px;
   font-family:var(--mono);
 }
+/* compact meters (5.3, per Patrick: "smaller… alignment is off") —
+   labels centered against the ↑ chip instead of hanging off baseline */
 #telemetry .t-head{
-  font-size:14px;letter-spacing:.08em;color:var(--dim);
-  display:flex;justify-content:space-between;align-items:baseline;
-  margin-bottom:10px;gap:10px;
+  font-size:11px;letter-spacing:.08em;color:var(--dim);
+  display:flex;justify-content:space-between;align-items:center;
+  margin-bottom:7px;gap:10px;
 }
 #telemetry .t-head span{white-space:nowrap}
 #models-up{cursor:pointer;color:var(--dim);font-weight:700;
-  padding:3px 10px;border:1px solid var(--line);border-radius:7px;
-  font-size:12px;line-height:1.5;user-select:none}
+  padding:1px 8px;border:1px solid var(--line);border-radius:6px;
+  font-size:11px;line-height:1.4;user-select:none}
 #models-up:active{transform:translateY(1px)}
 #models-up:hover{color:var(--text);border-color:var(--accent-hot)}
 #telemetry .t-head .live{color:var(--text);white-space:nowrap}
-.meter-row{margin-bottom:9px}
+.meter-row{margin-bottom:7px}
 .meter-row:last-child{margin-bottom:0}
 .meter-label{
-  display:flex;justify-content:space-between;font-size:13px;
-  color:var(--dim);margin-bottom:4px;
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:10.5px;color:var(--dim);margin-bottom:3px;min-height:18px;
 }
 .meter-label b{color:var(--text);font-weight:500}
 .meter{height:3px;border-radius:2px;background:rgba(255,255,255,.10);
@@ -7155,11 +7142,11 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #fleet-pending .preq button{margin-left:auto;padding:5px 12px;
   border-radius:8px;border:none;background:var(--accent);color:#1a1a1a;
   font-weight:600;cursor:pointer}
-#adv-grid{display:flex;flex-direction:column;gap:8px;margin-top:2px}
-#adv-grid .about-btn{width:100%;text-align:left;padding:11px 14px;
-  font-size:13px}
-#adv-grid .about-btn.danger{margin-top:6px}
-#adv-grid .about-btn{margin-top:0}
+/* compressed (5.3, per Patrick): the tall pill stack read as three
+   stray buttons — tighter rows, no MAINTENANCE label */
+#adv-grid{display:flex;flex-direction:column;gap:5px;margin-top:0}
+#adv-grid .about-btn{width:100%;text-align:left;padding:7px 12px;
+  font-size:12.5px;margin-top:0}
 #fleet-adv{margin-top:6px}
 #fleet-adv summary{font-family:var(--mono);font-size:9.5px;
   color:var(--faint);cursor:pointer;letter-spacing:.1em}
@@ -7623,7 +7610,6 @@ __AGENT_ROWS__
       </div>
     </div>
     <div class="set-sec">
-      <div class="set-h">Maintenance</div>
       <div id="adv-grid">
         <button class="about-btn" id="open-setup">Model updates&hellip;</button>
         <button class="about-btn" id="about-check">Check for updates</button>
@@ -7633,8 +7619,12 @@ __AGENT_ROWS__
     </div>
     <div id="about-foot">
     <button class="about-btn primary" id="about-close">Close</button>
+    </div>
   </div>
 </div>
+<!-- NB: the 5.1 Settings rebuild dropped about-veil's closing div, which
+     swallowed every veil below it as a CHILD of the hidden modal — the
+     setup panel "opened" at 0x0. Keep the tag count honest here. -->
 
 <div id="dlhelp-veil" hidden>
   <div id="dlhelp-card">
@@ -7767,6 +7757,8 @@ setVoice(voiceChat);
 let agent="";           // declared early: setTier reads it (TDZ!)
 let tier=localStorage.getItem("millen.tier")||"Fast";
 if(tier==="Smart")tier="Fast";        // merged tiers (1.20)
+if(tier==="Best")tier="Fast";         // Best retired (5.3)
+if(tier==="Power")tier="Pro";         // Pro absorbed Power (5.3)
 function setTier(name){
   tier=name;localStorage.setItem("millen.tier",name);
   councilManual=false;

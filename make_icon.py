@@ -1,11 +1,11 @@
-"""MillenAI 5.2 app icon.
+"""MillenAI app icon (5.3: greyscale).
 
-Fixes the 'reads smaller than its neighbours' complaint for real this
-time: the artwork fills the FULL Apple icon grid — an 824x824 squircle
-on the 1024 canvas (margins 100px, corner radius ~185), same envelope
-every stock macOS icon uses. Inside: night-sky gradient, stars, an
-aurora band, and a big rainbow M with a glow — the app's identity
-gradient, drawn to ~92% of the tile.
+The artwork fills the FULL Apple icon grid — an 824x824 squircle on
+the 1024 canvas (margins 100, corner radius ~185), the same envelope
+every stock macOS icon uses; anything bigger gets shrunk by the OS
+and reads SMALLER in the Dock (learned in 5.2). Inside: charcoal
+night, faint stars, and a brushed-silver M — the rainbow version read
+ridiculous next to real apps (5.3, per Patrick).
 """
 import math
 import os
@@ -23,9 +23,12 @@ M0 = 100            # Apple grid margin
 SQ = S - 2 * M0     # 824 squircle
 RAD = 185           # Apple's corner radius at this scale
 
-PALETTE = [(255, 143, 143), (255, 196, 110), (245, 230, 99),
-           (126, 240, 166), (110, 199, 255), (143, 157, 255),
-           (201, 143, 255)]
+# 5.3, per Patrick ("maybe a greyscale M" — the rainbow read
+# ridiculous in the Dock): a silver ramp, bright at the top-left,
+# steel at the bottom-right, like brushed metal catching window light
+PALETTE = [(246, 247, 250), (228, 231, 238), (204, 208, 218),
+           (176, 181, 194), (150, 156, 170), (128, 134, 148),
+           (112, 118, 132)]
 
 
 def lerp(a, b, t):
@@ -48,7 +51,7 @@ def squircle_mask():
 def background():
     """Deep navy vertical gradient + bottom city glow + stars + aurora."""
     bg = Image.new("RGB", (S, S))
-    top, bot = (9, 11, 24), (30, 35, 66)
+    top, bot = (14, 15, 19), (32, 34, 42)
     px = bg.load()
     for y in range(S):
         c = lerp(top, bot, y / S)
@@ -58,7 +61,7 @@ def background():
     glow = Image.new("RGB", (S, S), (0, 0, 0))
     gd = ImageDraw.Draw(glow)
     gd.ellipse((S * 0.02, S * 0.84, S * 0.98, S * 1.45),
-               fill=(110, 74, 32))
+               fill=(46, 48, 58))
     glow = glow.filter(ImageFilter.GaussianBlur(95))
     bg = Image.blend(bg, Image.blend(bg, glow, 1.0).point(lambda v: v), 0.0)
     bg = ImageChops_add(bg, glow)
@@ -68,7 +71,7 @@ def background():
     for _ in range(130):
         x, y = rnd.uniform(M0, S - M0), rnd.uniform(M0, S * 0.62)
         r = rnd.choice((1, 1, 1, 2))
-        a = rnd.randint(60, 200)
+        a = rnd.randint(40, 140)
         sd.ellipse((x - r, y - r, x + r, y + r), fill=(a, a, min(255, a + 20)))
     # aurora band — soft rainbow strip on a diagonal, heavily blurred
     au = Image.new("RGB", (S, S), (0, 0, 0))
@@ -81,7 +84,7 @@ def background():
         ad.line([(x0, S * 0.98), (x0 + S * 0.45, -S * 0.1)],
                 fill=c, width=7)
     au = au.filter(ImageFilter.GaussianBlur(90))
-    au = au.point(lambda v: int(v * 0.12))
+    au = au.point(lambda v: int(v * 0.05))
     bg = ImageChops_add(bg, au)
     # vignette — corners fall away, the center breathes
     vig = Image.new("L", (S, S), 0)
@@ -125,7 +128,7 @@ def build():
     gx = (S - gw) // 2
     gy = (S - gh) // 2 - 14          # a touch above optical center
 
-    # rainbow fill, diagonal
+    # silver fill, diagonal
     grad = Image.new("RGB", (gw, gh))
     gp = grad.load()
     for y in range(gh):
@@ -139,8 +142,8 @@ def build():
     glow_src.paste(grad, (gx, gy), glyph)
     tight = glow_src.filter(ImageFilter.GaussianBlur(18))
     wide = glow_src.filter(ImageFilter.GaussianBlur(70))
-    art = ImageChops_add(art, tight.point(lambda v: int(v * 0.55)))
-    art = ImageChops_add(art, wide.point(lambda v: int(v * 0.45)))
+    art = ImageChops_add(art, tight.point(lambda v: int(v * 0.30)))
+    art = ImageChops_add(art, wide.point(lambda v: int(v * 0.20)))
 
     # the M itself
     art.paste(grad, (gx, gy), glyph)
@@ -193,7 +196,7 @@ def export(icon):
     subprocess.run(["iconutil", "-c", "icns", iconset, "-o", icns],
                    check=True)
     # windows ico straight from the same art
-    ico = os.path.join(SCRATCH, "millenai.ico")
+    ico = os.path.join(SCRATCH, "MillenAI.ico")
     icon.save(ico, sizes=[(16, 16), (32, 32), (48, 48), (64, 64),
                           (128, 128), (256, 256)])
     print("preview:", prev)
