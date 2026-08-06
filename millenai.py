@@ -5927,7 +5927,7 @@ body.perf #tab-glide{transition:none}
 .chat-item{
   margin-bottom:1px;
   display:flex;align-items:center;gap:6px;padding:6px 10px;
-  border-radius:10px;cursor:pointer;color:var(--dim);font-size:13px;
+  border-radius:10px;cursor:pointer;color:var(--dim);font-size:12.5px;
   border:none;user-select:none;
   transition:background .14s ease,color .14s ease;
 }
@@ -6224,7 +6224,7 @@ body.perf #hero h1 .halo span,body.perf #hero h1::after{
 #hero .beta-tag{font-size:11px;margin:6px 0 8px;padding-left:.32em}
 #hero .beta-tag .vnum{color:#c9c9c9;font-weight:700;letter-spacing:.18em}
 
-.msg{margin-bottom:26px;animation:rise .25s ease both}
+.msg{margin-bottom:20px;animation:rise .25s ease both}
 body.perf .msg{animation:none}
 @keyframes rise{from{opacity:0;transform:translateY(6px)}}
 .msg .who{
@@ -6233,7 +6233,7 @@ body.perf .msg{animation:none}
 }
 .msg.ai .who{color:var(--faint);letter-spacing:.17em}
 .msg .body{
-  font-family:var(--helv);font-size:15.5px;line-height:1.75;
+  font-family:var(--helv);font-size:14.5px;line-height:1.65;
   letter-spacing:.002em;
   font-kerning:normal;text-rendering:optimizeLegibility;
   -webkit-font-smoothing:antialiased;
@@ -6252,12 +6252,13 @@ body.perf .msg{animation:none}
 .msg.ai .body{
   padding:0 2px;
   font-family:ui-serif,Georgia,'Times New Roman',serif;
-  font-size:16.5px;line-height:1.68;letter-spacing:.001em;
+  font-size:15.5px;line-height:1.62;letter-spacing:.001em;
 }
 /* code, tables and chips stay in their own faces inside the serif flow */
 .msg.ai .body code,.msg.ai .body pre{font-family:var(--mono)}
 .msg .meta{
-  font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:8px;
+  font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:7px;
+  opacity:.85;
 }
 .msg .meta b{color:var(--accent);font-weight:500}
 
@@ -6556,7 +6557,7 @@ body.gen #chip-model{color:var(--accent)}
 body.perf #composer{box-shadow:none}
 #input{
   flex:1;background:none;border:none;outline:none;resize:none;
-  color:var(--text);font:15px/1.5 var(--sans);max-height:180px;
+  color:var(--text);font:14.5px/1.5 var(--sans);max-height:180px;
   padding:6px 4px;
 }
 #input::placeholder{color:var(--faint)}
@@ -7649,6 +7650,7 @@ function mapCard(m){
 }
 function addMsg(role,text,drafts,srcs,mapd,ph,places,loc){
   const hero=$("#hero"); if(hero)hero.remove();
+  const sl=$("#skyload"); if(sl)sl.hidden=true;
   const div=document.createElement("div");
   div.className="msg "+(role==="user"?"user":"ai");
   const who=role==="user"?"you":(whoLabel(lastModels)||tier);
@@ -8370,13 +8372,14 @@ async function bootSkyline(){
     },{once:true});
     function buf(){
       if(shown)return;
-      if(bar&&barOK()){bar.hidden=false;}   // visible from the FIRST moment
+      if(bar){if(barOK())bar.hidden=false;else bar.hidden=true;}
       try{
         const d=c.duration,e=c.buffered.length?c.buffered.end(0):0;
         // STREAM as it loads: ~6s of runway is enough cushion to play
         // smoothly while the rest keeps downloading — on a decent
         // connection the city is on screen in well under 10 seconds
         if(d>0&&e>=Math.min(6,d*.25)){reveal();return;}
+        if(bar&&!barOK())bar.hidden=true;
         if(bar&&d>0&&barOK()){
           bar.hidden=false;
           const p=Math.min(99,Math.round(e/Math.min(d,6)*100));
@@ -8406,6 +8409,7 @@ async function bootSkyline(){
         i=(i+1)%SKY_N;localStorage.setItem("millen.sky",i);
         poll();return;
       }
+      if(bar&&!barOK())bar.hidden=true;
       if(bar&&barOK()){
         bar.hidden=false;
         fill.style.width=(st.pct||0)+"%";

@@ -1409,3 +1409,13 @@ that found all three: re-execute the page's own script text via
   while the window is hidden (and corrects itself on visibilitychange
   the instant it's back), shows ONLY when a download runs with the
   setup veil closed.
+
+## 4.2.3 — product type scale
+- The 5.0 direction ("total claude replacement, not a backyard
+  project") starts with type discipline: serif answers 16.5→15.5px at
+  1.62 leading, base body 14.5, sidebar rows 12.5, composer 14.5,
+  message gap 26→20, meta at 10px/.85. Same look, product rhythm.
+- The backdrop bar could linger over a freshly opened chat: the gates
+  only prevented SHOWING it, nothing hid an already-visible bar when
+  the hero left. Every tick now corrects visibility both ways, and
+  addMsg force-hides it.
