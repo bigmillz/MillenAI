@@ -124,7 +124,8 @@ check("query pinwheel css", ".wtspin" in page and "wtspin 1.5s" in page)
 check("centered LFG drop replaces the drive-by",
       "lfgOut" in page and "lfgBloom" in page
       and "keyframes lfgWash{" not in page)
-check("backdrop prefetch js", "millen.skynext" in page)
+check("backdrop pantry js", "millen.skynext" in page
+      and "fillPantry" in page and "PANTRY=5" in page)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)

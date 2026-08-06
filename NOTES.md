@@ -1537,3 +1537,19 @@ Five gaps that read as backyard-project, all closed:
 - ICON: greyscale — brushed-silver M on charcoal, faint stars, quiet
   glow. Same Apple-grid envelope as 5.2 (that part was right); the
   rainbow was the problem, not the size.
+
+## 5.3.1 — the pantry
+- BACKDROP CACHING, THIRD TRY (per Patrick: "no background, or takes
+  forever, or super slow"): the 3.8 no-stockpile rule is rescinded.
+  The server now keeps up to 8 clips (~2 GB ceiling, LRU on mtime
+  which serving touches). After the backdrop reveals, fillPantry
+  stocks the shelf one clip at a time until 5 spares sit on disk,
+  NYC-biased, skipping recent history and clips that errored this
+  session. The boot picker is DISK FIRST, ALWAYS: fresh-on-disk from
+  the biased pool, else any cached clip that isn't last night's —
+  the download bar is a true-first-run experience only. skynext stays
+  primed so the next pick is decided before the app closes.
+- ICON: reverted to the About-panel bar-chart mark by ask — four
+  rounded bars sweeping #8b5cf6→#7d8fff→#4cc9e0 with the teal dot,
+  charcoal tile, Apple-grid envelope kept from 5.2. Bars drawn 2x and
+  LANCZOS-downsampled because PIL has no antialiasing.

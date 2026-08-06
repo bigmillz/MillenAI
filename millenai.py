@@ -3917,9 +3917,10 @@ def _sky_fetch(i: int):
         _faststart(tmp, _sky_path(i))
         with _sky_lock:
             _sky_jobs[i] = {"status": "ready", "pct": 100}
-        # NO STOCKPILE (3.8, per Patrick): the bar plays every launch
-        # and the disk keeps only the playing clip and its predecessor
-        # — a re-pick of a recent clip is instant, nothing archives.
+        # THE PANTRY (5.3.1, per Patrick: "preload more in the background
+        # and cache them for the future" — the 3.8 no-stockpile rule is
+        # rescinded): keep up to 8 clips (~2 GB ceiling). mtime is
+        # touched on serve, so the playing clip is never the evictee.
         # Orphans from old catalog hashes get deleted too.
         try:
             valid = {os.path.basename(_sky_path(n))
@@ -3930,7 +3931,7 @@ def _sky_fetch(i: int):
                 if os.path.basename(p) not in valid:
                     os.remove(p)
             clips = [p for p in clips if os.path.basename(p) in valid]
-            for old in clips[:-2]:
+            for old in clips[:-8]:
                 os.remove(old)
             for part in glob.glob(os.path.join(_sky_dir(), "*.dl")):
                 if time.time() - os.path.getmtime(part) > 86400:
@@ -9164,8 +9165,17 @@ async function bootSkyline(){
     // five clips against a 32-deep history would never resurface.
     const nycAvail=all.filter(x=>nyc.has(x)&&hist.slice(0,3).indexOf(x)<0);
     if(nycAvail.length&&Math.random()<0.5)pool=nycAvail;
+    // DISK FIRST, ALWAYS (5.3.1, per Patrick: "no background, or takes
+    // forever"): a launch never waits on the network when ANY cached
+    // clip exists. Priorities: fresh-on-disk from the biased pool, then
+    // any disk clip that isn't last night's, and only an empty pantry
+    // (true first run) earns the download bar.
     const localPool=pool.filter(x=>onDisk.indexOf(x)>=0);
-    if(localPool.length&&Math.random()<0.6)pool=localPool;
+    if(localPool.length)pool=localPool;
+    else{
+      const diskAny=all.filter(x=>onDisk.indexOf(x)>=0&&x!==last);
+      if(diskAny.length)pool=diskAny;
+    }
     i=pool[Math.floor(Math.random()*pool.length)];
   }
   hist=[i].concat(hist.filter(x=>x!==i)).slice(0,32);
@@ -9178,31 +9188,52 @@ async function bootSkyline(){
   // the bar belongs to the EMPTY stage only — once a chat is on screen
   // (hero gone) or an answer is streaming, it stays out of the way
   const barOK=()=>$("#hero")&&!document.body.classList.contains("gen");
-  // PREPARE TOMORROW (5.2): once tonight's clip is up and playing, pull
-  // ONE different clip in the background and remember it — the next
-  // launch opens on it instantly. The playing backdrop never changes;
-  // the server's keep-two LRU (mtime-touched on serve) holds exactly
-  // the playing clip and this prepared one.
-  function prefetchNext(){
+  // THE PANTRY FILLER (5.3.1, replaces the one-clip prefetch): once
+  // tonight's clip is up and playing, quietly stock the shelf — one
+  // clip at a time, until 5 spares sit on disk beside the playing one.
+  // Every future launch then opens instantly from disk and stays
+  // varied. The playing backdrop never changes; the server keeps 8 and
+  // serializes downloads, so this never fights a user-facing fetch.
+  const PANTRY=5;
+  const skyFailed=new Set();
+  function fillPantry(){
     if(!IS_LOCAL)return;               // visitors never grow the disk
-    let cand=all.filter(x=>x!==i&&hist.slice(0,3).indexOf(x)<0);
-    if(!cand.length)cand=all.filter(x=>x!==i);
-    if(!cand.length)return;
-    // the home-team bias applies HERE too — the prepared clip IS the
-    // next launch's pick, so tomorrow leans New York the same 50%
-    const ny=cand.filter(x=>nyc.has(x));
-    if(ny.length&&Math.random()<0.5)cand=ny;
-    const n=cand[Math.floor(Math.random()*cand.length)];
-    let tries=0;
-    (function warm(){
-      fetch("/api/sky/status?i="+n+"&warm=1").then(r=>r.json()).then(st=>{
-        if(st.status==="ready"){
-          localStorage.setItem("millen.skynext",String(n));return;}
-        if(st.status==="error")return;
-        // "busy" = something else owns the line; try again in a while
-        if(++tries<90)setTimeout(warm,st.status==="busy"?30000:4000);
-      }).catch(()=>{});
-    })();
+    fetch("/api/sky/cached").then(r=>r.json()).then(c=>{
+      const have=(c.cached||[]);
+      const spare=have.filter(x=>x!==i);
+      if(spare.length>=PANTRY){
+        // shelves full — make sure tomorrow's pick is already decided
+        if(!localStorage.getItem("millen.skynext")){
+          const pick=spare[Math.floor(Math.random()*spare.length)];
+          localStorage.setItem("millen.skynext",String(pick));
+        }
+        return;
+      }
+      let cand=all.filter(x=>have.indexOf(x)<0&&x!==i
+        &&hist.slice(0,6).indexOf(x)<0&&!skyFailed.has(x));
+      if(!cand.length)return;
+      // the home-team bias applies to the shelf too — half of what gets
+      // stocked leans New York, so tomorrow does as well
+      const ny=cand.filter(x=>nyc.has(x));
+      if(ny.length&&Math.random()<0.5)cand=ny;
+      const n=cand[Math.floor(Math.random()*cand.length)];
+      let tries=0;
+      (function warm(){
+        fetch("/api/sky/status?i="+n+"&warm=1").then(r=>r.json()).then(st=>{
+          if(st.status==="ready"){
+            if(!localStorage.getItem("millen.skynext"))
+              localStorage.setItem("millen.skynext",String(n));
+            setTimeout(fillPantry,4000);          // next shelf
+            return;
+          }
+          if(st.status==="error"){
+            skyFailed.add(n);setTimeout(fillPantry,30000);return;
+          }
+          // "busy" = something else owns the line; try again in a while
+          if(++tries<200)setTimeout(warm,st.status==="busy"?30000:5000);
+        }).catch(()=>{});
+      })();
+    }).catch(()=>{});
   }
   // ONE BACKDROP PER LAUNCH, per Patrick: an earlier build played a
   // cached clip while the real pick downloaded, then swapped — which
@@ -9217,7 +9248,7 @@ async function bootSkyline(){
     function reveal(){
       if(shown)return;shown=true;
       hideBar();skyline.hidden=false;
-      setTimeout(prefetchNext,9000);   // let playback settle first
+      setTimeout(fillPantry,9000);     // let playback settle first
     }
     c.addEventListener("canplaythrough",reveal,{once:true});
     c.addEventListener("error",()=>{

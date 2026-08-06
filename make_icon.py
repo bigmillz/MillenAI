@@ -1,44 +1,41 @@
-"""MillenAI app icon (5.3: greyscale).
+"""MillenAI app icon (5.3.1: the gradient-bars mark, reverted by ask).
 
 The artwork fills the FULL Apple icon grid — an 824x824 squircle on
 the 1024 canvas (margins 100, corner radius ~185), the same envelope
 every stock macOS icon uses; anything bigger gets shrunk by the OS
-and reads SMALLER in the Dock (learned in 5.2). Inside: charcoal
-night, faint stars, and a brushed-silver M — the rainbow version read
-ridiculous next to real apps (5.3, per Patrick).
+and reads SMALLER in the Dock (learned in 5.2). Inside: the About
+panel's bar-chart mark — four rounded bars sweeping purple to teal
+with the teal dot — on quiet charcoal. Bars are drawn 2x and
+downsampled because PIL draws without antialiasing.
 """
-import math
 import os
-import random
 import subprocess
-import sys
 
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFilter
 
-OUT = "/Users/patrickmiller/My Drive/Downloads/files"
-SCRATCH = os.path.dirname(os.path.abspath(__file__))
+HERE = os.path.dirname(os.path.abspath(__file__))
 
 S = 1024
 M0 = 100            # Apple grid margin
 SQ = S - 2 * M0     # 824 squircle
 RAD = 185           # Apple's corner radius at this scale
 
-# 5.3, per Patrick ("maybe a greyscale M" — the rainbow read
-# ridiculous in the Dock): a silver ramp, bright at the top-left,
-# steel at the bottom-right, like brushed metal catching window light
-PALETTE = [(246, 247, 250), (228, 231, 238), (204, 208, 218),
-           (176, 181, 194), (150, 156, 170), (128, 134, 148),
-           (112, 118, 132)]
+# the About-panel SVG's gradient: #8b5cf6 -> #7d8fff -> #4cc9e0
+G_STOPS = [(139, 92, 246), (125, 143, 255), (76, 201, 224)]
+# viewBox-120 geometry straight from the SVG in millenai.py
+BARS = [(18, 62, 14, 40), (39, 44, 14, 58), (60, 30, 14, 72),
+        (81, 52, 14, 50)]
+DOT = (95, 24, 7)          # cx, cy, r
 
 
 def lerp(a, b, t):
     return tuple(int(a[i] + (b[i] - a[i]) * t) for i in range(3))
 
 
-def palette_at(t):
-    t = max(0.0, min(1.0, t)) * (len(PALETTE) - 1)
-    i = min(int(t), len(PALETTE) - 2)
-    return lerp(PALETTE[i], PALETTE[i + 1], t - i)
+def grad_at(t):
+    t = max(0.0, min(1.0, t)) * (len(G_STOPS) - 1)
+    i = min(int(t), len(G_STOPS) - 2)
+    return lerp(G_STOPS[i], G_STOPS[i + 1], t - i)
 
 
 def squircle_mask():
@@ -48,142 +45,85 @@ def squircle_mask():
     return m
 
 
-def background():
-    """Deep navy vertical gradient + bottom city glow + stars + aurora."""
-    bg = Image.new("RGB", (S, S))
-    top, bot = (14, 15, 19), (32, 34, 42)
-    px = bg.load()
-    for y in range(S):
-        c = lerp(top, bot, y / S)
-        for x in range(S):
-            px[x, y] = c
-    # bottom city glow — warm amber breathing up from the horizon
-    glow = Image.new("RGB", (S, S), (0, 0, 0))
-    gd = ImageDraw.Draw(glow)
-    gd.ellipse((S * 0.02, S * 0.84, S * 0.98, S * 1.45),
-               fill=(46, 48, 58))
-    glow = glow.filter(ImageFilter.GaussianBlur(95))
-    bg = Image.blend(bg, Image.blend(bg, glow, 1.0).point(lambda v: v), 0.0)
-    bg = ImageChops_add(bg, glow)
-    # stars
-    rnd = random.Random(57)
-    sd = ImageDraw.Draw(bg)
-    for _ in range(130):
-        x, y = rnd.uniform(M0, S - M0), rnd.uniform(M0, S * 0.62)
-        r = rnd.choice((1, 1, 1, 2))
-        a = rnd.randint(40, 140)
-        sd.ellipse((x - r, y - r, x + r, y + r), fill=(a, a, min(255, a + 20)))
-    # aurora band — soft rainbow strip on a diagonal, heavily blurred
-    au = Image.new("RGB", (S, S), (0, 0, 0))
-    ad = ImageDraw.Draw(au)
-    n = 260
-    for k in range(n):
-        t = k / (n - 1)
-        c = palette_at(t)
-        x0 = -S * 0.2 + t * S * 1.4
-        ad.line([(x0, S * 0.98), (x0 + S * 0.45, -S * 0.1)],
-                fill=c, width=7)
-    au = au.filter(ImageFilter.GaussianBlur(90))
-    au = au.point(lambda v: int(v * 0.05))
-    bg = ImageChops_add(bg, au)
-    # vignette — corners fall away, the center breathes
-    vig = Image.new("L", (S, S), 0)
-    vd = ImageDraw.Draw(vig)
-    vd.ellipse((-S * 0.25, -S * 0.25, S * 1.25, S * 1.25), fill=255)
-    vig = vig.filter(ImageFilter.GaussianBlur(160))
-    black = Image.new("RGB", (S, S), (0, 0, 0))
-    inv = vig.point(lambda v: int((255 - v) * 0.36))
-    bg.paste(black, (0, 0), inv)
-    return bg
+def bars_layer():
+    """The mark, rendered 2x and downsampled, on transparency.
 
-
-def ImageChops_add(a, b):
-    from PIL import ImageChops
-    return ImageChops.add(a, b)
-
-
-def m_glyph_mask(font_path, index, target_w):
-    """The letter M rendered huge, returned as an L-mode mask."""
-    size = 900
-    font = ImageFont.truetype(font_path, size, index=index)
-    tmp = Image.new("L", (S * 2, S * 2), 0)
-    d = ImageDraw.Draw(tmp)
-    d.text((S, S), "M", font=font, fill=255, anchor="mm")
-    box = tmp.getbbox()
-    glyph = tmp.crop(box)
-    w, h = glyph.size
-    scale = target_w / w
-    return glyph.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
+    Each bar takes its colour from where its centre sits along the
+    group's sweep — matching how the mark reads in the app (left bars
+    violet, right bars toward teal) — with a slight vertical lift so
+    the tops feel lit.
+    """
+    X = 2                       # supersample factor
+    scale = (SQ * 0.60) / 120.0   # mark spans ~60% of the tile
+    w = int(120 * scale * X)
+    lay = Image.new("RGBA", (w, w), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    for (bx, by, bw, bh) in BARS:
+        cx_norm = (bx + bw / 2 - 18) / (95 - 18)   # 0 at first bar, 1 at dot
+        base = grad_at(cx_norm * 0.9)
+        top = lerp(base, (255, 255, 255), 0.18)
+        x0, y0 = bx * scale * X, by * scale * X
+        x1, y1 = (bx + bw) * scale * X, (by + bh) * scale * X
+        r = 6 * scale * X
+        # vertical mini-gradient inside the bar: lit top, base bottom
+        n = max(1, int(y1 - y0))
+        bar = Image.new("RGBA", (int(x1 - x0) + 2, n + 2), (0, 0, 0, 0))
+        bp = bar.load()
+        for yy in range(n):
+            c = lerp(top, base, yy / n)
+            for xx in range(bar.size[0]):
+                bp[xx, yy] = c + (255,)
+        m = Image.new("L", bar.size, 0)
+        ImageDraw.Draw(m).rounded_rectangle(
+            (0, 0, bar.size[0] - 2, n), radius=r, fill=255)
+        lay.paste(bar, (int(x0), int(y0)), m)
+    cx, cy, r = DOT
+    d.ellipse(((cx - r) * scale * X, (cy - r) * scale * X,
+               (cx + r) * scale * X, (cy + r) * scale * X),
+              fill=(76, 201, 224, 255))
+    out_px = int(120 * scale)
+    return lay.resize((out_px, out_px), Image.LANCZOS)
 
 
 def build():
     mask = squircle_mask()
-    art = background()
 
-    # the M — Condensed Black, ~62% of the tile: big enough to own the
-    # squircle, small enough to keep the breathing room stock icons have
-    glyph = m_glyph_mask("/System/Library/Fonts/HelveticaNeue.ttc", 9,
-                         int(SQ * 0.66))
-    gw, gh = glyph.size
-    gx = (S - gw) // 2
-    gy = (S - gh) // 2 - 14          # a touch above optical center
-
-    # silver fill, diagonal
-    grad = Image.new("RGB", (gw, gh))
-    gp = grad.load()
-    for y in range(gh):
-        for x in range(gw):
-            t = (x / gw) * 0.82 + (y / gh) * 0.18
-            gp[x, y] = palette_at(t)
-
-    # glow behind the glyph: a tight bright halo plus a wide soft bloom,
-    # both carrying the glyph's own rainbow so the light reads as ITS
-    glow_src = Image.new("RGB", (S, S), (0, 0, 0))
-    glow_src.paste(grad, (gx, gy), glyph)
-    tight = glow_src.filter(ImageFilter.GaussianBlur(18))
-    wide = glow_src.filter(ImageFilter.GaussianBlur(70))
-    art = ImageChops_add(art, tight.point(lambda v: int(v * 0.30)))
-    art = ImageChops_add(art, wide.point(lambda v: int(v * 0.20)))
-
-    # the M itself
-    art.paste(grad, (gx, gy), glyph)
-
-    # rim light: a white copy nudged up shows only along the top edges —
-    # the cheap bevel that makes the glyph sit IN the scene, not on it
-    from PIL import ImageChops
-    rim = Image.new("L", (S, S), 0)
-    rim.paste(glyph, (gx, gy - 5))
-    body = Image.new("L", (S, S), 0)
-    body.paste(glyph, (gx, gy))
-    rim = ImageChops.subtract(rim, body)
-    rim = rim.filter(ImageFilter.GaussianBlur(1.4))
-    rim = rim.point(lambda v: int(v * 0.55))
-    white_rim = Image.new("RGB", (S, S), (255, 255, 255))
-    art.paste(white_rim, (0, 0), rim)
-
-    # glass: inner top highlight, fading out by ~18% down
-    hl = Image.new("L", (S, S), 0)
-    hp = hl.load()
-    for y in range(M0, int(S * 0.30)):
-        a = int(46 * max(0.0, 1 - (y - M0) / (S * 0.30 - M0)))
+    # quiet charcoal, faintly darker at the bottom — flat like the app's
+    # About panel, no starfield, no theatrics
+    art = Image.new("RGB", (S, S))
+    px = art.load()
+    top, bot = (46, 48, 54), (33, 34, 39)
+    for y in range(S):
+        c = lerp(top, bot, y / S)
         for x in range(S):
-            hp[x, y] = a
-    white = Image.new("RGB", (S, S), (255, 255, 255))
-    art.paste(white, (0, 0), hl)
+            px[x, y] = c
 
-    # assemble onto transparency + hairline border
+    mark = bars_layer()
+    mw, mh = mark.size
+    mx = (S - mw) // 2
+    my = (S - mh) // 2
+
+    # a soft violet-teal bloom behind the mark so it sits in light
+    glow = Image.new("RGB", (S, S), (0, 0, 0))
+    glow.paste(mark.convert("RGB"), (mx, my), mark.split()[3])
+    glow = glow.filter(ImageFilter.GaussianBlur(60))
+    from PIL import ImageChops
+    art = ImageChops.add(art, glow.point(lambda v: int(v * 0.30)))
+
+    art.paste(mark.convert("RGB"), (mx, my), mark.split()[3])
+
     out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     out.paste(art, (0, 0), mask)
     bd = ImageDraw.Draw(out)
     bd.rounded_rectangle((M0, M0, S - M0, S - M0), radius=RAD,
-                         outline=(255, 255, 255, 56), width=2)
+                         outline=(255, 255, 255, 40), width=2)
     return out
 
 
 def export(icon):
-    prev = os.path.join(SCRATCH, "icon_preview.png")
+    prev = os.path.join(HERE, "icon_preview.png")
     icon.resize((512, 512), Image.LANCZOS).save(prev)
-    iconset = os.path.join(SCRATCH, "MillenAI.iconset")
+    iconset = os.path.join(HERE, "MillenAI.iconset")
     os.makedirs(iconset, exist_ok=True)
     for pt in (16, 32, 128, 256, 512):
         for mult in (1, 2):
@@ -192,11 +132,10 @@ def export(icon):
                     else "icon_%dx%d@2x.png" % (pt, pt))
             icon.resize((px, px), Image.LANCZOS).save(
                 os.path.join(iconset, name))
-    icns = os.path.join(SCRATCH, "MillenAI.icns")
+    icns = os.path.join(HERE, "MillenAI.icns")
     subprocess.run(["iconutil", "-c", "icns", iconset, "-o", icns],
                    check=True)
-    # windows ico straight from the same art
-    ico = os.path.join(SCRATCH, "MillenAI.ico")
+    ico = os.path.join(HERE, "MillenAI.ico")
     icon.save(ico, sizes=[(16, 16), (32, 32), (48, 48), (64, 64),
                           (128, 128), (256, 256)])
     print("preview:", prev)
