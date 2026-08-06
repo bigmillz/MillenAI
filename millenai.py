@@ -5940,6 +5940,67 @@ body.perf #tab-glide{transition:none}
 .chat-item .cx{color:var(--faint);visibility:hidden;font-size:13px;padding:0 3px}
 .chat-item:hover .cx{visibility:visible}
 .chat-item .cx:hover{color:var(--red)}
+/* day grouping, pinning, in-place rename */
+.cgroup{font-family:var(--mono);font-size:9px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--faint);opacity:.75;
+  padding:12px 10px 5px;user-select:none}
+.cgroup:first-child{padding-top:2px}
+.chat-item .cpin{width:13px;height:13px;flex:none;color:var(--faint);
+  visibility:hidden;display:flex;align-items:center}
+.chat-item .cpin svg{width:13px;height:13px}
+.chat-item:hover .cpin{visibility:visible}
+.chat-item .cpin:hover{color:var(--text)}
+.chat-item.pinned .cpin{visibility:visible;color:var(--text);opacity:.75}
+input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
+  border:1px solid rgba(255,255,255,.28);border-radius:6px;
+  color:var(--text);font:12.5px var(--sans);padding:2px 6px;outline:none}
+/* ⌘K — the single biggest "this is a real app" signal */
+#palette{position:fixed;inset:0;z-index:80;display:flex;
+  justify-content:center;align-items:flex-start;padding-top:14vh;
+  background:rgba(0,0,0,.5);
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+#palette[hidden]{display:none}
+#palette .pbox{width:min(620px,92vw);
+  background:rgba(17,19,25,.94);border:1px solid rgba(255,255,255,.14);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),
+             0 32px 80px -24px rgba(0,0,0,.95);
+  -webkit-backdrop-filter:blur(30px);backdrop-filter:blur(30px);
+  border-radius:16px;overflow:hidden;
+  animation:palIn .18s cubic-bezier(.2,.8,.3,1) both}
+@keyframes palIn{from{opacity:0;transform:translateY(-10px) scale(.985)}}
+#pq{width:100%;background:none;border:none;outline:none;color:var(--text);
+  font:15px var(--sans);padding:16px 18px;
+  border-bottom:1px solid rgba(255,255,255,.08)}
+#pq::placeholder{color:var(--faint)}
+#presults{max-height:min(52vh,420px);overflow-y:auto;padding:6px}
+.pitem{display:flex;align-items:center;gap:10px;padding:9px 12px;
+  border-radius:9px;cursor:pointer;color:var(--dim);font-size:13.5px}
+.pitem .pk{font-family:var(--mono);font-size:9px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--faint);flex:none;
+  border:1px solid rgba(255,255,255,.12);border-radius:5px;padding:2px 6px}
+.pitem .pt{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pitem .psub{color:var(--faint);font-size:11.5px;flex:none;max-width:44%;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pitem.sel,.pitem:hover{background:rgba(255,255,255,.09);color:var(--text)}
+.pempty{padding:22px 14px;text-align:center;color:var(--faint);font-size:13px}
+.pfoot{display:flex;gap:16px;padding:9px 14px;
+  border-top:1px solid rgba(255,255,255,.08);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+  color:var(--faint)}
+/* undo toast — nothing destructive without a way back */
+#undobar{position:fixed;left:50%;bottom:26px;transform:translateX(-50%);
+  z-index:70;display:flex;align-items:center;gap:14px;
+  background:rgba(15,17,23,.88);border:1px solid rgba(255,255,255,.15);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.07),
+             0 18px 50px -20px rgba(0,0,0,.9);
+  -webkit-backdrop-filter:blur(22px);backdrop-filter:blur(22px);
+  border-radius:14px;padding:11px 14px 11px 18px;
+  font-size:13px;color:var(--text);
+  animation:rise .22s ease both}
+#undobar[hidden]{display:none}
+#undobar button{background:none;border:none;color:#8fb8ff;cursor:pointer;
+  font:600 13px var(--sans);padding:2px 4px}
+#undobar button:hover{text-decoration:underline}
 .infobtn{
   margin-left:auto;width:17px;height:17px;border-radius:50%;flex-shrink:0;
   margin-left:9px;background:var(--line);color:var(--dim);
@@ -6256,11 +6317,30 @@ body.perf .msg{animation:none}
 }
 /* code, tables and chips stay in their own faces inside the serif flow */
 .msg.ai .body code,.msg.ai .body pre{font-family:var(--mono)}
+.mact{display:flex;gap:2px;margin-top:6px;opacity:0;
+  transition:opacity .16s ease}
+.msg:hover .mact,.mact:focus-within{opacity:1}
+.mab{width:26px;height:26px;border-radius:7px;border:none;cursor:pointer;
+  background:none;color:var(--faint);display:flex;align-items:center;
+  justify-content:center;transition:background .14s,color .14s,transform .1s}
+.mab svg{width:14px;height:14px}
+.mab:hover{background:rgba(255,255,255,.09);color:var(--text)}
+.mab:active{transform:scale(.92)}
+.mab.done{color:#8fe0a8}
 .msg .meta{
   font-family:var(--mono);font-size:10px;color:var(--faint);margin-top:7px;
   opacity:.85;
 }
 .msg .meta b{color:var(--accent);font-weight:500}
+.wbadge{display:inline-block;margin-right:8px;padding:2px 7px;
+  border-radius:6px;background:rgba(255,255,255,.07);
+  border:1px solid rgba(255,255,255,.1);color:var(--dim);
+  font-size:9px;letter-spacing:.1em;text-transform:uppercase}
+.retrybtn{margin-top:10px;background:rgba(255,255,255,.08);
+  border:1px solid rgba(255,255,255,.16);border-radius:10px;
+  color:var(--text);font:600 13px var(--sans);padding:8px 16px;
+  cursor:pointer;transition:background .15s}
+.retrybtn:hover{background:rgba(255,255,255,.14)}
 
 .body p{margin:0 0 1.05em}
 .body p:last-child{margin-bottom:0}
@@ -7054,6 +7134,16 @@ __AGENT_ROWS__
     <div class="lbl">loading the backdrop</div>
   </div>
 <div id="lfg" hidden>LET&rsquo;S FUCKING GO.</div>
+<div id="palette" hidden>
+  <div class="pbox">
+    <input id="pq" placeholder="Search chats, or type a command\u2026"
+           autocomplete="off" spellcheck="false">
+    <div id="presults"></div>
+    <div class="pfoot"><span>\u2191\u2193 navigate</span>
+      <span>\u21a9 open</span><span>esc close</span></div>
+  </div>
+</div>
+<div id="undobar" hidden><span class="ut"></span><button id="undobtn">Undo</button></div>
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
@@ -7648,6 +7738,65 @@ function mapCard(m){
     +'&q='+encodeURIComponent((m.name||"").split(",")[0]||"pin")
     +'" target="_blank" rel="noopener">Open in Maps \u2197</a></div>';
 }
+const ICO={
+  copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
+  redo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>',
+  edit:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>'};
+// every answer is a thing you can act on — copy it, run it again, or
+// rewrite the question. Their absence is what makes a chat feel like a
+// printout instead of a workspace.
+function msgActions(div,role,text){
+  const bar=document.createElement("div");
+  bar.className="mact";
+  const mk=(name,title,svg,fn)=>{
+    const b=document.createElement("button");
+    b.className="mab";b.title=title;b.innerHTML=svg;
+    b.addEventListener("click",ev=>{ev.stopPropagation();fn(b);});
+    bar.appendChild(b);
+  };
+  mk("copy","Copy",ICO.copy,b=>{
+    const t=(typeof text==="string"?text:"");
+    navigator.clipboard.writeText(t).then(()=>{
+      b.classList.add("done");setTimeout(()=>b.classList.remove("done"),1200);
+    }).catch(()=>{});
+  });
+  if(role==="assistant")
+    mk("redo","Try again",ICO.redo,()=>regenerate());
+  else
+    mk("edit","Edit & resend",ICO.edit,()=>editResend(text));
+  div.appendChild(bar);
+}
+// TRY AGAIN: drop the last answer and re-ask the same question
+function regenerate(){
+  if(generating)return;
+  let i=messages.length-1;
+  while(i>=0&&messages[i].role!=="assistant")i--;
+  if(i<0)return;
+  const q=[...messages.slice(0,i)].reverse().find(m=>m.role==="user");
+  if(!q)return;
+  messages.splice(i,messages.length-i);      // drop the answer
+  const lastU=messages.pop();                 // and its question
+  inner.innerHTML="";
+  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",
+    m.content,m.drafts,m.sources,m.map,m.photos,m.places,m.loc));
+  input.value=(lastU&&lastU.content)||q.content;
+  send();
+}
+// EDIT & RESEND: rewind to that question with the text in the composer
+function editResend(text){
+  if(generating)return;
+  const i=messages.findIndex(m=>m.role==="user"&&m.content===text);
+  if(i<0)return;
+  messages.splice(i,messages.length-i);
+  inner.innerHTML="";
+  messages.forEach(m=>addMsg(m.role==="user"?"user":"assistant",
+    m.content,m.drafts,m.sources,m.map,m.photos,m.places,m.loc));
+  input.value=String(text).replace(/\n?\ud83d\udcc4 .*$/,"").trim();
+  input.dispatchEvent(new Event("input"));
+  input.focus();
+  input.setSelectionRange(input.value.length,input.value.length);
+  persistCurrent();
+}
 function addMsg(role,text,drafts,srcs,mapd,ph,places,loc){
   const hero=$("#hero"); if(hero)hero.remove();
   const sl=$("#skyload"); if(sl)sl.hidden=true;
@@ -7658,6 +7807,7 @@ function addMsg(role,text,drafts,srcs,mapd,ph,places,loc){
   const body=div.querySelector(".body");
   if(role==="user")body.textContent=text; else body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text)+photoRow(ph)+(places&&places.length?placesModule(places,loc,mapd):mapCard(mapd));
   if(role!=="user"&&drafts&&drafts.length)paintDrafts(div,drafts,false);
+  if(text)msgActions(div,role,text);
   inner.appendChild(div);
   scroller.scrollTop=scroller.scrollHeight;
   return div;
@@ -7807,6 +7957,8 @@ async function send(){
 
   abortCtl=new AbortController();
   let full="",t0=performance.now(),tokEst=0,lastRate=0,wasAborted=false,searched=false,status=null,drafts=[],sources=null,photos=null,mapd=null,locCtx="",places=null,placeHint=null;
+  const seenStatus=[];
+  const lastStatusWas=s=>seenStatus.some(x=>x.indexOf(s)>=0);
   lastModels="";
 
   try{
@@ -7827,7 +7979,9 @@ async function send(){
       if(done)break;
       raw+=dec.decode(value,{stream:true});
       // pull progress markers out so they never land in the answer
-      full=raw.replace(/\u0000STATUS:(.*?)\u0000/g,(_,t)=>{status=t;return "";})
+      full=raw.replace(/\u0000STATUS:(.*?)\u0000/g,(_,t)=>{
+                status=t;if(seenStatus.indexOf(t)<0)seenStatus.push(t);
+                return "";})
               .replace(/\u0000STATUS:[^\u0000]*$/,"")    // partial marker
               .replace(/\u0000DRAFT:(.*?)\u0000/g,(_,j)=>{
                  try{const d=JSON.parse(j);
@@ -7916,14 +8070,28 @@ async function send(){
   }
   body.innerHTML=(searched&&full?srcRow(sources):"")
     +renderMD(full||(wasAborted?"*(stopped)*":
-    "⚠️ The engine returned nothing. Is the model server for **"+model+"** actually running?"))
+    "That answer didn\u2019t come through \u2014 the model was still "
+    +"warming up. Try again and it usually lands."))
     +(full&&!wasAborted?photoRow(photos)
       +(places&&places.length?placesModule(places,locCtx,mapd):mapCard(mapd)):"");
   const secs=((performance.now()-t0)/1000);
   const isErr=full.trim().startsWith("⚠️")||full.includes("\n⚠️");
+  if(full&&!isErr&&!aiDiv.querySelector(".mact"))
+    msgActions(aiDiv,"assistant",full);
+  if(!full&&!wasAborted){
+    const rb=document.createElement("button");
+    rb.className="retrybtn";rb.textContent="Try again";
+    rb.addEventListener("click",()=>{rb.remove();regenerate();});
+    aiDiv.appendChild(rb);
+  }
   if(full&&!isErr){
     const meta=document.createElement("div");meta.className="meta";
-    meta.innerHTML="<b>"+lastRate.toFixed(1)+" tok/s</b> · ~"+Math.round(tokEst)+" tokens · "+secs.toFixed(1)+"s";
+    const where=/cloud|gemini|groq|claude|gpt|openai|community/i
+      .test(lastModels)?"cloud":(lastStatusWas("GPU is on it")
+      ?"a friend\u2019s GPU":"this Mac");
+    meta.innerHTML='<span class="wbadge">'+esc(where)+'</span>'
+      +"<b>"+lastRate.toFixed(1)+" tok/s</b> · ~"+Math.round(tokEst)
+      +" tokens · "+secs.toFixed(1)+"s";
     aiDiv.appendChild(meta);
     const rec={role:"assistant",content:full};
     if(drafts.length)rec.drafts=drafts;
@@ -8089,20 +8257,102 @@ async function nameChat(c,text){
     else c.named=false;          // let a later turn try again
   }catch(e){c.named=false;}
 }
+// WHEN was this chat? Real products group by day; a flat wall sorted by
+// recency is the tell of a prototype.
+function chatBucket(ts){
+  if(!ts)return "Older";
+  const d=new Date(ts), now=new Date();
+  const day=x=>new Date(x.getFullYear(),x.getMonth(),x.getDate()).getTime();
+  const diff=(day(now)-day(d))/86400000;
+  if(diff<=0)return "Today";
+  if(diff===1)return "Yesterday";
+  if(diff<=6)return "This week";
+  if(diff<=30)return "This month";
+  return "Older";
+}
+const PIN_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+  +'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
+  +'<path d="M12 17v5"/><path d="M9 10.8V4h6v6.8l2 3.2H7z"/></svg>';
 function renderChats(){
   const el=$("#chat-list");
-  el.innerHTML=chats.map(c=>
-    '<div class="chat-item'+(c.id===curChat?" active":"")+'" data-id="'+c.id+
-    '"><span class="ct">'+esc(c.title||"chat")+'</span><span class="cx" title="Delete chat">×</span></div>').join("");
-  el.querySelectorAll(".chat-item").forEach(it=>{
-    it.querySelector(".cx").addEventListener("click",ev=>{
-      ev.stopPropagation();
-      chats=chats.filter(c=>c.id!==it.dataset.id);
-      if(curChat===it.dataset.id){curChat=null;messages=[];resetHero();}
-      saveChats();renderChats();
-    });
-    it.addEventListener("click",()=>loadChat(it.dataset.id));
+  const pins=chats.filter(c=>c.pin);
+  const rest=chats.filter(c=>!c.pin);
+  const row=c=>
+    '<div class="chat-item'+(c.id===curChat?" active":"")
+    +(c.pin?" pinned":"")+'" data-id="'+c.id+'">'
+    +'<span class="ct" title="'+esc(c.title||"chat")+'">'
+    +esc(c.title||"chat")+'</span>'
+    +'<span class="cpin" title="'+(c.pin?"Unpin":"Pin to top")+'">'
+    +PIN_SVG+'</span>'
+    +'<span class="cx" title="Delete chat">\u00d7</span></div>';
+  let html="";
+  if(pins.length)
+    html+='<div class="cgroup">Pinned</div>'+pins.map(row).join("");
+  let last="";
+  rest.forEach(c=>{
+    const b=chatBucket(c.ts);
+    if(b!==last){html+='<div class="cgroup">'+b+'</div>';last=b;}
+    html+=row(c);
   });
+  el.innerHTML=html;
+  el.querySelectorAll(".chat-item").forEach(it=>{
+    const id=it.dataset.id;
+    it.querySelector(".cx").addEventListener("click",ev=>{
+      ev.stopPropagation();deleteChat(id);
+    });
+    it.querySelector(".cpin").addEventListener("click",ev=>{
+      ev.stopPropagation();
+      const c=chats.find(x=>x.id===id);
+      if(c){c.pin=!c.pin;saveChats();renderChats();}
+    });
+    it.addEventListener("dblclick",ev=>{
+      ev.stopPropagation();startRename(it,id);
+    });
+    it.addEventListener("click",()=>loadChat(id));
+  });
+}
+// RENAME in place — dblclick the title, type, Enter (Esc cancels)
+function startRename(it,id){
+  const c=chats.find(x=>x.id===id);if(!c)return;
+  const span=it.querySelector(".ct");
+  const inp=document.createElement("input");
+  inp.className="crename";inp.value=c.title||"";
+  span.replaceWith(inp);inp.focus();inp.select();
+  const done=save=>{
+    if(save){const v=inp.value.trim();if(v){c.title=v.slice(0,80);c.named=true;}}
+    saveChats();renderChats();
+  };
+  inp.addEventListener("keydown",e=>{
+    e.stopPropagation();
+    if(e.key==="Enter"){e.preventDefault();done(true);}
+    if(e.key==="Escape"){e.preventDefault();done(false);}
+  });
+  inp.addEventListener("blur",()=>done(true));
+  inp.addEventListener("click",e=>e.stopPropagation());
+}
+// DELETE with UNDO — nothing irreversible on a single click
+let undoTimer=null,undoStash=null;
+function deleteChat(id){
+  const idx=chats.findIndex(c=>c.id===id);
+  if(idx<0)return;
+  undoStash={chat:chats[idx],idx:idx,wasCur:curChat===id};
+  chats.splice(idx,1);
+  if(curChat===id){curChat=null;messages=[];resetHero();}
+  saveChats();renderChats();
+  const t=$("#undobar");
+  t.querySelector(".ut").textContent='Deleted "'
+    +(undoStash.chat.title||"chat").slice(0,40)+'"';
+  t.hidden=false;
+  clearTimeout(undoTimer);
+  undoTimer=setTimeout(()=>{t.hidden=true;undoStash=null;},6000);
+}
+function undoDelete(){
+  if(!undoStash)return;
+  chats.splice(Math.min(undoStash.idx,chats.length),0,undoStash.chat);
+  const back=undoStash.chat.id, wasCur=undoStash.wasCur;
+  undoStash=null;$("#undobar").hidden=true;clearTimeout(undoTimer);
+  saveChats();renderChats();
+  if(wasCur)loadChat(back);
 }
 function loadChat(id){
   if(id===curChat)return;
@@ -8118,6 +8368,143 @@ function loadChat(id){
 }
 renderChats();
 loadChatsFromDisk();
+$("#undobtn").addEventListener("click",undoDelete);
+
+/* ------------------------------------------------- command palette */
+// Search every chat — titles AND message bodies — plus the handful of
+// actions worth reaching without the mouse.
+const palette=$("#palette"),pq=$("#pq"),presults=$("#presults");
+let palItems=[],palSel=0;
+function palActions(){
+  const acts=[
+    {k:"new",t:"New chat",run:()=>$("#newchat").click()},
+    {k:"go",t:"Settings",run:()=>openAbout()},
+    {k:"go",t:"Model updates\u2026",run:()=>openSetup()},
+    {k:"set",t:"Toggle performance mode",
+     run:()=>$("#perf-toggle").click()},
+  ];
+  // tier names come from the rendered rows — one source of truth
+  $$("#tier-rows .tier").forEach(el=>{
+    const name=el.dataset.tier;
+    if(name)acts.push({k:"tier",t:"Switch to "+name,
+                       run:()=>setTier(name)});
+  });
+  return acts;
+}
+function palSearch(q){
+  const s=q.trim().toLowerCase();
+  const out=[];
+  if(!s){
+    chats.slice(0,8).forEach(c=>out.push(
+      {k:"chat",t:c.title||"chat",sub:"",run:()=>loadChat(c.id)}));
+    palActions().forEach(a=>out.push(a));
+    return out;
+  }
+  palActions().filter(a=>a.t.toLowerCase().includes(s))
+    .forEach(a=>out.push(a));
+  chats.forEach(c=>{
+    const title=(c.title||"chat");
+    if(title.toLowerCase().includes(s)){
+      out.push({k:"chat",t:title,sub:"",run:()=>loadChat(c.id)});return;
+    }
+    // fall through to message text — "that Bushwick thing" lives in the
+    // body, not the title
+    const hit=(c.messages||[]).find(m=>
+      typeof m.content==="string"&&m.content.toLowerCase().includes(s));
+    if(hit){
+      const i=hit.content.toLowerCase().indexOf(s);
+      out.push({k:"msg",t:title,
+        sub:hit.content.slice(Math.max(0,i-18),i+42).replace(/\s+/g," "),
+        run:()=>loadChat(c.id)});
+    }
+  });
+  return out.slice(0,40);
+}
+function palPaint(){
+  if(!palItems.length){
+    presults.innerHTML='<div class="pempty">No matches</div>';return;
+  }
+  presults.innerHTML=palItems.map((it,i)=>
+    '<div class="pitem'+(i===palSel?" sel":"")+'" data-i="'+i+'">'
+    +'<span class="pk">'+esc(it.k)+'</span>'
+    +'<span class="pt">'+esc(it.t)+'</span>'
+    +(it.sub?'<span class="psub">'+esc(it.sub)+'</span>':"")+'</div>').join("");
+  presults.querySelectorAll(".pitem").forEach(el=>{
+    el.addEventListener("click",()=>palRun(+el.dataset.i));
+    el.addEventListener("mousemove",()=>{
+      palSel=+el.dataset.i;
+      presults.querySelectorAll(".pitem").forEach((x,j)=>
+        x.classList.toggle("sel",j===palSel));
+    });
+  });
+}
+function palRun(i){
+  const it=palItems[i];palClose();
+  if(it&&it.run)try{it.run();}catch(e){}
+}
+function palOpen(){
+  palette.hidden=false;pq.value="";palSel=0;
+  palItems=palSearch("");palPaint();pq.focus();
+}
+function palClose(){palette.hidden=true;input.focus();}
+pq.addEventListener("input",()=>{
+  palItems=palSearch(pq.value);palSel=0;palPaint();
+  presults.scrollTop=0;
+});
+pq.addEventListener("keydown",e=>{
+  if(e.key==="ArrowDown"||e.key==="ArrowUp"){
+    e.preventDefault();
+    if(!palItems.length)return;
+    palSel=(palSel+(e.key==="ArrowDown"?1:-1)+palItems.length)%palItems.length;
+    palPaint();
+    const sel=presults.querySelector(".pitem.sel");
+    if(sel)sel.scrollIntoView({block:"nearest"});
+  }else if(e.key==="Enter"){e.preventDefault();palRun(palSel);}
+  else if(e.key==="Escape"){e.preventDefault();palClose();}
+});
+palette.addEventListener("click",e=>{if(e.target===palette)palClose();});
+
+/* -------------------------------------------------------- keyboard */
+// Power users judge software in the first thirty seconds by whether
+// their fingers already know it.
+document.addEventListener("keydown",e=>{
+  const mod=e.metaKey||e.ctrlKey;
+  const typing=/^(INPUT|TEXTAREA)$/.test((e.target||{}).tagName||"");
+  if(mod&&e.key.toLowerCase()==="k"){
+    e.preventDefault();
+    palette.hidden?palOpen():palClose();return;
+  }
+  if(mod&&e.key.toLowerCase()==="n"){
+    e.preventDefault();$("#newchat").click();return;
+  }
+  if(e.key==="Escape"){
+    if(!palette.hidden){palClose();return;}
+    if(generating&&abortCtl){e.preventDefault();abortCtl.abort();return;}
+    // close whatever modal is open, outermost last
+    for(const sel of ["#new-veil","#update-veil","#about-veil",
+                      "#setup-veil","#share-veil"]){
+      const el=$(sel);
+      if(el&&!el.hidden){el.hidden=true;return;}
+    }
+    return;
+  }
+  // ↑ on an empty composer recalls your last message to edit
+  if(e.key==="ArrowUp"&&e.target===input&&!input.value.trim()
+     &&!generating){
+    const lastU=[...messages].reverse().find(m=>m.role==="user");
+    if(lastU&&typeof lastU.content==="string"){
+      e.preventDefault();
+      input.value=lastU.content.replace(/\n?\ud83d\udcc4 .*$/,"").trim();
+      input.dispatchEvent(new Event("input"));
+      input.setSelectionRange(input.value.length,input.value.length);
+    }
+    return;
+  }
+  // plain "/" focuses the composer, like every chat app worth using
+  if(e.key==="/"&&!typing&&palette.hidden){
+    e.preventDefault();input.focus();
+  }
+});
 
 /* ----------------------------------------------------------- new chat */
 $("#newchat").addEventListener("click",()=>{

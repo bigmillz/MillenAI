@@ -1419,3 +1419,30 @@ that found all three: re-execute the page's own script text via
   only prevented SHOWING it, nothing hid an already-visible bar when
   the hero left. Every tick now corrects visibility both ways, and
   addMsg force-hides it.
+
+## 5.0 — the "it's a real app" release
+Five gaps that read as backyard-project, all closed:
+- CHAT ORGANIZATION: day grouping (Pinned / Today / Yesterday / This
+  week / This month / Older), pin-to-top, dblclick rename in place,
+  and delete with a 6s UNDO toast that restores the chat at its old
+  index (and reopens it if it was the current one). All fields ride
+  the existing chat store, so they persist without schema work.
+- COMMAND PALETTE (⌘K): fuzzy over chat TITLES and MESSAGE BODIES —
+  searching "cobra" surfaces the chat plus the surrounding sentence —
+  plus actions (new chat, settings, model updates, perf toggle, switch
+  to any tier). Tier names read from the rendered rows, one source of
+  truth. Arrows navigate, Enter opens, Esc closes.
+- MESSAGE ACTIONS: hover row under every message — Copy (with a green
+  tick), Try again on answers (drops the answer, re-asks), Edit &
+  resend on questions (rewinds the thread, loads the text). 
+- KEYBOARD: ⌘K palette, ⌘N new chat, Esc stops generation / closes the
+  top modal, ↑ on an empty composer recalls the last message, "/"
+  focuses the composer.
+- HUMAN FAILURE: "The engine returned nothing. Is the model server for
+  X actually running?" became "That answer didn't come through — the
+  model was still warming up. Try again and it usually lands." with an
+  actual Try again button under it. The meta line now carries a
+  WHERE badge — THIS MAC / CLOUD / A FRIEND'S GPU.
+- NOTE: the Browser pane swallows real ⌘K before the page sees it —
+  the handler is fine (verified by dispatching the event); test with a
+  synthetic KeyboardEvent, not a real keypress.
