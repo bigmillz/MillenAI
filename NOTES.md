@@ -1400,3 +1400,12 @@ that found all three: re-execute the page's own script text via
   NOTE: use the RESIDENT model, never the smallest — reaching for the
   1B swaps engines and evicts the model that just answered.
 - Settings: fleet status block and the button grid get real spacing.
+
+## 4.2.2 — the header download strip
+- Background model downloads get a whisper-thin progress strip in the
+  sidebar header (under the wordmark, above the AI|Agents slider):
+  pastel shimmer fill, "models · 47% · 38 MB/s" mono label, click
+  opens the full setup panel. Polls /api/setup every 4s, skips ticks
+  while the window is hidden (and corrects itself on visibilitychange
+  the instant it's back), shows ONLY when a download runs with the
+  setup veil closed.

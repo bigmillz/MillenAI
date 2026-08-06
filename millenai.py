@@ -5846,6 +5846,22 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 .tier:hover{color:var(--text);background:var(--panel2)}
 /* the library tabs + agent radio rows */
+/* background model download: a whisper of a progress strip in the
+   header — visible only while a download runs, click opens details */
+#dlstrip{display:flex;align-items:center;gap:8px;margin:2px 2px 4px;
+  cursor:pointer}
+#dlstrip[hidden]{display:none}
+#dlstrip .dltrack{flex:1;height:5px;border-radius:3px;overflow:hidden;
+  background:rgba(255,255,255,.09);
+  border:1px solid rgba(255,255,255,.14)}
+#dlstrip .dlfill{height:100%;width:0;border-radius:3px;
+  background:linear-gradient(90deg,#ffdede,#ffedcf,#fbf6cf,#d9f8e6,
+             #d3e9ff,#e0dcff,#ffdede);
+  background-size:220% 100%;transition:width .6s ease}
+body:not(.perf) #dlstrip .dlfill{animation:skyshimmer 3.2s linear infinite}
+#dlstrip .dllbl{font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.12em;color:var(--faint);white-space:nowrap}
+#dlstrip:hover .dllbl{color:var(--dim)}
 #mode-tabs{display:flex;gap:0;margin:5px 0 6px;position:relative;
   background:rgba(255,255,255,.05);border-radius:11px;padding:3px;
   border:1px solid rgba(255,255,255,.07)}
@@ -6984,6 +7000,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   </div>
 
 
+  <div id="dlstrip" hidden title="Models downloading — click for details">
+    <div class="dltrack"><div class="dlfill"></div></div>
+    <span class="dllbl">models &middot; 0%</span>
+  </div>
   <div id="mode-tabs">
     <i id="tab-glide"></i>
     <span class="ltab" data-m="ai">AI</span>
@@ -8937,6 +8957,27 @@ async function setupTick(){
     }
   }catch(e){}
 }
+// the header strip: alive whenever models download in the background
+const dlStrip=$("#dlstrip");
+async function dlStripTick(){
+  if(document.hidden||!dlStrip)return;
+  try{
+    const st=await(await fetch("/api/setup")).json();
+    const bg=st.busy&&veil.hidden;
+    dlStrip.hidden=!bg;
+    if(bg){
+      dlStrip.querySelector(".dlfill").style.width=(st.overall_pct||0)+"%";
+      dlStrip.querySelector(".dllbl").textContent=
+        "models \u00b7 "+(st.overall_pct||0)+"%"
+        +(st.speed_mbs>0?" \u00b7 "+st.speed_mbs+" MB/s":"");
+    }
+  }catch(e){}
+}
+setInterval(dlStripTick,4000);
+document.addEventListener("visibilitychange",()=>{
+  if(!document.hidden)dlStripTick();   // correct a stale strip instantly
+});
+if(dlStrip)dlStrip.addEventListener("click",()=>{dlStrip.hidden=true;openSetup();});
 function openSetup(){
   setupManual=true;
   veil.hidden=false;setupTick();
