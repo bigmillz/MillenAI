@@ -1,0 +1,14 @@
+v23 — Shadowrocket import links
+================================
+
+Scan the QR PNGs in Shadowrocket (+ > Scan QR Code), or copy a link
+and use + > type = URL. v23-tcp (Trojan) is the fast primary; v23-nyc
+(Hysteria 2) is the fallback for networks that shape or block TCP.
+
+PRIMARY  (Trojan / TCP 443):
+trojan://wWpoXIUnVz3KYLIgxhy2Karkac59Bf1@159.65.163.25:443?peer=zoom.us&sni=zoom.us&allowInsecure=1&udp=1#v23-tcp
+
+FALLBACK (Hysteria 2 / UDP 443, salamander obfs):
+hysteria2://P75CJly8peVgsdXM9dIytHQSwOT15Pi@159.65.163.25:443?sni=zoom.us&obfs=salamander&obfs-password=Hs6dUMM8YzbL9bniT7xZlU51r6rEWhS1&insecure=1&alpn=h3#v23-nyc
+
+Cert SHA-256 (for reference / manual pinning): fb:14:12:d0:5b:84:cd:b5:bd:87:24:34:64:28:dd:7d:4e:4e:cf:34:0a:91:5e:cb:d5:10:cd:cd:19:75:72:49
