@@ -1576,3 +1576,20 @@ Five gaps that read as backyard-project, all closed:
 - Dev preview launcher moved to .claude/run_backend.py — the session
   scratchpad gets wiped between sessions and silently took the old
   launcher (and launch.json's target) with it.
+
+## 5.3.3 — the seam
+- THE "WEIRD EDGE": the boot reveal drives THREE masked layers
+  (#sky-color, #hero h1::after, and the blurred .halo span) by sliding
+  a 114° gradient mask. A stalled slide — occluded window, throttled
+  frame, cancelled transition — strands a mask mid-screen, and the
+  HALO's stranded edge (blur 19px + saturate 1.55) reads as a
+  permanent teal glowing seam beside the wordmark. Diagnosed by
+  elimination: steady-state mask-position computes to 0 (seamless),
+  the warp canvas is retired and cleared, and a forced mid-flight
+  backdrop mask fades the WRONG way (bright-left) with a far softer
+  ramp than the artifact.
+- FIX SHAPE, not symptom: masks now exist only during the show. The
+  6.4s wipe cleanup adds body.paintdone, which sets mask-image:none
+  !important on all three layers — steady state carries ZERO mask, so
+  there is nothing left to strand, whatever WebKit does to a
+  transition mid-flight.

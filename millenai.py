@@ -6500,6 +6500,16 @@ body.perf #chat-scroll{scroll-behavior:auto}
 body.painted #hero h1 .halo span,body.painted #hero h1::after{
   -webkit-mask-position:0 0;mask-position:0 0;
 }
+/* and once the flourish is OVER the reveal masks are REMOVED outright
+   (5.3.3, per Patrick's "weird edge thing"): an occluded window or a
+   throttled frame could strand a mask mid-slide — the blurred halo's
+   frozen mask edge was a permanent teal seam beside the wordmark. No
+   mask in steady state, nothing to strand. */
+body.paintdone #sky-color,
+body.paintdone #hero h1 .halo span,
+body.paintdone #hero h1::after{
+  -webkit-mask-image:none!important;mask-image:none!important;
+}
 body.painting #hero h1 .halo span,body.painting #hero h1::after{
   transition:-webkit-mask-position .55s linear,mask-position .55s linear;
   transition-delay:2.15s;
@@ -9888,6 +9898,9 @@ function rainbowWipe(){
     // was occluded that frame never came.
     document.body.classList.add("painted");
     document.body.classList.remove("painting");
+    // the show is over: drop the reveal masks entirely so nothing a
+    // stalled transition left behind can sit on screen as a seam
+    document.body.classList.add("paintdone");
     wipeBusy=false;
   },6400);
 }

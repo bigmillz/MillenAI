@@ -132,6 +132,10 @@ check("lane-aware sidebar js", "laneOK" in page and ".cempty" in page
 check("tabs are iconed and AI reads Chat",
       page.count("#mode-tabs .ltab svg") >= 1 and ">Chat</span>" in page
       and ">AI</span>" not in page)
+# 5.3.3: reveal masks must be dropped once the flourish lands, or a
+# stalled transition leaves a permanent seam ("weird edge thing")
+check("post-flourish mask teardown css+js",
+      "paintdone" in page and "mask-image:none!important" in page)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)
