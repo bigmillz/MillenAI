@@ -126,6 +126,12 @@ check("centered LFG drop replaces the drive-by",
       and "keyframes lfgWash{" not in page)
 check("backdrop pantry js", "millen.skynext" in page
       and "fillPantry" in page and "PANTRY=5" in page)
+# 5.3.2 surface: lane-aware sidebar + iconed tabs, AI renamed Chat
+check("lane-aware sidebar js", "laneOK" in page and ".cempty" in page
+      and "switchLane" in page)
+check("tabs are iconed and AI reads Chat",
+      page.count("#mode-tabs .ltab svg") >= 1 and ">Chat</span>" in page
+      and ">AI</span>" not in page)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)

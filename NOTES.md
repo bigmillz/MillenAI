@@ -1553,3 +1553,26 @@ Five gaps that read as backyard-project, all closed:
   rounded bars sweeping #8b5cf6→#7d8fff→#4cc9e0 with the teal dot,
   charcoal tile, Apple-grid envelope kept from 5.2. Bars drawn 2x and
   LANCZOS-downsampled because PIL has no antialiasing.
+
+## 5.3.2 — lanes
+- THE SIDEBAR FOLLOWS THE TAB (like Claude): every chat is born with a
+  lane — the tab it started on (ai/code/agents) — and renderChats shows
+  the active lane only. Legacy records without a lane read as "ai" and
+  live under Chat. ⌘K still reaches everything; opening a chat from
+  another lane hops the tab (and its agent) along via switchLane, so
+  the sidebar context always matches the screen. Empty lanes say "No
+  code chats yet" instead of sitting blank.
+- AI is now CHAT, and all three tabs carry 12px inline stroke icons
+  (bubble / </> / spark), flexed with a 6px gap.
+- TDZ BIT TWICE: setTier(tier) runs at boot and reaches modeShow. A
+  `let uiMode` declared next to modeShow crashed the ENTIRE boot script
+  (empty sidebar, dead app) — it lives in the early state block with
+  engineState, which exists for exactly this. And renderChats() called
+  synchronously from modeShow hit the same wall via `let chats` below —
+  it's a setTimeout(,0) now. The console errors that follow such an
+  abort (simGpu, agentsWrap) are downstream noise of the one real
+  crash, and stale entries persist across reloads — timestamp a marker
+  before trusting them.
+- Dev preview launcher moved to .claude/run_backend.py — the session
+  scratchpad gets wiped between sessions and silently took the old
+  launcher (and launch.json's target) with it.

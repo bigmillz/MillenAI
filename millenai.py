@@ -6077,11 +6077,13 @@ body:not(.perf) #dlstrip .dlfill{animation:skyshimmer 3.2s linear infinite}
 body.perf #tab-glide{transition:none}
 #mode-tabs .ltab{
   position:relative;z-index:1;
-  flex:1;text-align:center;font-family:var(--mono);font-size:11px;
+  flex:1;font-family:var(--mono);font-size:11px;
+  display:flex;align-items:center;justify-content:center;gap:6px;
   letter-spacing:.12em;text-transform:uppercase;color:var(--faint);
   padding:6px 0;border:none;border-radius:9px;
   cursor:pointer;user-select:none;transition:color .22s ease;
 }
+#mode-tabs .ltab svg{width:12px;height:12px;flex:none}
 #mode-tabs .ltab:hover{color:var(--dim)}
 #mode-tabs .ltab.on{color:#111;background:none;font-weight:700}
 #agents-wrap,#code-wrap{margin:6px 0 4px}
@@ -6146,6 +6148,9 @@ body.perf #tab-glide{transition:none}
   text-transform:uppercase;color:var(--faint);opacity:.75;
   padding:12px 10px 5px;user-select:none}
 .cgroup:first-child{padding-top:2px}
+/* a lane with nothing in it says so quietly instead of sitting blank */
+.cempty{font-size:12.5px;color:var(--faint);padding:10px;
+  font-style:italic;user-select:none}
 .chat-item .cpin{width:13px;height:13px;flex:none;color:var(--faint);
   visibility:hidden;display:flex;align-items:center}
 .chat-item .cpin svg{width:13px;height:13px}
@@ -7410,9 +7415,20 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   </div>
   <div id="mode-tabs">
     <i id="tab-glide"></i>
-    <span class="ltab" data-m="ai">AI</span>
-    <span class="ltab" data-m="code">Code</span>
-    <span class="ltab" data-m="agents">Agents</span>
+    <span class="ltab" data-m="ai"><svg viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round"><path
+      d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>Chat</span>
+    <span class="ltab" data-m="code"><svg viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/>
+      <polyline points="8 6 2 12 8 18"/></svg>Code</span>
+    <span class="ltab" data-m="agents"><svg viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round"><path
+      d="M12 3l2.1 6.9L21 12l-6.9 2.1L12 21l-2.1-6.9L3 12l6.9-2.1z"/>
+      </svg>Agents</span>
   </div>
   <div id="tier-rows">__TIER_ROWS__</div>
   <div id="code-wrap" hidden>
@@ -7693,6 +7709,8 @@ let councilManual=false;
 // declared up here: setCombine() runs during boot and reads it, which would
 // hit the temporal dead zone if it were declared further down
 let engineState={};
+// same story: setTier(tier) at boot reaches modeShow, which writes this
+let uiMode="ai";
 
 /* ------------------------------------------------------- model picker */
 // council[0] is the active model and, in combine mode, also the merger
@@ -7819,9 +7837,14 @@ document.addEventListener("click",e=>{
 });
 setTier(tier);
 
-// AI | Code | Agents: the primary selector is tabbed — AI shows the tier
-// dropdown, Code the two code specialists, Agents the rest of the list
+// Chat | Code | Agents: the primary selector is tabbed — Chat shows the
+// tier dropdown, Code the two code specialists, Agents the rest. The
+// SIDEBAR follows the tab too (5.3.2, per Patrick, like Claude): each
+// lane lists only its own chats. NB: uiMode is declared in the early
+// state block — setTier(tier) runs at boot and lands here via
+// modeShow, which is a TDZ crash if the let lives down here.
 function modeShow(which){
+  uiMode=which;
   $("#tier-rows").hidden=which!=="ai";
   $("#code-wrap").hidden=which!=="code";
   $("#agents-wrap").hidden=which!=="agents";
@@ -7829,18 +7852,24 @@ function modeShow(which){
     t.classList.toggle("on",t.dataset.m===which));
   $("#mode-tabs").classList.toggle("code",which==="code");
   $("#mode-tabs").classList.toggle("agents",which==="agents");
+  // deferred a tick: setTier(tier) reaches here DURING boot, before the
+  // chat state (let chats/curChat, PIN_SVG) below has initialized — a
+  // synchronous renderChats() call here is a TDZ crash that kills the
+  // whole boot script (seen live: empty sidebar, dead app)
+  setTimeout(renderChats,0);
+}
+// each tab owns its lane: opening CODE activates a code specialist on
+// the spot (the tab IS the mode); leaving it drops back to the standard
+// path so the chip never says "Coding" under the Chat tab
+function switchLane(m){
+  modeShow(m);
+  const codey=agent==="Coding"||agent==="Workspace";
+  if(m==="code"&&!codey)
+    setAgent(localStorage.getItem("millen.codeagent")||"Coding");
+  else if(m!=="code"&&codey)setAgent("");
 }
 $$("#mode-tabs .ltab").forEach(t=>
-  t.addEventListener("click",()=>{
-    const m=t.dataset.m;modeShow(m);
-    // each tab owns its lane: opening CODE activates a code specialist
-    // on the spot (the tab IS the mode); leaving it drops back to the
-    // standard path so the chip never says "Coding" under the AI tab
-    const codey=agent==="Coding"||agent==="Workspace";
-    if(m==="code"&&!codey)
-      setAgent(localStorage.getItem("millen.codeagent")||"Coding");
-    else if(m!=="code"&&codey)setAgent("");
-  }));
+  t.addEventListener("click",()=>switchLane(t.dataset.m)));
 
 /* ------------------------------------------------------------ agents */
 // radio choice: a task specialist (Coding, Resumes…) or the standard
@@ -8663,7 +8692,9 @@ function persistChat(id,msgs){
   // mid-answer chat switch, is not necessarily the one on screen
   if(!msgs.length)return;
   let c=chats.find(x=>x.id===id);
-  if(!c){c={id:id};chats.unshift(c);}
+  // a chat belongs to the lane it was born in (Chat / Code / Agents) —
+  // legacy records without a lane read as "ai" and live under Chat
+  if(!c){c={id:id,lane:uiMode};chats.unshift(c);}
   const first=msgs.find(m=>m.role==="user");
   // show the raw text immediately, then let a small model name it properly
   if(!c.title)c.title=(first?first.content:"chat").slice(0,48);
@@ -8706,8 +8737,12 @@ const PIN_SVG='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" '
   +'<path d="M12 17v5"/><path d="M9 10.8V4h6v6.8l2 3.2H7z"/></svg>';
 function renderChats(){
   const el=$("#chat-list");
-  const pins=chats.filter(c=>c.pin);
-  const rest=chats.filter(c=>!c.pin);
+  // the sidebar shows the ACTIVE LANE only, like Claude: Code lists
+  // code chats, Agents lists specialist chats, Chat lists the rest
+  const laneOK=c=>(c.lane||"ai")===uiMode;
+  const mine=chats.filter(laneOK);
+  const pins=mine.filter(c=>c.pin);
+  const rest=mine.filter(c=>!c.pin);
   const row=c=>
     '<div class="chat-item'+(c.id===curChat?" active":"")
     +(c.pin?" pinned":"")+'" data-id="'+c.id+'">'
@@ -8725,6 +8760,9 @@ function renderChats(){
     if(b!==last){html+='<div class="cgroup">'+b+'</div>';last=b;}
     html+=row(c);
   });
+  if(!html)html='<div class="cempty">'
+    +(uiMode==="code"?"No code chats yet"
+      :uiMode==="agents"?"No agent chats yet":"No chats yet")+'</div>';
   el.innerHTML=html;
   el.querySelectorAll(".chat-item").forEach(it=>{
     const id=it.dataset.id;
@@ -8789,6 +8827,9 @@ function loadChat(id){
   if(id===curChat)return;
   persistCurrent();
   const c=chats.find(x=>x.id===id);if(!c)return;
+  // opening a chat from another lane (⌘K reaches everything) hops the
+  // tab with it, so the sidebar context always matches what's on screen
+  if((c.lane||"ai")!==uiMode)switchLane(c.lane||"ai");
   // an in-flight answer is NOT aborted: it streams on quietly and lands
   // in its own chat — switching away no longer costs you the response
   curChat=id;
