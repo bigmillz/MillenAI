@@ -6489,10 +6489,17 @@ body.perf #chat-scroll{scroll-behavior:auto}
   -webkit-mask-position:100% 0;mask-position:100% 0;
 }
 #hero h1::after{content:attr(data-word)}
-/* the tube's halo: the same travelling colours, thrown 16px */
+/* the tube's halo: the same travelling colours, thrown 16px.
+   THE SEAM (5.3.4, per Patrick — twice): WebKit rasterizes a filtered
+   element into a layer sized to its BOX and clips the blur there, so
+   the bloom ended in a hard vertical line beside the M (teal over the
+   night clip, amber over the sunset — the glow's own colour). Padding
+   grows the raster bounds so the blur fades to nothing well inside
+   them; the negative margin puts the box back where it was. */
 #hero h1 .halo{
   position:absolute;left:0;top:0;z-index:-1;opacity:1;
   pointer-events:none;
+  padding:130px;margin:-130px;
   filter:blur(19px) saturate(1.55);
 }
 #hero h1 .halo span{position:static;display:block}

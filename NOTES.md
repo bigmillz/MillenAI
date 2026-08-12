@@ -1593,3 +1593,23 @@ Five gaps that read as backyard-project, all closed:
   !important on all three layers — steady state carries ZERO mask, so
   there is nothing left to strand, whatever WebKit does to a
   transition mid-flight.
+
+## 5.3.4 — the seam, actually
+- 5.3.3's mask teardown was CORRECT HARDENING BUT THE WRONG CULPRIT —
+  the seam survived it (verified against the live 5.3.3 app: all three
+  masks computed to none, edge still present in the render). The real
+  cause: WebKit rasterizes a filtered element into a layer sized to
+  its BOX and CLIPS the blur output there. The wordmark halo
+  (blur 19px, saturate 1.55) is exactly the h1's text box — measured
+  identical rects — so the bloom terminated in a hard vertical line
+  ~40-60px beside the M. The "seam colour" was the glow itself: teal
+  over the night clip, amber over the sunset clip.
+- DIAGNOSIS THAT WORKED: amplify the suspect (blur 30 / brightness
+  2.2) and screenshot — the rectangular clip became unmissable. Column
+  -mean pixel scans had already cleared the video (no coherent edge in
+  the footage) and elementsFromPoint cleared the overlay stack.
+- FIX: the classic filter-clip workaround — padding:130px;
+  margin:-130px on .halo. The raster bounds grow 130px past the text,
+  the blur fades to nothing well inside them, and the negative margin
+  keeps alignment (span rect verified unmoved). Amplified re-test:
+  smooth falloff on every side, no straight edges.
