@@ -9167,7 +9167,7 @@ async function bootSkyline(){
   // play its moment — the loading bar IS part of the show. The server
   // keeps only the last couple of files, never a 20 GB archive.
   const last=parseInt(localStorage.getItem("millen.sky")||"-1",10);
-  const firstEver=last<0;
+  let firstEver=last<0;
   const darkSet=new Set(JSON.parse('__SKY_DARK__'));
   // THE POOL IS OPEN: all 89 Apple clips are eligible ("getting kinda
   // stale"). The dark set is only a first-run preference now — the warp
@@ -9190,6 +9190,11 @@ async function bootSkyline(){
   let onDisk=[];
   try{onDisk=(await(await fetch("/api/sky/cached")).json()).cached||[];}
   catch(e){}
+  // a stocked pantry is proof this is a veteran install even when
+  // localStorage says otherwise — private-mode WKWebView wiped it on
+  // every launch until 5.3.6, and the "first run" dark-set preference
+  // kept re-picking the same space clips (seen live, per Patrick)
+  if(firstEver&&onDisk.length>=2)firstEver=false;
   // BORROWERS GET THE INSTANT CITY: a tunnel visitor picks from what
   // the host already has on disk — no download ritual, no blank wall
   // (seen live: incognito web showed a black void while a 250 MB pull
@@ -10814,7 +10819,14 @@ if __name__ == "__main__":
             background_color="#0f1117",
             text_select=True,   # pywebview blocks selection by default
         )
-        webview.start()
+        # pywebview defaults to private_mode=True — an EPHEMERAL WebKit
+        # data store that wipes localStorage on every launch. That's why
+        # the backdrop opened on the same dark-set clip forever: skynext,
+        # skyhist and millen.sky all vanished, so every boot looked like
+        # a first run (5.3.6, per Patrick: "STILL defaults to that earth
+        # one each time"). Persist the profile in app_dir.
+        webview.start(private_mode=False,
+                      storage_path=os.path.join(app_dir(), "webkit"))
         print("  window closed — shutting down. o7\n")
     else:
         print("  (browser mode — pip install pywebview for a native window)")

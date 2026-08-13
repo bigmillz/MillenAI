@@ -1646,3 +1646,25 @@ Five gaps that read as backyard-project, all closed:
 - Browser-pane gotcha: document.hidden is TRUE in the pane even when
   the page renders — anything gated on it (haloTick, the chameleon)
   looks dead there. Override the getter to test.
+
+## 5.3.6 — the amnesiac window
+- WHY THE BACKDROP NEVER ROTATED despite a working pantry: pywebview
+  defaults to private_mode=True, and its cocoa backend implements that
+  by ERASING ALL WEBSITE DATA from the default WKWebsiteDataStore at
+  every window creation (cocoa.py: removeDataOfTypes_ since epoch).
+  Every app launch wiped localStorage: millen.skynext (the prepared
+  clip), millen.skyhist (rotation memory) and millen.sky all vanished,
+  so each boot ran as a FIRST RUN — and the first-run courtesy
+  restricts picks to the dark set. Result: the same space/earth clips
+  forever, while fresh clips downloaded dutifully next to them.
+  Fix: webview.start(private_mode=False, storage_path=app_dir()/webkit)
+  — on cocoa the storage_path is ignored and persistence simply means
+  "don't wipe the default store". Verified in pywebview's source, not
+  the browser pane (the pane can't run WKWebView).
+- COLLATERAL HEALED: every localStorage pref was silently resetting
+  each launch on desktop all along — performance mode, last code
+  agent, tier choice. They stick now.
+- BELT + SUSPENDERS: firstEver is now also false whenever the disk
+  already holds 2+ clips — a stocked pantry is proof of a veteran
+  install even if storage ever gets wiped again, so the dark-set
+  first-run preference can never re-trap the picker.

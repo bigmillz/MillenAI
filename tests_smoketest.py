@@ -143,6 +143,10 @@ check("canvas halo replaces the filtered one",
       and ".halo{display:none}" in page)
 check("pantry rotates a fresh clip per session",
       "THE SHELF ROTATES" in page)
+# 5.3.6: a stocked pantry overrides the first-run dark-set preference —
+# private-mode WKWebView wiped localStorage every launch until now
+check("veteran pantry overrides first-run dark set",
+      "stocked pantry is proof" in page)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)
