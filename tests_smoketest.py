@@ -136,6 +136,13 @@ check("tabs are iconed and AI reads Chat",
 # stalled transition leaves a permanent seam ("weird edge thing")
 check("post-flourish mask teardown css+js",
       "paintdone" in page and "mask-image:none!important" in page)
+# 5.3.5: the halo is CANVAS pixels now — live CSS blur on it raster-
+# clipped in Blink and misrendered in WebKit (the seam, three ways)
+check("canvas halo replaces the filtered one",
+      "haloTick" in page and "halo-cv" in page
+      and ".halo{display:none}" in page)
+check("pantry rotates a fresh clip per session",
+      "THE SHELF ROTATES" in page)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)

@@ -1613,3 +1613,36 @@ Five gaps that read as backyard-project, all closed:
   the blur fades to nothing well inside them, and the negative margin
   keeps alignment (span rect verified unmoved). Amplified re-test:
   smooth falloff on every side, no straight edges.
+
+## 5.3.5 — the seam, third form, and the rolling shelf
+- THE SEAM SURVIVED 5.3.4 in the app while the Chromium pane verified
+  clean — because the pane is BLINK and the app is WKWEBVIEW. The
+  padded-wrapper workaround that satisfies Blink turned the artifact
+  into a crisper rainbow sliver in WebKit (ancestor filter +
+  background-clip:text misrender). LESSON, in caps: A FIX FOR A
+  RENDERING BUG MUST BE VERIFIED ON THE ENGINE THAT SHOWS IT — the
+  desktop app is Safari's engine, the preview pane is Chrome's.
+- FINAL FORM: the halo is a CANVAS. haloTick (400ms, hero-only,
+  skips perf/hidden) redraws "MillenAI" with the travelling 16s
+  rainbow phase and blurs AT DRAW TIME via ctx.filter — the pixels
+  arrive pre-blurred, so no engine compositor ever gets a chance to
+  clip them. Measured: max per-pixel alpha step across the glow is
+  4/255 — smoothness by construction. haloCap() probes that
+  ctx.filter actually spreads ink (a no-op filter would paint SHARP
+  text behind the wordmark); unsupported engines get no halo rather
+  than a wrong one. The DOM .halo stays in the markup (the gauntlet
+  and wipe classes reference it) but is display:none.
+- ROLLING SHELF (per Patrick: "randomize as much as possible… not
+  100gb"): fillPantry now sets millen.skynext IMMEDIATELY (favoring
+  never-seen spares), and even with full shelves streams ONE fresh
+  never-seen clip per session — the keep-8 LRU evicts the oldest, so
+  disk stays ~2 GB while the catalog cycles. When the fresh clip
+  lands it TAKES OVER skynext: most launches open on footage the
+  user has literally never seen, downloaded invisibly the session
+  before. True stream-on-first-play is impossible with Apple's
+  sources: moov sits at the END of the file (hence _faststart), so
+  nothing can play until the last byte arrives — rotation is the
+  honest fix.
+- Browser-pane gotcha: document.hidden is TRUE in the pane even when
+  the page renders — anything gated on it (haloTick, the chameleon)
+  looks dead there. Override the getter to test.

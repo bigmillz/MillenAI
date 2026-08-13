@@ -6489,20 +6489,17 @@ body.perf #chat-scroll{scroll-behavior:auto}
   -webkit-mask-position:100% 0;mask-position:100% 0;
 }
 #hero h1::after{content:attr(data-word)}
-/* the tube's halo: the same travelling colours, thrown 16px.
-   THE SEAM (5.3.4, per Patrick — twice): WebKit rasterizes a filtered
-   element into a layer sized to its BOX and clips the blur there, so
-   the bloom ended in a hard vertical line beside the M (teal over the
-   night clip, amber over the sunset — the glow's own colour). Padding
-   grows the raster bounds so the blur fades to nothing well inside
-   them; the negative margin puts the box back where it was. */
-#hero h1 .halo{
-  position:absolute;left:0;top:0;z-index:-1;opacity:1;
-  pointer-events:none;
-  padding:130px;margin:-130px;
-  filter:blur(19px) saturate(1.55);
-}
-#hero h1 .halo span{position:static;display:block}
+/* the tube's halo — THIRD AND FINAL FORM (5.3.5, per Patrick, thrice):
+   the live-filter halo is RETIRED. Blink clipped its blur at the raster
+   bounds (5.3.4's hard line beside the M) and WebKit mangled the
+   padded-wrapper workaround into a rainbow sliver — ancestor filter +
+   background-clip:text is a cross-engine minefield. The glow is now a
+   CANVAS whose pixels are blurred at draw time (ctx.filter) — nothing
+   for any engine's compositor to clip, ever. */
+#hero h1 .halo{display:none}
+#halo-cv{position:absolute;z-index:-1;pointer-events:none;opacity:0}
+body.painted #halo-cv{opacity:1;transition:opacity 1.2s ease .3s}
+body.perf #halo-cv{display:none}
 /* once painted it stays painted */
 body.painted #hero h1 .halo span,body.painted #hero h1::after{
   -webkit-mask-position:0 0;mask-position:0 0;
@@ -9259,14 +9256,20 @@ async function bootSkyline(){
     fetch("/api/sky/cached").then(r=>r.json()).then(c=>{
       const have=(c.cached||[]);
       const spare=have.filter(x=>x!==i);
-      if(spare.length>=PANTRY){
-        // shelves full — make sure tomorrow's pick is already decided
-        if(!localStorage.getItem("millen.skynext")){
-          const pick=spare[Math.floor(Math.random()*spare.length)];
-          localStorage.setItem("millen.skynext",String(pick));
-        }
-        return;
-      }
+      // tomorrow starts decided NOW: a spare the user has never seen
+      // beats one from history — maximum variety at zero wait
+      const unseen=spare.filter(x=>hist.indexOf(x)<0);
+      const pool0=unseen.length?unseen:spare;
+      if(pool0.length)localStorage.setItem("millen.skynext",
+        String(pool0[Math.floor(Math.random()*pool0.length)]));
+      // THE SHELF ROTATES (5.3.5, per Patrick: "randomize as much as
+      // possible… not cache 100gb"): even with full shelves, ONE fresh
+      // never-seen clip streams in per session — the server's keep-8
+      // evicts the oldest, so the disk stays ~2 GB while the catalog
+      // cycles through. The 30-second wait is what this kills: the
+      // download happens invisibly NOW, not while the user stares at
+      // a loading bar at the next launch.
+      const stocked=spare.length>=PANTRY;
       let cand=all.filter(x=>have.indexOf(x)<0&&x!==i
         &&hist.slice(0,6).indexOf(x)<0&&!skyFailed.has(x));
       if(!cand.length)return;
@@ -9279,13 +9282,16 @@ async function bootSkyline(){
       (function warm(){
         fetch("/api/sky/status?i="+n+"&warm=1").then(r=>r.json()).then(st=>{
           if(st.status==="ready"){
-            if(!localStorage.getItem("millen.skynext"))
-              localStorage.setItem("millen.skynext",String(n));
-            setTimeout(fillPantry,4000);          // next shelf
+            // the freshest clip IS tomorrow's backdrop — never seen,
+            // already on disk, instant at next launch
+            localStorage.setItem("millen.skynext",String(n));
+            if(!stocked)setTimeout(fillPantry,4000);   // keep stocking
             return;
           }
           if(st.status==="error"){
-            skyFailed.add(n);setTimeout(fillPantry,30000);return;
+            skyFailed.add(n);
+            if(!stocked)setTimeout(fillPantry,30000);
+            return;
           }
           // "busy" = something else owns the line; try again in a while
           if(++tries<200)setTimeout(warm,st.status==="busy"?30000:5000);
@@ -9569,6 +9575,66 @@ if(matchMedia("(pointer:fine)").matches){
 setInterval(()=>{
   if(!perf&&!document.hidden)paintBrandFromSky(performance.now());
 },1500);
+
+/* --------------------------------------------- canvas wordmark halo */
+// The glow behind the wordmark is PAINTED, not filtered (5.3.5): live
+// CSS blur raster-clipped in Blink and misrendered in WebKit — canvas
+// pixels blurred at draw time leave nothing for a compositor to clip.
+const HALO_PAL=["#ff8f8f","#ffc46e","#f5e663","#7ef0a6",
+                "#6ec7ff","#8f9dff","#c98fff","#ff8fd8","#ff8f8f"];
+let haloOK=null;
+function haloCap(){
+  // a no-op ctx.filter would paint SHARP text behind the wordmark —
+  // probe once: does a blurred dot actually spread ink?
+  if(haloOK!==null)return haloOK;
+  try{
+    const t=document.createElement("canvas");t.width=t.height=20;
+    const c=t.getContext("2d");
+    c.filter="blur(4px)";c.fillStyle="#fff";c.fillRect(9,9,2,2);
+    haloOK=c.getImageData(5,10,1,1).data[3]>0;
+  }catch(e){haloOK=false;}
+  return haloOK;
+}
+function haloTick(){
+  if(perf||document.hidden||!haloCap())return;
+  const row=document.querySelector("#hero .h1row");
+  const h1=row&&row.querySelector("h1");
+  let cv=document.getElementById("halo-cv");
+  if(!row||!h1){if(cv)cv.remove();return;}
+  if(!cv||cv.parentElement!==row){
+    cv=document.createElement("canvas");cv.id="halo-cv";
+    row.insertBefore(cv,h1);
+  }
+  const r=h1.getBoundingClientRect();
+  if(r.width<10)return;
+  const pad=150,dpr=Math.min(devicePixelRatio||1,2);
+  const cssW=r.width+pad*2,cssH=r.height+pad*2;
+  const W=Math.round(cssW*dpr),H=Math.round(cssH*dpr);
+  if(cv.width!==W||cv.height!==H){
+    cv.width=W;cv.height=H;
+    cv.style.width=cssW+"px";cv.style.height=cssH+"px";
+    cv.style.left=(h1.offsetLeft-pad)+"px";
+    cv.style.top=(h1.offsetTop-pad)+"px";
+  }
+  const x=cv.getContext("2d");
+  x.clearRect(0,0,W,H);
+  const cs=getComputedStyle(h1);
+  x.font="700 "+(parseFloat(cs.fontSize)*dpr)
+    +"px 'Space Grotesk',sans-serif";
+  x.textBaseline="middle";x.textAlign="center";
+  // same travelling phase as the CSS `rainbow` 16s loop on the ::after
+  const tw=Math.max(1,x.measureText("MillenAI").width);
+  const phase=(performance.now()/16000)%1;
+  const g0=W/2-tw/2-phase*tw*2;
+  const g=x.createLinearGradient(g0,0,g0+tw*2,0);
+  HALO_PAL.forEach((c,k)=>g.addColorStop(k/(HALO_PAL.length-1),c));
+  x.fillStyle=g;
+  x.filter="blur("+Math.round(19*dpr)+"px) saturate(1.55)";
+  x.fillText("MillenAI",W/2,H/2);
+  x.filter="none";
+}
+setInterval(haloTick,400);
+haloTick();
 
 /* ------------------------------------------- mic: whisper voice input */
 const micBtn=$("#mic");
