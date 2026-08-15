@@ -1919,3 +1919,21 @@ Five gaps that read as backyard-project, all closed:
   the response body, plus a shape hint: Gemini keys start with AIza
   and are exactly 39 chars — a shorter one means the paste was cut
   (the masked field in Patrick's screenshot showed ~22 dots).
+
+## 6 beta 213 — cloud that discovers itself
+- THE REAL b212 BUG, surfaced by b212's own error fix: Google retired
+  gemini-2.5-flash FOR NEW USERS — Patrick's 53-char key was fine
+  (and the 39-char hint was wrong: keys come longer now; the hint
+  only fires under 35 chars as a truncation smell).
+- RETIREMENT-PROOF SAVE: /api/cloud/set now LISTS models with the
+  key first (auth check + inventory in one call), filters to
+  chat-capable ids, picks by preference ladder (gemini-3-flash →
+  flash-latest → 2.5 → any flash → pro; groq/claude have their own),
+  THEN runs the 1-token probe on the pick. A retired default can
+  never brick a save again. Inventory stored in cloud.json.
+- UI (per Patrick): "FRONTIER" dropped from the card; under the key
+  box, the model list — grey possibilities per provider before a key,
+  the REAL inventory in white with green ✓ once live, "· in use" on
+  the active one. Old configs without an inventory stay grey until
+  re-saved (a configured key with no model list must NOT check
+  placeholder names — caught live).
