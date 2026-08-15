@@ -1,5 +1,7 @@
 #!/bin/zsh
-# Builds MillenAI.app — a double-clickable native macOS bundle.
+# Builds Concorde.app — a double-clickable native macOS bundle.
+# (Executable, bundle id, icns filename and data dirs stay "MillenAI":
+#  the updater pgreps the binary and WebKit keys storage to the bundle id.)
 # Version comes from APP_VERSION/APP_BUILD in millenai.py.
 # Creates a private venv so it never fights Homebrew's managed Python (PEP 668).
 # Run from the folder containing millenai.py and MillenAI.icns:
@@ -32,8 +34,8 @@ APP_VERSION="$(python3 -c "import re;print(re.search(r'APP_VERSION = \"([^\"]+)\
 APP_BUILD="$(python3 -c "import re;print(re.search(r'APP_BUILD = (\d+)', open('millenai.py').read()).group(1))")"
 echo "version: $APP_VERSION (build $APP_BUILD)"
 
-APP="MillenAI.app"
-rm -rf "$APP" "MillenAI Beta 2.app"   # drop any old versioned bundle too
+APP="Concorde.app"
+rm -rf "$APP" MillenAI.app "MillenAI Beta 2.app"   # drop old-brand bundles too
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 
 cp millenai.py "$APP/Contents/Resources/"
@@ -46,8 +48,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>CFBundleName</key>            <string>MillenAI</string>
-  <key>CFBundleDisplayName</key>     <string>MillenAI</string>
+  <key>CFBundleName</key>            <string>Concorde</string>
+  <key>CFBundleDisplayName</key>     <string>Concorde</string>
   <key>CFBundleIdentifier</key>      <string>com.millen.millenai</string>
   <key>CFBundleVersion</key>         <string>${APP_BUILD}</string>
   <key>CFBundleShortVersionString</key> <string>${APP_VERSION}</string>
@@ -56,7 +58,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundlePackageType</key>     <string>APPL</string>
   <key>NSHighResolutionCapable</key> <true/>
   <key>LSMinimumSystemVersion</key>  <string>11.0</string>
-  <key>NSMicrophoneUsageDescription</key> <string>MillenAI uses the microphone for voice input — audio never leaves this Mac.</string>
+  <key>NSMicrophoneUsageDescription</key> <string>Concorde uses the microphone for voice input — audio never leaves this Mac.</string>
 </dict>
 </plist>
 PLIST
@@ -83,7 +85,7 @@ PY="$VENV/bin/python3"
 mkdir -p "$SUPPORT" "$LOGDIR"
 
 if [[ ! -x "$PY" ]] || ! "$PY" -c "import webview" 2>/dev/null; then
-  /usr/bin/osascript -e 'display notification "First run: setting up the AI engine (a few minutes)…" with title "MillenAI"' 2>/dev/null || true
+  /usr/bin/osascript -e 'display notification "First run: setting up the AI engine (a few minutes)…" with title "Concorde"' 2>/dev/null || true
   BASE="$(command -v python3 || echo /usr/bin/python3)"
   {
     "$BASE" -m venv "$VENV" &&
@@ -96,7 +98,7 @@ if [[ ! -x "$PY" ]] || ! "$PY" -c "import webview" 2>/dev/null; then
     "$VENV/bin/pip" install mlx-lm mlx-whisper >> "$LOGDIR/bootstrap.log" 2>&1 || true
   fi
   if [[ ! -x "$PY" ]] || ! "$PY" -c "import webview" 2>/dev/null; then
-    /usr/bin/osascript -e 'display dialog "MillenAI could not set up its Python engine. Install the Apple Command Line Tools (run: xcode-select --install), check your internet connection, and open MillenAI again." buttons {"OK"} with title "MillenAI"' 2>/dev/null || true
+    /usr/bin/osascript -e 'display dialog "Concorde could not set up its Python engine. Install the Apple Command Line Tools (run: xcode-select --install), check your internet connection, and open Concorde again." buttons {"OK"} with title "Concorde"' 2>/dev/null || true
     exit 1
   fi
 fi

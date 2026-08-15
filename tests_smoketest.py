@@ -147,6 +147,11 @@ check("pantry rotates a fresh clip per session",
 # private-mode WKWebView wiped localStorage every launch until now
 check("veteran pantry overrides first-run dark set",
       "stocked pantry is proof" in page)
+# 6.0: the brand is Concorde on every user-facing surface; the old name
+# survives only in internals (paths, bundle id, repo) which never
+# reach the page
+check("Concorde brand, no stray MillenAI",
+      "Concorde" in page and "MillenAI" not in page)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)

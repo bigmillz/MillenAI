@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Builds MillenAI-<version>-Windows.zip — the self-bootstrapping Windows
+# Builds Concorde-<version>-Windows.zip — the self-bootstrapping Windows
 # package, including CUDA support on an NVIDIA machine.
 #
 #   ./build_windows.sh
@@ -28,7 +28,7 @@ cp millenai.py "$STAGE/"
 # and readme emit is converted to CRLF on the way out.
 crlf() { sed $'s/$/\r/' ; }
 
-cat <<'BAT' | crlf > "$STAGE/MillenAI.bat"
+cat <<'BAT' | crlf > "$STAGE/Concorde.bat"
 @echo off
 setlocal
 set "SUPPORT=%LOCALAPPDATA%\MillenAI"
@@ -39,7 +39,7 @@ if not exist "%SUPPORT%" mkdir "%SUPPORT%"
 
 where python >nul 2>&1
 if errorlevel 1 (
-  echo MillenAI needs Python 3.10 or newer.
+  echo Concorde needs Python 3.10 or newer.
   echo Install it from https://www.python.org/downloads/ ^(tick "Add to PATH"^)
   pause
   exit /b 1
@@ -56,7 +56,7 @@ start "" "%PY%" "%~dp0millenai.py"
 BAT
 
 cat <<README | crlf > "$STAGE/README.txt"
-MillenAI $VER — local AI for Windows
+Concorde $VER — local AI for Windows
 =====================================
 
 REQUIREMENTS
@@ -65,14 +65,14 @@ REQUIREMENTS
   * NVIDIA GPU recommended — see below.
 
 INSTALL
-  1. Unzip anywhere (e.g. Documents\MillenAI)
-  2. Double-click MillenAI.bat
+  1. Unzip anywhere (e.g. Documents\Concorde)
+  2. Double-click Concorde.bat
   3. First run installs the engine, then offers the models (~46 GB).
      SmartScreen may warn about an unknown publisher — choose
      "More info" then "Run anyway".
 
 NVIDIA / CUDA
-  Nothing to install and nothing to configure. MillenAI downloads Ollama's
+  Nothing to install and nothing to configure. Concorde downloads Ollama's
   Windows build, which bundles the CUDA runtime; Ollama detects the GPU and
   offloads to it on its own. Without an NVIDIA card everything still runs,
   just on the CPU and much slower.
@@ -83,7 +83,7 @@ WINDOWS ON ARM (Snapdragon / Surface / ARM VMs)
   which does voice input) ship x64 wheels only, so an ARM64 Python cannot
   install them. Windows 11 emulates the x64 build with no setup on your part.
 
-  Only the app runs emulated — MillenAI still fetches the native ARM64
+  Only the app runs emulated — Concorde still fetches the native ARM64
   Ollama, so the models run at full speed. There is no CUDA on
   Windows-on-ARM, so inference is CPU-only on those machines.
 
@@ -91,7 +91,7 @@ Everything runs locally. No accounts, no cloud.
 Models and settings live in %LOCALAPPDATA%\MillenAI
 README
 
-ZIP="MillenAI-$VER-Windows.zip"
+ZIP="Concorde-$VER-Windows.zip"
 rm -f "$ZIP"
 (cd build-win && zip -qr "../$ZIP" MillenAI)
 rm -rf build-win

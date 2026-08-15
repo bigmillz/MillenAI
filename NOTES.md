@@ -1668,3 +1668,27 @@ Five gaps that read as backyard-project, all closed:
   already holds 2+ clips — a stocked pantry is proof of a veteran
   install even if storage ever gets wiped again, so the dark-set
   first-run preference can never re-trap the picker.
+
+## 6.0 — Concorde
+- THE REBRAND: MillenAI is Concorde everywhere a user looks — wordmark,
+  window, tab, splash, sign-in, gate, DMG, MSI, shortcuts, README.
+  One APP_NAME constant + brand() applied at the three HTML serve
+  points (index, WELCOME_PAGE, GATE_PAGE); "Concorde" is 8 characters
+  like "MillenAI", so every wordmark metric survived untouched.
+- WHAT DELIBERATELY KEEPS THE OLD NAME (the rename-safety spine):
+  app_dir()/venv paths (data continuity), CFBundleIdentifier
+  com.millen.millenai (WebKit keys storage to bundle identity — the
+  5.3.6 persistence win dies if this changes), CFBundleExecutable
+  MillenAI (_SWAP_SCRIPT pgreps ".../MacOS/MillenAI"), MillenAI.icns/
+  .ico filenames, UPDATE_REPO bigmillz/MillenAI, User-Agents, the
+  Windows INSTALLDIR + registry key, and the MSI UpgradeCode (change
+  it and upgrades stop replacing the old install).
+- UPDATE CHAIN VERIFIED SAFE BY READING, NOT HOPE: the updater picks
+  release assets by .dmg EXTENSION (never name), the swap script
+  globs "$MP"/*.app and renames it onto the EXISTING bundle path, so
+  a MillenAI.app updating from a Concorde DMG stays at its old path
+  with the new app inside. Existing installs cross the rename without
+  knowing it happened.
+- brand() is a GLOBAL replace on served HTML — before shipping,
+  grep the page for URLs containing the repo name (a link to
+  bigmillz/MillenAI would be rewritten into a 404). Zero today.

@@ -64,12 +64,12 @@ PY
 
 echo "→ building macOS"
 ./build_dmg.sh >/dev/null
-DMG="MillenAI ${VERSION}.dmg"   # build_dmg.sh derives this from millenai.py
+DMG="Concorde ${VERSION}.dmg"   # build_dmg.sh derives this from millenai.py
 [[ -f "$DMG" ]] || { echo "expected $DMG but it wasn't built"; exit 1; }
 
 echo "→ building Windows"
 ./build_windows.sh >/dev/null
-ZIP="MillenAI-${VERSION}-Windows.zip"
+ZIP="Concorde-${VERSION}-Windows.zip"
 [[ -f "$ZIP" ]] || { echo "expected $ZIP but it wasn't built"; exit 1; }
 
 echo "→ publishing v$BUILD"
@@ -78,7 +78,7 @@ git push origin HEAD
 SHOW="$VERSION"; [[ "$VERSION" == *.*.0 ]] && SHOW="${VERSION%.0}"
 gh release create "v$BUILD" "$DMG" "$ZIP" \
   --title "$SHOW" \
-  --notes "MillenAI $VERSION.
+  --notes "Concorde $VERSION.
 
 **macOS** — download the .dmg. Existing installs update themselves.
 

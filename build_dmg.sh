@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Packages MillenAI into a styled, shareable disk image: $VOL.dmg
+# Packages Concorde into a styled, shareable disk image: $VOL.dmg
 # Finder shows a custom starfield background with a drag-to-install arrow.
 set -e
 cd "$(dirname "$0")"
@@ -7,14 +7,14 @@ cd "$(dirname "$0")"
 ./build_macos_app.sh
 
 VER="$(python3 -c "import re;print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('millenai.py').read()).group(1))")"
-VOL="MillenAI $VER"
+VOL="Concorde $VER"
 
 VENV="$HOME/Library/Application Support/MillenAI/venv"
 "$VENV/bin/pip" install --quiet pillow
 
 STAGE="$(mktemp -d)/MillenAI"
 mkdir -p "$STAGE/.background"
-cp -R MillenAI.app "$STAGE/"
+cp -R Concorde.app "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
 # --- background art (1320x800 @144dpi -> 660x400 pts, retina-sharp)
@@ -77,7 +77,7 @@ def centered(y, text, f, fill):
     od.text(((W - w) / 2, y), text, font=f, fill=fill)
 
 # wordmark: MillenAI + the version, in periwinkle
-name, tag = "MillenAI ", sys.argv[2]
+name, tag = "Concorde ", sys.argv[2]
 nw = od.textlength(name, font=big)
 tw = od.textlength(tag, font=big)
 x0 = (W - nw - tw) / 2
@@ -88,7 +88,7 @@ centered(178, "your models. your mac. zero cloud.", sub, (143, 151, 173, 235))
 # install help. macOS 15+ removed the right-click→Open bypass, so an
 # unnotarized app MUST be allowed from System Settings the first time.
 small = font("/System/Library/Fonts/Menlo.ttc", 21)
-centered(668, "1. drag MillenAI into Applications, then open it once",
+centered(668, "1. drag Concorde into Applications, then open it once",
          small, (120, 128, 150, 235))
 centered(704, "2. macOS will block it — that is expected for a free app",
          small, (120, 128, 150, 235))
@@ -144,7 +144,7 @@ tell application "Finder"
     set icon size of vo to 128
     set text size of vo to 13
     set background picture of vo to file ".background:bg.png"
-    set position of item "MillenAI.app" of container window to {165, 210}
+    set position of item "Concorde.app" of container window to {165, 210}
     set position of item "Applications" of container window to {495, 210}
     update without registering applications
     delay 1

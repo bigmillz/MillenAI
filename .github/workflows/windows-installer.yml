@@ -86,9 +86,9 @@ jobs:
           & "$wix\candle.exe" -arch x64 "-dVer=$ver" "-dSourceDir=dist\MillenAI" `
               packaging\msi\Product.wxs Files.wxs
           if ($LASTEXITCODE -ne 0) { throw "candle failed" }
-          & "$wix\light.exe" -sval -out "MillenAI-$ver-x64.msi" Product.wixobj Files.wixobj
+          & "$wix\light.exe" -sval -out "Concorde-$ver-x64.msi" Product.wixobj Files.wixobj
           if ($LASTEXITCODE -ne 0) { throw "light failed" }
-          Get-Item "MillenAI-$ver-x64.msi" | ForEach-Object {
+          Get-Item "Concorde-$ver-x64.msi" | ForEach-Object {
             Write-Host ("built {0}  {1:N1} MB" -f $_.Name, ($_.Length/1MB)) }
 
       - name: attach to the release
@@ -96,6 +96,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $msi = Get-ChildItem MillenAI-*-x64.msi | Select-Object -First 1
+          $msi = Get-ChildItem Concorde-*-x64.msi | Select-Object -First 1
           gh release upload "${{ steps.tag.outputs.tag }}" $msi.FullName --clobber
           Write-Host "attached $($msi.Name) to ${{ steps.tag.outputs.tag }}"

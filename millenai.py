@@ -81,6 +81,16 @@ except ImportError:
     HAS_WEBVIEW = False
 
 APP_VERSION = "5.3.7"   # bump here — UI, window, DMG all follow
+# THE BRAND (6.0): Concorde. Every user-facing surface says Concorde;
+# everything load-bearing stays "MillenAI" — app_dir, bundle id, the
+# executable name (_SWAP_SCRIPT pgreps it), UPDATE_REPO, User-Agents —
+# so data, permissions and the self-update chain survive the rename.
+APP_NAME = "Concorde"
+
+
+def brand(html: str) -> str:
+    """User-facing copy carries the brand; code and paths keep MillenAI."""
+    return html.replace("MillenAI", APP_NAME)
 
 
 def short_version(v: str = None) -> str:
@@ -4297,10 +4307,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 return False
             wrong = True
         if self.path == "/" or self.path.startswith("/?"):
-            body = (GATE_PAGE.replace(
+            body = brand(GATE_PAGE.replace(
                 "__GATE_NOTE__",
                 "that key isn’t right — try again" if wrong else "")
-                .encode("utf-8"))
+                ).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -4314,7 +4324,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.end_headers()
         try:
-            self.wfile.write(b"MillenAI: access key required.")
+            self.wfile.write(brand("MillenAI: access key required.")
+                             .encode("utf-8"))
         except Exception:
             pass
         return False
@@ -4391,12 +4402,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             # tunnel visitors must have an identity before the app loads —
             # this is what keeps the owner's chats out of everyone's hands
             if self._remote() and not self._uid():
-                body = (WELCOME_PAGE.replace(
+                body = brand(WELCOME_PAGE.replace(
                     "__GOOGLE_DISPLAY__",
                     "inline-block" if google_conf() else "none")
                     .replace("__GOOGLE_FLEX__",
                              "inline-flex" if google_conf() else "none")
-                    .encode("utf-8"))
+                    ).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type",
                                  "text/html; charset=utf-8")
@@ -4419,7 +4430,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     .replace("__SPLASH_LFG__",
                              "1" if _splash_shown[0] else "0")
                     .replace("__APP_VER__", short_version()))
-            body = html.encode("utf-8")
+            body = brand(html).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
@@ -10699,7 +10710,7 @@ def reap_orphan_engines():
 
 if __name__ == "__main__":
     threading.Thread(target=start_backend, daemon=True).start()
-    print(f"\n  MillenAI {short_version()}")
+    print(f"\n  {APP_NAME} {short_version()}")
     print(f"  running on http://127.0.0.1:{PORT}")
     reap_orphan_engines()
     maybe_version_splash()
@@ -10811,7 +10822,7 @@ if __name__ == "__main__":
     elif HAS_WEBVIEW:
         # Native macOS window (WKWebView). Blocks until the window closes.
         window = webview.create_window(
-            f"MillenAI {short_version()}",
+            f"{APP_NAME} {short_version()}",
             url,
             width=1320,
             height=860,
