@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 212               # integer compared against the GitHub release tag
+APP_BUILD = 213               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -4655,7 +4655,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 return
             c = cloud_conf()
             self._send_json({"configured": bool(c),
-                             "name": (c or {}).get("name", "")})
+                             "name": (c or {}).get("name", ""),
+                             "model": (c or {}).get("model", ""),
+                             "models": (c or {}).get("models", [])})
         elif self.path == "/api/downloads":
             self._send_json(download_links())
         elif self.path == "/api/stats":
@@ -4944,6 +4946,50 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "err": "paste a full key"})
                 return
             name, base, model = spec
+            # DISCOVER models with the key first (6b213): one call
+            # checks auth AND returns the real inventory, so a retired
+            # default (gemini-2.5-flash, seen live) can never brick the
+            # save. The chat probe below then verifies the pick.
+            found = []
+            try:
+                if "anthropic" in base:
+                    lq = urllib.request.Request(
+                        base + "/models",
+                        headers={"x-api-key": key,
+                                 "anthropic-version": "2023-06-01"})
+                else:
+                    lq = urllib.request.Request(
+                        base + "/models",
+                        headers={"Authorization": "Bearer " + key})
+                raw = json.loads(urllib.request.urlopen(
+                    lq, timeout=20).read().decode("utf-8", "replace"))
+                found = [str(m.get("id", "")).replace("models/", "")
+                         for m in (raw.get("data") or [])
+                         if m.get("id")]
+            except Exception:
+                pass                      # discovery is best-effort
+            if found:
+                # chat-capable only, then prefer the fastest current line
+                skip = ("embed", "tts", "image", "imagen", "veo", "aqa",
+                        "audio", "live", "learnlm", "exp")
+                chat = [i for i in found
+                        if not any(k in i.lower() for k in skip)]
+                prefs_order = {
+                    "gemini": ["gemini-3-flash", "gemini-3.0-flash",
+                               "flash-latest", "gemini-2.5-flash",
+                               "flash", "pro"],
+                    "groq": ["gpt-oss-120b", "llama", "qwen"],
+                    "claude": ["sonnet", "haiku", "opus"],
+                }.get(which, [])
+                for want in prefs_order:
+                    hit = next((i for i in chat if want in i.lower()), "")
+                    if hit:
+                        model = hit
+                        break
+                else:
+                    if chat:
+                        model = chat[0]
+                found = chat[:6] if chat else found[:6]
             # live-test before saving: a bad key must fail HERE, not
             # silently on the user's next question
             try:
@@ -4978,15 +5024,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     if isinstance(body, list):
                         body = body[0] if body else {}
                     detail = ((body.get("error") or {}).get("message")
-                              or "")[:90]
+                              or "")[:160]
                 except Exception:
                     pass
                 hint = ""
-                if which == "gemini" and not (
-                        key.startswith("AIza") and len(key) == 39):
-                    hint = (" — Gemini keys start with AIza and are 39 "
-                            "characters; this one is %d, so the paste "
-                            "may have been cut off" % len(key))
+                if which == "gemini" and len(key) < 35:
+                    hint = (" — this key is only %d characters; the "
+                            "paste may have been cut off" % len(key))
                 self._send_json({"ok": False,
                                  "err": "that key didn't work: %s%s"
                                         % (detail or ("HTTP %s"
@@ -5000,13 +5044,14 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             try:
                 with open(CLOUD_FILE, "w") as f:
                     json.dump({"name": name, "base": base, "key": key,
-                               "model": model}, f)
+                               "model": model, "models": found}, f)
                 os.chmod(CLOUD_FILE, 0o600)
             except Exception as exc:
                 self._send_json({"ok": False, "err": str(exc)[:80]})
                 return
             p = load_prefs(None); p["turbo"] = True; store_prefs(p)
-            self._send_json({"ok": True, "name": name})
+            self._send_json({"ok": True, "name": name,
+                             "model": model, "models": found})
             return
         if self.path == "/api/guest":
             # one tap, zero questions: a TEMPORARY pass — the cookie lives
@@ -7051,6 +7096,12 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
   border:1px solid rgba(255,255,255,.12);border-radius:8px;
   font-size:12px;padding:6px 9px;outline:none;min-width:80px}
 #ck-key:focus{border-color:rgba(143,157,255,.6)}
+#ck-models{margin-top:8px;display:flex;flex-direction:column;gap:3px}
+.ckm{font-family:var(--mono);font-size:10.5px;letter-spacing:.04em;
+  color:var(--faint);display:flex;align-items:center;gap:6px}
+.ckm.on{color:#fff}
+.ckm.act i{font-style:normal;color:var(--faint)}
+.ckm .ckt{color:#7ddba0;font-weight:700}
 #ck-note{font-size:11px;color:var(--faint);margin-top:7px;
   line-height:1.5;min-height:14px}
 /* the places module: dark multi-pin map + card rail */
@@ -7813,7 +7864,7 @@ __CODE_ROWS__
         <span>Use cloud power</span><i class="hint" id="turbo-hint"
         title="Answers come from a cloud GPU instead of this Mac — much faster, but your prompts leave this computer while it is on.">i</i></label>
       <div id="cloudkey-box">
-        <div id="cloudkey-head">Frontier cloud <em>free key &middot; 2 minutes</em></div>
+        <div id="cloudkey-head">Cloud <em>free key &middot; 2 minutes</em></div>
         <div id="cloudkey-row">
           <select id="ck-provider">
             <option value="gemini">Gemini (free tier)</option>
@@ -7825,6 +7876,7 @@ __CODE_ROWS__
           <button class="about-btn slim" id="ck-save">Save</button>
         </div>
         <div id="ck-note"></div>
+        <div id="ck-models"></div>
       </div>
     </div>
     <div class="set-sec">
@@ -10487,6 +10539,24 @@ function shareDone(on){
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contrib_on:true})});
 }
+// the model list under the key box (6b213): grey possibilities until
+// a key is live, then the REAL inventory in white with green checks
+const CK_PLACEHOLDER={
+  gemini:["Gemini Flash","Gemini Pro"],
+  groq:["GPT-OSS 120B","Llama 4","Qwen 3"],
+  claude:["Claude Sonnet","Claude Haiku"]};
+function ckModels(list,live,active){
+  const box=$("#ck-models");if(!box)return;
+  const rows=(list&&list.length?list
+    :CK_PLACEHOLDER[$("#ck-provider").value]||[]);
+  box.innerHTML=rows.map(m=>
+    '<div class="ckm'+(live?" on":"")
+    +(live&&m===active?' act':'')+'">'
+    +(live?'<span class="ckt">✓</span>':"")
+    +esc(m)+(live&&m===active?' <i>· in use</i>':"")+'</div>').join("");
+}
+$("#ck-provider").addEventListener("change",()=>ckModels(null,false));
+ckModels(null,false);
 $("#ck-save").addEventListener("click",async()=>{
   const note=$("#ck-note"),key=$("#ck-key").value.trim();
   if(!key){note.textContent="paste a key first";return;}
@@ -10495,9 +10565,10 @@ $("#ck-save").addEventListener("click",async()=>{
     const d=await(await fetch("/api/cloud/set",{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({provider:$("#ck-provider").value,key:key})})).json();
-    if(d.ok){note.textContent="✓ "+d.name+" is live — Best tier now "
-      +"answers from the frontier cloud.";$("#ck-key").value="";
-      $("#turbo-row").hidden=false;$("#turbo").checked=true;}
+    if(d.ok){note.textContent="✓ "+d.name+" is live — cloud answers "
+      +"are on.";$("#ck-key").value="";
+      $("#turbo-row").hidden=false;$("#turbo").checked=true;
+      ckModels(d.models,!!(d.models&&d.models.length),d.model);}
     else note.textContent=d.err||"that didn't work";
   }catch(e){note.textContent="network error — try again";}
 });
@@ -10705,6 +10776,9 @@ async function openAbout(){
       try{
         const cs=await(await fetch("/api/cloud")).json();
         $("#turbo-row").hidden=!cs.configured;
+        if(typeof ckModels==="function")
+          ckModels(cs.models,
+            !!(cs.configured&&cs.models&&cs.models.length),cs.model);
         if(cs.name)$("#turbo-hint").title=
           "Answers come from "+cs.name+" instead of this Mac \u2014 much "
           +"faster, but your prompts leave this computer while it is on.";
