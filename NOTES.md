@@ -2008,3 +2008,26 @@ Five gaps that read as backyard-project, all closed:
 - Verified end-to-end on the shared store: fake Gemini key -> ✗ row
   with "Please pass a valid API key" while ✓ Groq · in use stayed
   put; probe entry removed from the real config afterwards.
+
+## 6 beta 219 — the cloud pulls its weight
+- THE ASK (per Patrick: "use the cloud models to their fullest…
+  offload as much as possible"): cloud was only wired into Fast's
+  single-model path. Now, on every council run with "Use cloud
+  power" on:
+  1. THE CLOUD BENCH — every provider with a working key drafts IN
+     PARALLEL with the local loop (threads kicked before it, joined
+     after, 75s cap). Frontier voices join the council at zero local
+     cost; failures record "(no answer — cloud)" and never block.
+  2. CLOUD DRAFTS OUTRANK locals in the merge feed (rank -1) so the
+     top-5 trim can't drop them.
+  3. THE COMPOSITE OFFLOADS — the merge (the heaviest single step,
+     and the one that writes the final text) runs on the ACTIVE
+     cloud model; local Gemma remains the no-key/failure path
+     untouched. X-Models carries the bench so whoLive and the where
+     badge label it right.
+- THE BUBBLE: "answers blended by Gemma" becomes "✓ Cloud Enabled"
+  (green check) whenever configured+turbo — key-less machines keep
+  the old texts.
+- Verified live with Patrick's real Groq key: Thinking run showed
+  compositing… then settled to tier, and the meta badge read CLOUD —
+  the composite came from Groq's 120B, not local Gemma.
