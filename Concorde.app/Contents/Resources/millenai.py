@@ -107,8 +107,8 @@ def short_version(v: str = None) -> str:
     compares or builds artifacts uses APP_VERSION raw."""
     v = v or APP_VERSION
     v = v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
-    return v + (" beta" if APP_BETA else "")
-APP_BUILD = 203               # integer compared against the GitHub release tag
+    return v + (" beta %d" % APP_BUILD if APP_BETA else "")
+APP_BUILD = 204               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -7172,8 +7172,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   padding:10px 2px 0;font-size:11.5px;color:var(--faint);text-align:center;
 }
 #turbo-row[hidden]{display:none}
-#beta-row #beta-ver{display:block;font-family:var(--mono);font-size:9.5px;
-  letter-spacing:.08em;color:var(--faint);font-style:normal;margin-top:2px}
 #turbo-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
   color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
   text-align:left}
@@ -7666,11 +7664,6 @@ __AGENT_ROWS__
     </div>
     <div id="about-body">
     <div class="set-sec">
-      <label id="beta-row"><input type="checkbox" id="betaup">
-        <span>Beta updates — new builds first, kinks included
-        <em id="beta-ver">you're on __APP_VER__</em></span></label>
-    </div>
-    <div class="set-sec">
       <div class="set-h">Personality</div>
       <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
         placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
@@ -7708,6 +7701,8 @@ __AGENT_ROWS__
       <div id="adv-grid">
         <button class="about-btn" id="open-setup">Model updates&hellip;</button>
         <button class="about-btn" id="about-check">Check for updates</button>
+        <label id="beta-row"><input type="checkbox" id="betaup">
+          <span>Include Beta Releases</span></label>
         <button class="about-btn danger" id="about-forget">Forget me</button>
       </div>
     </div>
