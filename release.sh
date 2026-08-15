@@ -76,7 +76,13 @@ echo "→ publishing v$BUILD"
 git add -A && git commit -m "Release $VERSION (build $BUILD)" || true
 git push origin HEAD
 SHOW="$VERSION"; [[ "$VERSION" == *.*.0 ]] && SHOW="${VERSION%.0}"
+# BETA HOLD: while APP_BETA is True, publish as a PRERELEASE — the
+# desktop updater reads /releases/latest (prereleases excluded), so
+# existing installs stay on the last stable until the beta graduates.
+PRE=()
+grep -q "APP_BETA = True" millenai.py && { PRE=(--prerelease); SHOW="$SHOW beta"; }
 gh release create "v$BUILD" "$DMG" "$ZIP" \
+  "${PRE[@]}" \
   --title "$SHOW" \
   --notes "Concorde $VERSION.
 

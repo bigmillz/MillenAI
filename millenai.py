@@ -80,7 +80,14 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "6.1.0"   # bump here — UI, window, DMG all follow
+APP_VERSION = "6.0.0"   # bump here — UI, window, DMG all follow
+# BETA HOLD (per Patrick): the 6.x line is beta until the kinks are out.
+# While True: every display surface says "beta", release.sh publishes
+# as a GitHub PRERELEASE, and — because the desktop updater reads
+# /releases/latest, which EXCLUDES prereleases — every existing install
+# stays parked on the last stable (v197 / 5.3.7). The live :9889
+# instance follows raw tags and DOES run betas: that's the testbed.
+APP_BETA = True
 # THE BRAND (6.0): Concorde. Every user-facing surface says Concorde;
 # everything load-bearing stays "MillenAI" — app_dir, bundle id, the
 # executable name (_SWAP_SCRIPT pgreps it), UPDATE_REPO, User-Agents —
@@ -94,9 +101,13 @@ def brand(html: str) -> str:
 
 
 def short_version(v: str = None) -> str:
-    """Display form, macOS-style: '2.0.0'->'2.0', '2.0.1' stays."""
+    """Display form, macOS-style: '2.0.0'->'2.0', '2.0.1' stays.
+
+    Display-ONLY — the beta suffix rides along here. Anything that
+    compares or builds artifacts uses APP_VERSION raw."""
     v = v or APP_VERSION
-    return v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
+    v = v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
+    return v + (" beta" if APP_BETA else "")
 APP_BUILD = 199               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
