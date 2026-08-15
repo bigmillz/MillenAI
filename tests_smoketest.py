@@ -107,7 +107,14 @@ leftovers = [t for t in re.findall(r"__[A-Z_]{3,}__", page)
              if t not in ("__MAIN__",)]
 check("no unreplaced template tokens", not leftovers, str(leftovers[:5]))
 check("no raw NUL bytes", b"\x00" not in b)
-check("halo element present", 'class="halo"' in page)
+# 6.0b2: no in-app hero branding — greeting IS the hero (Claude-style);
+# the only wordmark is the frame-wide sidebar header
+# NB: ".h1row" survives as a dead CSS selector + haloTick query —
+# assert the MARKUP is gone, not the substring
+check("hero is greeting-only", '<p class="greet"' in page
+      and 'class="h1row"' not in page)
+check("frame-wide sidebar wordmark", "--sbw,384px)*.105" in page
+      and 'class="vsub"' in page)
 check("mobile drawer present", 'id="mburger"' in page)
 check("tier dropdown js present", "tierRows.classList" in page)
 check("arena removed", "arena" not in page.lower())

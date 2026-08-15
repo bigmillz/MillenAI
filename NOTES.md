@@ -1717,3 +1717,23 @@ Five gaps that read as backyard-project, all closed:
   cropped flush by the squircle mask at composite. Silver ramp,
   brightest at the diagonal. Body copy and answers keep their faces —
   readability is not a mood.
+
+## 6.0 beta 2 — darker, hero-less
+- NO IN-APP HERO BRANDING (per Patrick: "claude doesn't even have
+  branding in the app"): the giant wordmark + beta-tag left the hero;
+  the serif greeting stands alone over the backdrop. The canvas halo
+  and h1 gradient machinery are dead code now (haloTick self-cleans
+  when no h1 exists) — left in place, cheap and inert. Gauntlet
+  gotcha: assert on class="h1row" absence, not the substring — the
+  dead CSS selector keeps the bare string in the page.
+- FRAME-WIDE WORDMARK: CONCORDE spans the sidebar edge to edge in
+  Michroma caps (the NAIL FAIRY treatment) and SCALES with the
+  sidebar via font-size:calc(var(--sbw)*.105). Version + controls
+  moved to a slim row beneath (.vsub).
+- DARKER: base tokens dropped ~8 shades (--bg #212121 -> #101013,
+  panels/lines to match), the glass recipe's ground went from
+  rgba(13,15,20,a) to rgba(6,7,10,a) everywhere in one replace, and
+  the native window ground matches (#0a0a0c).
+- STILL 6.0.0 BETA: released as v200 PRERELEASE via the APP_BETA
+  path — fleet stays parked on v197; the live instance (raw tags)
+  picks the beta up for remote kink-hunting.
