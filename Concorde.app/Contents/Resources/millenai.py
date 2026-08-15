@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 215               # integer compared against the GitHub release tag
+APP_BUILD = 216               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -3548,7 +3548,7 @@ def run_council(labels: list, messages: list, emit, status,
     good.sort(key=lambda d: rank.get(d[0], 99))
     good = good[:5]
 
-    status(f"{merger} is combining {len(good)} answers")
+    status("compositing\u2026")
     question = messages[-1]["content"] if messages else ""
     body = "\n\n".join(f"[answer {n}]\n{t[:1500]}"
                        for n, (_l, t) in enumerate(good, 1))
@@ -8238,6 +8238,21 @@ function renderMD(raw){
   s=s.replace(/```(\w*)\n?([\s\S]*?)(```|$)/g,(_,lang,code)=>{
     code=code.replace(/\n$/,"");
     if(lang.toLowerCase()==="flow")return flowDiagram(code);
+    // a fence that is JUST a pipe table renders as the table it is —
+    // models constantly wrap tables in fences (seen live: UberX costs
+    // as mono soup with $7 highlighted as a number token)
+    if(!lang||/^(md|markdown|te?xt|table)$/i.test(lang)){
+      const tl=code.trim().split(/\n/).map(l=>l.trim());
+      if(tl.length>=2&&tl.every(l=>/^\|.*\|$/.test(l))
+         &&/^\|[\s:|-]+\|$/.test(tl[1])){
+        const cells=r=>r.replace(/^\||\|$/g,"").split("|").map(c=>c.trim());
+        return "<table><thead><tr>"
+          +cells(tl[0]).map(c=>"<th>"+c+"</th>").join("")
+          +"</tr></thead><tbody>"
+          +tl.slice(2).map(r=>"<tr>"+cells(r).map(c=>"<td>"+c+"</td>")
+            .join("")+"</tr>").join("")+"</tbody></table>";
+      }
+    }
     return '<div class="codecard">'
       +(lang?'<div class="codebar">'+esc(lang)+'</div>':"")
       +"<pre><code>"+hilite(code,lang)+"</code></pre></div>";
@@ -8752,6 +8767,16 @@ async function send(){
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
     if(lastModels){const w=aiDiv.querySelector(".who");if(w)w.textContent=whoLabel(lastModels);}
+    // the label is LIVE (6b216, per Patrick): show the model that is
+    // running RIGHT NOW; the merge leg reads "compositing…" and never
+    // credits the merger by name
+    const whoLive=()=>{
+      const w=aiDiv.querySelector(".who");if(!w||!status)return;
+      if(/^compositing/.test(status)){w.textContent="compositing\u2026";return;}
+      const hit=(lastModels||"").split(",").map(x=>x.trim())
+        .find(m=>m&&status.indexOf(m)>=0);
+      if(hit)w.textContent=hit;
+    };
     if(searched)body.innerHTML=srcRow(sources)+'<span class="caret"></span>';
     const reader=resp.body.getReader(),dec=new TextDecoder();
     let raw="";
@@ -8762,6 +8787,7 @@ async function send(){
       // pull progress markers out so they never land in the answer
       full=raw.replace(/\u0000STATUS:(.*?)\u0000/g,(_,t)=>{
                 status=t;if(seenStatus.indexOf(t)<0)seenStatus.push(t);
+                whoLive();
                 return "";})
               .replace(/\u0000STATUS:[^\u0000]*$/,"")    // partial marker
               .replace(/\u0000DRAFT:(.*?)\u0000/g,(_,j)=>{
@@ -8831,6 +8857,10 @@ async function send(){
 
   aiDiv.classList.remove("live");
   collapseSteps();
+  // at rest the label credits the LINEUP, not the last runner: single
+  // model keeps its name, councils settle to the tier (6b216)
+  {const w=aiDiv.querySelector(".who");
+   if(w)w.textContent=whoLabel(lastModels)||tier||"";}
   paintDrafts(aiDiv,drafts,false);   // merge done: collapse (or clear bar)
   // the stream died but good drafts exist — the best one IS the answer;
   // never show "engine returned nothing" over a usable draft
