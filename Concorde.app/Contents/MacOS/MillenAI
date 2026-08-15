@@ -1,0 +1,36 @@
+#!/bin/zsh
+DIR="$(cd "$(dirname "$0")" && pwd)"
+
+# We only get here if the user already cleared Gatekeeper once, so strip the
+# download flag from our own bundle: later launches, and drag-and-drop
+# updates onto this same bundle, then open without prompting again.
+# (Nothing can do this *before* first launch — that is the whole point of
+# quarantine — so the DMG still has to explain the one-time approval.)
+xattr -dr com.apple.quarantine "$DIR/../.." 2>/dev/null || true
+
+SUPPORT="$HOME/Library/Application Support/MillenAI"
+LOGDIR="$HOME/Library/Logs/MillenAI"
+VENV="$SUPPORT/venv"
+PY="$VENV/bin/python3"
+mkdir -p "$SUPPORT" "$LOGDIR"
+
+if [[ ! -x "$PY" ]] || ! "$PY" -c "import webview" 2>/dev/null; then
+  /usr/bin/osascript -e 'display notification "First run: setting up the AI engine (a few minutes)…" with title "Concorde"' 2>/dev/null || true
+  BASE="$(command -v python3 || echo /usr/bin/python3)"
+  {
+    "$BASE" -m venv "$VENV" &&
+    "$VENV/bin/pip" install --upgrade pip &&
+    "$VENV/bin/pip" install pywebview ddgs psutil
+  } >> "$LOGDIR/bootstrap.log" 2>&1
+  # MLX exists only for Apple silicon; Intel Macs run the models on Ollama,
+  # which the app downloads for itself on first use
+  if [[ "$(uname -m)" == "arm64" ]]; then
+    "$VENV/bin/pip" install mlx-lm mlx-whisper >> "$LOGDIR/bootstrap.log" 2>&1 || true
+  fi
+  if [[ ! -x "$PY" ]] || ! "$PY" -c "import webview" 2>/dev/null; then
+    /usr/bin/osascript -e 'display dialog "Concorde could not set up its Python engine. Install the Apple Command Line Tools (run: xcode-select --install), check your internet connection, and open Concorde again." buttons {"OK"} with title "Concorde"' 2>/dev/null || true
+    exit 1
+  fi
+fi
+
+exec "$PY" "$DIR/../Resources/millenai.py"
