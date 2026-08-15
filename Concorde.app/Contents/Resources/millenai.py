@@ -80,7 +80,14 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "6.1.0"   # bump here — UI, window, DMG all follow
+APP_VERSION = "6.0.0"   # bump here — UI, window, DMG all follow
+# BETA HOLD (per Patrick): the 6.x line is beta until the kinks are out.
+# While True: every display surface says "beta", release.sh publishes
+# as a GitHub PRERELEASE, and — because the desktop updater reads
+# /releases/latest, which EXCLUDES prereleases — every existing install
+# stays parked on the last stable (v197 / 5.3.7). The live :9889
+# instance follows raw tags and DOES run betas: that's the testbed.
+APP_BETA = True
 # THE BRAND (6.0): Concorde. Every user-facing surface says Concorde;
 # everything load-bearing stays "MillenAI" — app_dir, bundle id, the
 # executable name (_SWAP_SCRIPT pgreps it), UPDATE_REPO, User-Agents —
@@ -94,10 +101,14 @@ def brand(html: str) -> str:
 
 
 def short_version(v: str = None) -> str:
-    """Display form, macOS-style: '2.0.0'->'2.0', '2.0.1' stays."""
+    """Display form, macOS-style: '2.0.0'->'2.0', '2.0.1' stays.
+
+    Display-ONLY — the beta suffix rides along here. Anything that
+    compares or builds artifacts uses APP_VERSION raw."""
     v = v or APP_VERSION
-    return v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
-APP_BUILD = 199               # integer compared against the GitHub release tag
+    v = v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
+    return v + (" beta" if APP_BETA else "")
+APP_BUILD = 200               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -5869,11 +5880,11 @@ if("__WIN_WIPE__"==="1"&&
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Michroma&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#212121;
-  --panel:#171717;
-  --panel2:#2f2f2f;
-  --line:#3d3d3d;
-  --line-soft:#333;
+  --bg:#101013;
+  --panel:#0a0a0c;
+  --panel2:#191a1e;
+  --line:#26272c;
+  --line-soft:#1e1f23;
   --text:#ececec;
   --dim:#b4b4b4;
   --faint:#8e8e8e;
@@ -5936,7 +5947,7 @@ html.winwipe.winwipe-run body{
   width:384px;min-width:384px;height:100%;
   /* real frosted glass, per Patrick: ~30% panel, heavy blur carrying the
      legibility instead of the tint */
-  background:rgba(13,15,20,.34);
+  background:rgba(6,7,10,.34);
   -webkit-backdrop-filter:blur(26px) saturate(1.45);
           backdrop-filter:blur(26px) saturate(1.45);
   border-right:1px solid rgba(255,255,255,.07);
@@ -6002,16 +6013,20 @@ body.resizing{cursor:col-resize;user-select:none}
    sitting it on the wordmark's baseline hangs it low against the taller type */
 /* same face as the startup wordmark (5.3, per Patrick) — Space Grotesk
    with the hero's tight tracking; the greys stay exactly as they were */
+/* FRAME-WIDE (6.0b2, per Patrick, after nailfairy's NAIL FAIRY):
+   the wordmark spans the sidebar edge to edge and scales with it —
+   --sbw is kept current by setSidebar */
 .vghost{
-  font-family:var(--disp);font-size:16.5px;letter-spacing:.04em;
-  color:rgba(255,255,255,.62);user-select:none;cursor:pointer;
-  padding-top:0;margin-right:auto;line-height:1.1;
-  display:flex;align-items:baseline;gap:8px;
+  font-family:var(--disp);text-transform:uppercase;
+  font-size:calc(var(--sbw,384px)*.105);letter-spacing:.045em;
+  color:rgba(255,255,255,.66);user-select:none;
+  display:block;line-height:1.05;white-space:nowrap;
+  padding:2px 0 6px;
 }
 .vghost b{font-weight:400}
-.vghost i{font-style:normal;font-weight:400;font-size:.82em;
-  font-family:var(--mono);color:rgba(255,255,255,.42)}
-.vghost:hover{color:rgba(255,255,255,.85)}
+.vsub{font-style:normal;font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.22em;text-transform:uppercase;
+  color:rgba(255,255,255,.38);margin-right:auto;align-self:center}
 
 #newchat,#settings-btn{
   width:28px;height:28px;flex-shrink:0;
@@ -6267,7 +6282,7 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
 
 /* telemetry — the instrument cluster */
 #telemetry{
-  margin-top:12px;background:rgba(13,15,20,.44);
+  margin-top:12px;background:rgba(6,7,10,.44);
   border:1px solid rgba(255,255,255,.07);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
   -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
@@ -6547,8 +6562,8 @@ body.perf #hero h1 .halo span,body.perf #hero h1::after{
 /* the greeting reads as a headline, not a caption */
 #hero .greet{
   font-family:ui-serif,Georgia,'Times New Roman',serif;
-  font-size:44px;font-weight:400;letter-spacing:-.01em;
-  color:#eceade;margin-top:22px;
+  font-size:40px;font-weight:400;letter-spacing:-.01em;
+  color:#e7e5db;margin-top:0;
 }
 /* the wordmark centres on its own; LIVE is pulled out of the flow so it
    sits further right without dragging the title off-centre */
@@ -6607,7 +6622,7 @@ body.perf .msg{animation:none}
 #ws-note{font-size:11px;color:var(--faint);margin-top:7px;min-height:13px}
 /* the working tree — progress plus what it's actually doing */
 .worktree{margin:0 0 14px;padding:11px 13px;border-radius:12px;
-  background:rgba(13,15,20,.5);border:1px solid rgba(255,255,255,.09);
+  background:rgba(6,7,10,.5);border:1px solid rgba(255,255,255,.09);
   -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
   font-family:var(--sans)}
 .wtbar{height:3px;border-radius:2px;background:rgba(255,255,255,.09);
@@ -6638,7 +6653,7 @@ body:not(.perf) .wtrow.run .wtdot{animation:blink 1s ease-in-out infinite}
 .wtl{flex:none}
 .wtd{flex:1;min-width:0;color:var(--faint);opacity:.75;font-size:11.5px;
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.worktree.folded{padding:7px 11px;background:rgba(13,15,20,.36)}
+.worktree.folded{padding:7px 11px;background:rgba(6,7,10,.36)}
 .wtsum{background:none;border:none;cursor:pointer;color:var(--faint);
   font:11.5px var(--mono);letter-spacing:.06em;padding:0;
   display:flex;align-items:center;gap:7px}
@@ -6908,7 +6923,7 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .prail{display:grid;
   grid-template-columns:repeat(auto-fit,minmax(170px,1fr));
   gap:1px;background:rgba(255,255,255,.08)}
-.pcard{background:rgba(13,15,20,.94);padding:11px 13px;display:flex;
+.pcard{background:rgba(6,7,10,.94);padding:11px 13px;display:flex;
   flex-direction:column;gap:3px}
 .pcard b{font-family:var(--sans);font-size:13.5px;letter-spacing:.01em}
 .pcard .pd{color:var(--dim);font-size:12px;line-height:1.45;
@@ -7409,8 +7424,9 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 <aside id="sidebar">
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
+    <span class="vghost" title="MillenAI"><b>MillenAI</b></span>
     <div id="brand-row">
-    <span class="vghost" title="About MillenAI"><b>MillenAI</b><i>__APP_VER__</i></span>
+    <i class="vsub">__APP_VER__</i>
 <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
@@ -7518,8 +7534,8 @@ __AGENT_ROWS__
   <canvas id="stars"></canvas>
   <div id="chat-scroll"><div id="chat-inner">
     <div id="hero">
-      <div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1></div>
-      <div class="beta-tag">__APP_BETA__</div>
+<!-- 6.0b2, per Patrick: no in-app hero branding — the greeting IS the
+     hero, Claude-style; the only wordmark lives in the sidebar header -->
       <p class="greet">What's going on today?</p>
     </div>
   </div></div>
@@ -8697,7 +8713,7 @@ async function pushChatsToDisk(){
 }
 
 function resetHero(){
-  inner.innerHTML='<div id="hero"><div class="h1row"><h1 data-word="MillenAI">MillenAI<span class="halo" aria-hidden="true"><span>MillenAI</span></span></h1></div><div class="beta-tag">__APP_BETA__</div><p class="greet">'+esc(greeting())+'</p></div>';
+  inner.innerHTML='<div id="hero"><p class="greet">'+esc(greeting())+'</p></div>';
 }
 function saveChats(){
   // write through to disk, coalesced so a burst of messages is one write
@@ -10818,7 +10834,7 @@ if __name__ == "__main__":
             width=1320,
             height=860,
             min_size=(940, 620),
-            background_color="#0f1117",
+            background_color="#0a0a0c",
             text_select=True,   # pywebview blocks selection by default
         )
         # pywebview defaults to private_mode=True — an EPHEMERAL WebKit
