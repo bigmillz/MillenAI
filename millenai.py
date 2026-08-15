@@ -4968,6 +4968,30 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                  "Content-Type": "application/json",
                                  "User-Agent": "MillenAI/%s" % APP_VERSION})
                 urllib.request.urlopen(tq, timeout=25).read(400)
+            except urllib.error.HTTPError as exc:
+                # the provider's OWN words beat "HTTP Error 400": Google
+                # answers 400 "Please pass a valid API key" for a bad key
+                # (verified live) — surface that, plus the shape hint
+                detail = ""
+                try:
+                    body = json.loads(exc.read().decode("utf-8", "replace"))
+                    if isinstance(body, list):
+                        body = body[0] if body else {}
+                    detail = ((body.get("error") or {}).get("message")
+                              or "")[:90]
+                except Exception:
+                    pass
+                hint = ""
+                if which == "gemini" and not (
+                        key.startswith("AIza") and len(key) == 39):
+                    hint = (" — Gemini keys start with AIza and are 39 "
+                            "characters; this one is %d, so the paste "
+                            "may have been cut off" % len(key))
+                self._send_json({"ok": False,
+                                 "err": "that key didn't work: %s%s"
+                                        % (detail or ("HTTP %s"
+                                           % exc.code), hint)})
+                return
             except Exception as exc:
                 self._send_json({"ok": False,
                                  "err": "that key didn't work (%s)"

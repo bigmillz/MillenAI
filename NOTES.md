@@ -1908,3 +1908,14 @@ Five gaps that read as backyard-project, all closed:
   fits untruncated at the 300px default.
 - Lesson that cost four rounds: flex baseline + tall centered
   siblings + flex-wrap is a three-way trap — measure mids, not vibes.
+
+## 6 beta 212 — the key that "didn't work"
+- GEMINI RETURNS 400 FOR A BAD KEY, not 401 (verified live against
+  the OpenAI-compat endpoint with a fake key: 400 INVALID_ARGUMENT
+  "Please pass a valid API key" — the model id is irrelevant
+  pre-auth). So "HTTP Error 400: Bad Request" almost always means
+  the KEY, not our request.
+- The validator now surfaces the provider's OWN error message from
+  the response body, plus a shape hint: Gemini keys start with AIza
+  and are exactly 39 chars — a shorter one means the paste was cut
+  (the masked field in Patrick's screenshot showed ~22 dots).
