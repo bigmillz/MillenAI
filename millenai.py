@@ -602,6 +602,12 @@ def cloud_bench() -> list:
     bench = []
     for c in cloud_ok_providers():
         bench.append((c["name"], c))
+        # alternates only on FREE tiers — Anthropic bills per token,
+        # and the blind alternate once benched claude-opus-5 on every
+        # council question (caught live). One paid seat is plenty;
+        # the compositor ladder is where Claude earns its keep.
+        if "anthropic" in c.get("base", ""):
+            continue
         alts = [m for m in c.get("models", []) if m != c.get("model")]
         alt = next((m for m in alts if "pro" in m.lower()
                     or "120b" in m.lower() or "70b" in m.lower()),
@@ -4816,6 +4822,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                              "model": (c or {}).get("model", ""),
                              "active": d.get("active", ""),
                              "turbo": bool(load_prefs(None).get("turbo")),
+                             "bench": [lbl for lbl, _c in cloud_bench()],
                              "providers": provs})
         elif self.path == "/api/downloads":
             self._send_json(download_links())
@@ -7206,6 +7213,8 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .ckm.act i{font-style:normal;color:var(--faint)}
 .ckm .ckt{color:#7ddba0;font-weight:700}
 .gcheck{font-style:normal;color:#7ddba0;font-weight:700}
+.mline.mcloud{color:#cfe4d8}
+.mline.mcloud i{font-style:normal;color:#7ddba0;font-size:10px}
 .ckm.bad{color:var(--dim)}
 .ckm .ckx{color:#e26d5a;font-weight:700}
 .ckm.bad i{font-style:normal;color:var(--faint)}
@@ -8148,17 +8157,21 @@ function setTier(name){
 }
 const tierPop=$("#tierpop");
 async function showTierPop(el,name){
-  let info={},cloudOn=false;
+  let info={},cloudOn=false,ci={};
   try{
-    const [ti,ci]=await Promise.all([
+    const r2=await Promise.all([
       (await fetch("/api/tiers")).json(),
       (await fetch("/api/cloud")).json()]);
-    info=ti[name]||{};cloudOn=!!(ci.configured&&ci.turbo);
+    info=r2[0][name]||{};ci=r2[1]||{};
+    cloudOn=!!(ci.configured&&ci.turbo);
   }catch(e){}
   const list=(info.models||[]);
+  const bench=(cloudOn&&list.length>1)?(ci.bench||[]):[];
   tierPop.innerHTML="<b>"+esc(name)+"</b>"+
     (list.length
       ? list.map(m=>'<div class="mline">'+esc(m)+'</div>').join("")+
+        bench.map(m=>'<div class="mline mcloud">'+esc(m)
+          +' <i>· cloud</i></div>').join("")+
         (cloudOn
           ?'<span class="note"><i class="gcheck">✓</i> Cloud Enabled</span>'
           :list.length>1?'<span class="note">answers blended by Gemma</span>'

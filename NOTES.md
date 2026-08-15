@@ -2051,3 +2051,17 @@ Five gaps that read as backyard-project, all closed:
   panel name the frontier voices correctly.
 - Verified live on real keys: Thinking run -> cloud badge, tier at
   rest, and the final text reads like the pro model that wrote it.
+
+## 6 beta 221 — the bench is visible (and Opus is off it)
+- PATRICK'S QUESTION ("also use cloud for the council, or just
+  compositing?") was answered by b219/220 — both — but the tier
+  bubble only listed local models, so the bench was invisible.
+  Council bubbles now seat the cloud voices too ("Groq 120B · cloud"
+  rows under the locals), fed by /api/cloud's new bench field.
+- COST BUG CAUGHT BY THE NEW BUBBLE: Patrick added a Claude key, and
+  the blind alternate-picker benched claude-opus-5 — a paid,
+  premium-priced draft on EVERY council question. Alternates are now
+  free-tier-only (Gemini/Groq); Anthropic fields one seat and earns
+  its keep at the top of the compositor ladder instead. All three
+  providers ok: bench = Groq 120B, Gemini, gemini-2.5-pro, Claude;
+  ladder = Claude -> gemini-2.5-pro -> Groq 120B -> local Gemma.
