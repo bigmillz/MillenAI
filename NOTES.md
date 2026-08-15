@@ -1844,3 +1844,19 @@ Five gaps that read as backyard-project, all closed:
 - Pane gotchas again: rAF throttling means wireFlow needed manual
   driving to verify there. Also: never put backticks in a git commit
   -m double-quoted string — command substitution eats the chain.
+
+## 6.0 beta 207 — the stand, the gear, the type
+- BRAND: the icon's silver diagonal bars (no tile) lean against the
+  first C like a stand — inline SVG with the icon's gradient, 15px,
+  2px off the C. Gear moved OUT of the brand row to the far right of
+  the Performance mode line (#settings became a flex row; the gear
+  keeps its own click handler so it opens Settings, not the toggle).
+  New chat stays beside the version.
+- TYPE: answers left the serif. Precise sans stack (-apple-system /
+  SF Pro Text first), 14.75px / 1.7 / -.006em — the "line gaps"
+  complaint was Georgia's uneven vertical rhythm; SF's metrics read
+  like Claude Code. Serif remains only in the hero greeting (the
+  charm) — code/tables/chips keep their own faces.
+- SHELL LESSON No. 2 this beta line: a bare "cat >> file" with no
+  input hangs reading stdin — it ate a 10-minute timeout between the
+  gauntlet and the release.
