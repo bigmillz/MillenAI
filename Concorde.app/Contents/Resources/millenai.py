@@ -108,7 +108,7 @@ def short_version(v: str = None) -> str:
     v = v or APP_VERSION
     v = v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 204               # integer compared against the GitHub release tag
+APP_BUILD = 205               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -815,6 +815,23 @@ AGENTS = {
             "runnable examples over fragments. State assumptions, name "
             "edge cases, and when something is a bad idea say so and give "
             "the better way. No filler, no apologies."),
+    },
+    "Hermes": {
+        # THE INFAMOUS ONE (6.0b7, per Patrick): Nous Hermes run as
+        # itself — direct, opinionated, zero corporate varnish. The
+        # system prompt sets TONE, not permissions: it still refuses
+        # what must be refused, it just skips the sermon.
+        "icon": "\U0001fabd", "desc": "the infamous one — direct, no varnish",
+        "picks": ["Hermes 3 8B", "Mistral Nemo 12B", "Llama 3.1 8B"],
+        "system": (
+            "You are Hermes — direct, sharp, personality-forward. "
+            "Answer exactly what was asked. Take real positions when "
+            "asked for opinions. Never hedge with corporate "
+            "disclaimers and never moralize about the question. Dry "
+            "wit welcome; preambles are not. Keep answers tight and "
+            "concrete. If something is genuinely dangerous or "
+            "illegal, decline in one short sentence without a "
+            "lecture."),
     },
     "Resumes": {
         "icon": "📄", "desc": "bullets that get interviews",
@@ -4447,6 +4464,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             html = (HTML_CONTENT
                     .replace("__AGENT_ROWS__", build_agent_rows())
                     .replace("__CODE_ROWS__", build_code_rows())
+                    .replace("__TIER_META__", json.dumps(
+                        {n: {"icon": t["icon"], "desc": t["desc"]}
+                         for n, t in TIERS.items()}))
+                    .replace("__AGENT_META__", json.dumps(
+                        {n: {"icon": a["icon"], "desc": a["desc"],
+                             "picks": a.get("picks", [])[:3]}
+                         for n, a in AGENTS.items()}))
                     .replace("__APP_BETA__",
                              'VERSION <b class="vnum">%s</b>' % short_version())
                     .replace("__TIER_ROWS__", build_tier_rows())
@@ -5964,7 +5988,7 @@ html.winwipe.winwipe-run body{
    reads as light and colour through the glass, never as detail. */
 #sidebar{
   position:relative;z-index:1;
-  width:384px;min-width:384px;height:100%;
+  width:300px;min-width:300px;height:100%;
   /* real frosted glass, per Patrick: ~30% panel, heavy blur carrying the
      legibility instead of the tint */
   background:rgba(6,7,10,.34);
@@ -6380,7 +6404,7 @@ body.gen #skyline,body.gen #stars{filter:brightness(.7)}
    the MAIN PANEL like the hero text (50% of the viewport is the window's
    centre, which the sidebar pushes visibly off-axis — the --sbw var is
    kept current by setSidebar) */
-#skyload{position:fixed;left:calc(50% + var(--sbw,384px)/2);top:57%;
+#skyload{position:fixed;left:calc(50% + var(--sbw,300px)/2);top:57%;
   transform:translateX(-50%);
   z-index:4;width:min(440px,50vw);text-align:center;pointer-events:none}
 #skyload[hidden]{display:none}
@@ -7260,6 +7284,22 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #celebrate{position:fixed;inset:0;z-index:90;pointer-events:none;overflow:hidden}
 #celebrate[hidden]{display:none}
 #cubecv{position:absolute;inset:0}
+/* the engine dropdown (6.0b7): glass card anchored at the chip */
+#engmenu{position:fixed;z-index:60;min-width:250px;
+  background:rgba(6,7,10,.92);border:1px solid rgba(255,255,255,.12);
+  -webkit-backdrop-filter:blur(26px);backdrop-filter:blur(26px);
+  border-radius:14px;padding:6px;
+  box-shadow:0 18px 50px -20px rgba(0,0,0,.9)}
+#engmenu[hidden]{display:none}
+.engrow{display:flex;align-items:center;gap:9px;padding:8px 10px;
+  border-radius:9px;cursor:pointer;font-size:13px;color:var(--dim)}
+.engrow:hover{background:rgba(255,255,255,.07);color:var(--text)}
+.engrow.on{color:var(--text);background:rgba(255,255,255,.05)}
+.engrow .eico{flex:none}
+.engrow .enm{font-weight:600;flex:none}
+.engrow .edsc{font-size:11px;color:var(--faint);margin-left:auto;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+  max-width:150px}
 /* a diagonal band of light that travels across the window */
 /* What made this read as a ribbon dragged over the window: evenly spaced
    colour stops at uniform opacity, a light blur, and hard rectangular ends
@@ -7883,12 +7923,39 @@ function hideTierPop(){tierPop.hidden=true;}
 // with a caret; clicking it unfolds the rest, picking one folds it back
 const tierRows=$("#tier-rows");
 tierRows.classList.add("closed");
-// the composer's engine pill opens the picker where it lives.
-// stopPropagation: the document-level dropdown-closer re-adds
-// "closed" on any outside click, which undid this instantly
+// the composer's engine pill drops the picker RIGHT THERE (6.0b7):
+// emoji rows for each tier, hover shows the models bubble, click picks
+const TIER_META=JSON.parse('__TIER_META__');
+const AGENT_META=JSON.parse('__AGENT_META__');
+const engMenu=document.createElement("div");
+engMenu.id="engmenu";engMenu.hidden=true;
+document.body.appendChild(engMenu);
+function openEngMenu(){
+  engMenu.innerHTML=Object.keys(TIER_META).map(n=>{
+    const m=TIER_META[n];
+    return '<div class="engrow'+(tier===n?" on":"")+'" data-t="'+n+'">'
+      +'<span class="eico">'+m.icon+'</span>'
+      +'<span class="enm">'+esc(n)+'</span>'
+      +'<span class="edsc">'+esc(m.desc)+'</span></div>';
+  }).join("");
+  engMenu.hidden=false;
+  const r=$("#model-chip").getBoundingClientRect();
+  engMenu.style.left=Math.round(r.left)+"px";
+  const below=innerHeight-r.bottom>engMenu.offsetHeight+16;
+  engMenu.style.top=below?Math.round(r.bottom+8)+"px"
+    :Math.round(r.top-engMenu.offsetHeight-8)+"px";
+  engMenu.querySelectorAll(".engrow").forEach(el=>{
+    el.addEventListener("mouseenter",()=>showTierPop(el,el.dataset.t));
+    el.addEventListener("mouseleave",hideTierPop);
+    el.addEventListener("click",ev=>{
+      ev.stopPropagation();
+      setTier(el.dataset.t);hideTierPop();engMenu.hidden=true;
+    });
+  });
+}
 $("#model-chip").addEventListener("click",ev=>{
-  ev.stopPropagation();
-  modeShow("ai");tierRows.classList.remove("closed");
+  ev.stopPropagation();hideTierPop();
+  if(engMenu.hidden)openEngMenu();else engMenu.hidden=true;
 });
 $$(".tier").forEach(el=>{
   el.addEventListener("click",ev=>{
@@ -7914,6 +7981,9 @@ document.addEventListener("click",e=>{
     tierRows.classList.add("closed");
   if(!e.target.closest||!e.target.closest("#agents-wrap"))
     agentsWrap.classList.add("closed");
+  const em=document.getElementById("engmenu");
+  if(em&&!e.target.closest("#engmenu")&&!e.target.closest("#model-chip"))
+    em.hidden=true;
 });
 setTier(tier);
 
@@ -7983,6 +8053,24 @@ $$("#agents-wrap .agent").forEach(el=>
 // the CODE tab's two rows: always visible, plain radio behavior
 $$("#code-wrap .agent").forEach(el=>
   el.addEventListener("click",()=>setAgent(el.dataset.agent||"")));
+// hover any specialist for a tierpop-style card: what it is, what runs
+function showAgentPop(el,name){
+  const m=(typeof AGENT_META!=="undefined"&&AGENT_META[name])||null;
+  if(!m)return;
+  tierPop.innerHTML="<b>"+m.icon+" "+esc(name)+"</b>"
+    +'<div class="mline">'+esc(m.desc)+'</div>'
+    +(m.picks&&m.picks.length
+      ?'<span class="note">runs: '+esc(m.picks.join(", "))+'</span>':"");
+  const r=el.getBoundingClientRect();
+  tierPop.hidden=false;
+  tierPop.style.left=Math.round(r.right+10)+"px";
+  tierPop.style.top=Math.round(r.top-4)+"px";
+}
+$$("#agents-wrap .agent, #code-wrap .agent").forEach(el=>{
+  const nm=el.dataset.agent;if(!nm)return;
+  el.addEventListener("mouseenter",()=>showAgentPop(el,nm));
+  el.addEventListener("mouseleave",hideTierPop);
+});
 paintAgents();
 modeShow("ai");
 
@@ -10382,7 +10470,7 @@ $("#sb-resize").addEventListener("mousedown",e=>{
   window.addEventListener("mousemove",move);
   window.addEventListener("mouseup",up);
 });
-$("#sb-resize").addEventListener("dblclick",()=>setSidebar(384));
+$("#sb-resize").addEventListener("dblclick",()=>setSidebar(300));
 
 /* ---------------------------------------------------------------- about */
 const aboutVeil=$("#about-veil");
