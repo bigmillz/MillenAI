@@ -125,6 +125,11 @@ check("engine dropdown js + meta", "openEngMenu" in page
 check("Hermes agent present with popup meta",
       'data-agent="Hermes"' in page and "showAgentPop" in page)
 check("sidebar defaults to 300px", "width:300px;min-width:300px" in page)
+# 6.0b206: rich answers — flow diagrams, code cards, highlighter
+check("flow diagram renderer", "flowDiagram" in page and "wireFlow" in page
+      and "fwires" in page)
+check("code cards + mini highlighter", "codecard" in page
+      and "hilite" in page and "hkw" in page)
 check("mobile drawer present", 'id="mburger"' in page)
 check("tier dropdown js present", "tierRows.classList" in page)
 check("arena removed", "arena" not in page.lower())

@@ -1820,3 +1820,27 @@ Five gaps that read as backyard-project, all closed:
   card (icon, desc, top picks) from the AGENT_META token — the
   "popup description" ask, and it covers every agent, not just
   Hermes.
+
+## 6.0 beta 206 — answers that look like Claude's
+- THE ASK (per Patrick, with a side-by-side): "diagrams and code etc
+  in different font/color/typeface". Three layers shipped:
+  1. RENDERER — flow fences become REAL diagrams: 'A -> B' edges with
+     optional '(note)' per node, layered by longest-path topology,
+     glass boxes + SVG bezier wires with arrowheads (wireFlow runs
+     post-layout and on resize; edges URI-encoded in a data attribute
+     because esc() leaves double quotes alone and the JSON truncated
+     the attribute at its first quote — seen live). Code fences became
+     language-labeled CARDS with a four-class mini-highlighter
+     (keywords/strings/comments/numbers, input pre-escaped). Ordered
+     lists and setext headers (text over -----, which small models
+     love and which rendered as stray hr's) now parse.
+  2. CSS — inline code went warm (#e8a08f) against the serif, token
+     colors are quiet blues/greens/golds, code cards get a mono
+     language bar.
+  3. PROMPT — SYSTEM_PROMPT teaches the flow syntax and demands
+     language-tagged fences; Gemma-class models follow it, the
+     smallest ones won't always. The renderer is verified against the
+     reference; model ADOPTION varies by model — the remaining kink.
+- Pane gotchas again: rAF throttling means wireFlow needed manual
+  driving to verify there. Also: never put backticks in a git commit
+  -m double-quoted string — command substitution eats the chain.
