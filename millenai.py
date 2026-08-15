@@ -108,7 +108,7 @@ def short_version(v: str = None) -> str:
     v = v or APP_VERSION
     v = v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
     return v + (" beta" if APP_BETA else "")
-APP_BUILD = 202               # integer compared against the GitHub release tag
+APP_BUILD = 203               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
