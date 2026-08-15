@@ -1885,3 +1885,9 @@ Five gaps that read as backyard-project, all closed:
   vanishes from every list. The Hermes hot-dog chat survives visibly.
 - Inert leftovers kept on purpose: #agents-wrap CSS rules (no matching
   DOM) and the __AGENT_ROWS__ token replace (no token in the page).
+- POST-SHIP CATCH on b209: the release chain ran DESPITE a red
+  scorecard — `tests | tail -2` reports TAIL's exit code, not the
+  gauntlet's. The failure was only my stale 5.2 three-tabs check
+  contradicting the new halves check (page was correct), but the hole
+  was real. Gauntlet now runs unpiped (redirect to a log, tail after)
+  so a red scorecard actually stops the train.

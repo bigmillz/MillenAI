@@ -141,9 +141,9 @@ check("tier dropdown js present", "tierRows.classList" in page)
 check("arena removed", "arena" not in page.lower())
 check("blend progress bar css", ".blendprog" in page)
 check("serene entrance css", "heroIn 2.6s" in page and "shockOut" not in page)
-# 5.2 surface
-check("three-tab selector, glide in thirds",
-      'data-m="code"' in page and "translateX(200%)" in page)
+# 5.2 surface (agents tab pulled again in 6b209 — two tabs is correct)
+check("tab selector with Code lane", 'data-m="code"' in page
+      and 'data-m="ai"' in page)
 check("code tab carries Coding + Workspace",
       'data-agent="Coding"' in page and 'data-agent="Workspace"' in page)
 check("query pinwheel css", ".wtspin" in page and "wtspin 1.5s" in page)
