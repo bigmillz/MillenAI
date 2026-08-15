@@ -1791,3 +1791,13 @@ Five gaps that read as backyard-project, all closed:
   unchecked; both restore on re-check (verified with dispatched
   change events both directions) and populate folded/open from prefs
   when Settings opens.
+
+## 6.0 beta 6 — version says which beta
+- short_version() carries the BUILD in beta: "6.0 beta 203" — window
+  title, tab, About header, splash, corner vsub all agree, and each
+  beta release visibly increments. No derived "beta N" counting; the
+  build number IS the beta number.
+- The opt-in checkbox settled under "Check for updates" (adv-grid:
+  updates → check → Include Beta Releases → forget), label shortened
+  to exactly that. Top-of-settings placement lasted one beta —
+  betas are for finding this out.
