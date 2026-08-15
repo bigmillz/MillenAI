@@ -101,14 +101,16 @@ def brand(html: str) -> str:
 
 
 def short_version(v: str = None) -> str:
-    """Display form, macOS-style: '2.0.0'->'2.0', '2.0.1' stays.
+    """Display form: every trailing .0 falls away — '6.0.0'->'6',
+    '6.1.0'->'6.1', '6.1.1' stays (6.0b208, per Patrick).
 
     Display-ONLY — the beta suffix rides along here. Anything that
     compares or builds artifacts uses APP_VERSION raw."""
     v = v or APP_VERSION
-    v = v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
+    while v.count(".") >= 1 and v.endswith(".0"):
+        v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 207               # integer compared against the GitHub release tag
+APP_BUILD = 208               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1823,6 +1825,17 @@ def check_update():
     # the tag is a build counter (v19); the release *title* is the version
     # people recognise (1.0.3) — show that, but still compare on the tag
     shown = (rel.get("name") or "").strip() or tag
+    # betas all share a title ("6.0 beta") — append the tag's build so
+    # the offer reads "6 beta 208", never "update 6.0.0 to 6.0.0"
+    if re.search(r"beta$", shown):
+        shown = "%s %d" % (shown, _build_from_tag(tag))
+    # and the numeric part obeys the same trailing-.0 truncation
+    mnum = re.match(r"^([\d.]+)(.*)$", shown)
+    if mnum:
+        num = mnum.group(1)
+        while num.count(".") >= 1 and num.endswith(".0"):
+            num = num[:-2]
+        shown = num + mnum.group(2)
     dmg = next((a for a in rel.get("assets", [])
                 if a.get("name", "").endswith(".dmg")), None)
     if dmg:
@@ -1838,7 +1851,7 @@ def check_update():
     return {"configured": True,
             "available": bool(dmg) and newer
                          and _app_bundle_path() is not None,
-            "latest": shown, "tag": tag, "current": APP_VERSION,
+            "latest": shown, "tag": tag, "current": short_version(),
             "published": rel.get("published_at", ""),
             "size_mb": round(dmg.get("size", 0) / 1e6, 1) if dmg else 0}
 
