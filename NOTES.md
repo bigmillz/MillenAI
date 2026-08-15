@@ -1951,3 +1951,26 @@ Five gaps that read as backyard-project, all closed:
   go." in the GREETING ROTATION (lowercase; the removal grep was
   case-sensitive). Gone now, and the gauntlet check went
   case-insensitive. Sweeps grep -i or they aren't sweeps.
+
+## 6 beta 216 — fenced tables + the live label
+- FENCED PIPE TABLES render as REAL tables: models constantly wrap
+  tables in bare fences (seen live: UberX costs as mono soup with $7
+  gold-highlighted as a number token). The fence handler detects an
+  all-pipe-rows body with a divider (bare/md/text/table langs only)
+  and emits the styled table; real code stays a code card.
+- THE MODEL LABEL IS LIVE (per Patrick: no Gemma-as-compositor
+  credit): whoLive() mirrors each STATUS into the .who slot — the
+  council's CURRENT model while it runs, "compositing…" during the
+  merge (the status no longer names the merger), and at rest singles
+  keep their model name while councils settle to the TIER (the
+  last-runner name was sticking, which recredited Gemma — caught
+  live). Verified through a full Thinking run.
+- PROCESS INCIDENT, fully owned: this release shipped from an
+  UNGUARDED chain — a heredoc inside a && chain ends the chain, so
+  everything after the heredoc ran unconditionally while the gauntlet
+  had actually CRASHED (ConnectionResetError: it collided with the
+  verification generation still holding the engine). A clean re-run
+  came back 59/59 so v216 stands, but the rules are now: (1) the
+  gauntlet gets a QUIET instance, never one mid-generation; (2) NO
+  heredocs inside release chains — NOTES first, then gauntlet, then
+  release, each its own command with its exit code checked.
