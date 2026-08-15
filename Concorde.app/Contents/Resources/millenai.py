@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 216               # integer compared against the GitHub release tag
+APP_BUILD = 217               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -6116,7 +6116,6 @@ body.resizing{cursor:col-resize;user-select:none}
    sidebar ever gets truly cramped the version ellipsizes, the button
    never drops below the text */
 #brand-row{display:flex;align-items:center;gap:5px;flex-wrap:nowrap}
-#brand-row .vsub{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #brand-row #newchat{margin-left:2px}
 #update-flag{margin-top:4px}
 #update-flag{
@@ -6169,13 +6168,17 @@ body.resizing{cursor:col-resize;user-select:none}
   font-size:12.5px;letter-spacing:.15em;
   color:rgba(255,255,255,.72);user-select:none;
   display:inline-block;line-height:1.2;white-space:nowrap;
+  margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
 }
 .vghost b{font-weight:400}
 #vmark{width:15px;height:15px;margin-right:2px;vertical-align:-2.5px}
-/* same size as the wordmark, baselines locked (6b210) */
-.vsub{font-style:normal;font-family:var(--mono);font-size:12.5px;
-  letter-spacing:.06em;text-transform:uppercase;line-height:1.2;
-  color:rgba(255,255,255,.38);margin-right:auto}
+/* INSIDE the wordmark's inline run (6b217): one text run = one
+   baseline in every engine — flex centering diverged between Blink
+   and WKWebView because the two faces carry different line metrics.
+   13px mono caps optically match Michroma 12.5px caps. */
+.vsub{font-style:normal;font-family:var(--mono);font-size:13px;
+  letter-spacing:.06em;text-transform:uppercase;
+  color:rgba(255,255,255,.38);margin-left:4px}
 
 #newchat,#settings-btn{
   width:26px;height:26px;flex-shrink:0;
@@ -7574,8 +7577,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
     <div id="brand-row">
-    <span class="vghost" title="MillenAI"><svg id="vmark" viewBox="0 0 20 20" aria-hidden="true"><defs><linearGradient id="vmg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f2f3f6"/><stop offset="1" stop-color="#787e89"/></linearGradient></defs><g stroke="url(#vmg)" stroke-width="3" stroke-linecap="round"><line x1="3" y1="16.5" x2="15" y2="4.5"/><line x1="8.5" y1="18" x2="17" y2="9.5"/><line x1="14" y1="19.5" x2="19" y2="14.5"/></g></svg><b>MillenAI</b></span>
-    <i class="vsub">__APP_VER__</i>
+    <span class="vghost" title="MillenAI"><svg id="vmark" viewBox="0 0 20 20" aria-hidden="true"><defs><linearGradient id="vmg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f2f3f6"/><stop offset="1" stop-color="#787e89"/></linearGradient></defs><g stroke="url(#vmg)" stroke-width="3" stroke-linecap="round"><line x1="3" y1="16.5" x2="15" y2="4.5"/><line x1="8.5" y1="18" x2="17" y2="9.5"/><line x1="14" y1="19.5" x2="19" y2="14.5"/></g></svg><b>MillenAI</b> <i class="vsub">__APP_VER__</i></span>
 <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
