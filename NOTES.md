@@ -1891,3 +1891,9 @@ Five gaps that read as backyard-project, all closed:
   contradicting the new halves check (page was correct), but the hole
   was real. Gauntlet now runs unpiped (redirect to a log, tail after)
   so a red scorecard actually stops the train.
+
+## 6 beta 210 — one line, one size
+- Wordmark and version now share 12.5px and a baseline: .vsub came up
+  from 9.5px, tracking matched at .18em, and #brand-row switched to
+  align-items:baseline (buttons opt back to center) — the version no
+  longer floats above the wordmark's line.

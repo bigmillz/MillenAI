@@ -6042,7 +6042,8 @@ body.resizing{cursor:col-resize;user-select:none}
 /* the 34px brand outgrew a single row (clipped to "lenAI" beside the
    buttons): the name owns its line now, controls sit beneath it */
 #brand-wrap{padding:0 6px 5px}
-#brand-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#brand-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
+#brand-row button{align-self:center}
 #brand-row #newchat{margin-left:2px}
 #update-flag{margin-top:4px}
 #update-flag{
@@ -6098,9 +6099,10 @@ body.resizing{cursor:col-resize;user-select:none}
 }
 .vghost b{font-weight:400}
 #vmark{width:15px;height:15px;margin-right:2px;vertical-align:-2.5px}
-.vsub{font-style:normal;font-family:var(--mono);font-size:9.5px;
-  letter-spacing:.22em;text-transform:uppercase;
-  color:rgba(255,255,255,.38);margin-right:auto;align-self:center}
+/* same size as the wordmark, baselines locked (6b210) */
+.vsub{font-style:normal;font-family:var(--mono);font-size:12.5px;
+  letter-spacing:.18em;text-transform:uppercase;line-height:1.2;
+  color:rgba(255,255,255,.38);margin-right:auto}
 
 #newchat,#settings-btn{
   width:28px;height:28px;flex-shrink:0;
