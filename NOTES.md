@@ -1947,3 +1947,7 @@ Five gaps that read as backyard-project, all closed:
   it — painted/paintdone land, no console errors.
 - It was born in 3.x as the loading-bar payoff and got its own drop
   in 5.2. Pour one out; the greeting carries the personality now.
+- b214 FOLLOW-UP: one straggler survived the sweep — "Let's fucking
+  go." in the GREETING ROTATION (lowercase; the removal grep was
+  case-sensitive). Gone now, and the gauntlet check went
+  case-insensitive. Sweeps grep -i or they aren't sweeps.

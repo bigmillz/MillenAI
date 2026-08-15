@@ -8921,7 +8921,7 @@ async function send(){
 const GREETINGS=[
   // NYC-MAJORITY, per Patrick — bodega warmth, subway pace. No church,
   // no startup-speak, nothing mean. A few plain ones for balance.
-  "What's up?","Let's fucking go.","Yo.","What's good?",
+  "What's up?","Yo.","What's good?",
   "What's good dawg?","Whaddaya need?","Let's get it.","Hit me.",
   "What's the move?","Say less.","Let's cook.","Bet — what's up?",
   "Lay it on me.","What's the word?","Let's run it.","What's the play?",
