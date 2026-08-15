@@ -593,6 +593,49 @@ def cloud_ok_providers() -> list:
             and v.get("base") and v.get("model")]
 
 
+def cloud_bench() -> list:
+    """(label, conf) pairs that draft SIMULTANEOUSLY in councils
+    (6b220, per Patrick: 'ALL available cloud models… not just one'):
+    each working provider fields its picked model plus one alternate
+    from its stored inventory (a pro-class sibling when there is one).
+    Capped at two per provider — free tiers have rate limits."""
+    bench = []
+    for c in cloud_ok_providers():
+        bench.append((c["name"], c))
+        alts = [m for m in c.get("models", []) if m != c.get("model")]
+        alt = next((m for m in alts if "pro" in m.lower()
+                    or "120b" in m.lower() or "70b" in m.lower()),
+                   alts[0] if alts else "")
+        if alt:
+            c2 = dict(c)
+            c2["model"] = alt
+            bench.append((alt, c2))
+    return bench
+
+
+def compositor_ladder() -> list:
+    """Confs to try for the COMPOSITE, strongest first (6b220): Claude,
+    then Gemini (upgraded to its pro model when the inventory has
+    one), then Groq. Local Gemma 4 stays the no-cloud floor — it was
+    only ever the best LOCAL compositor."""
+    d = _cloud_all()
+    pv = d.get("providers") or {}
+    out = []
+    for pid in ("claude", "gemini", "groq"):
+        c = pv.get(pid)
+        if not (c and c.get("status", "ok") == "ok" and c.get("key")
+                and c.get("base") and c.get("model")):
+            continue
+        c = dict(c)
+        if pid == "gemini":
+            pro = next((m for m in c.get("models", [])
+                        if "pro" in m.lower()), "")
+            if pro:
+                c["model"] = pro
+        out.append(c)
+    return out
+
+
 def cloud_stream(messages: list, emit) -> bool:
     """Stream from the configured cloud endpoint. False = fall back local."""
     c = cloud_conf()
@@ -3548,16 +3591,16 @@ def run_council(labels: list, messages: list, emit, status,
     # loop — frontier voices join the council at zero local cost.
     cloud_threads = []
     if load_prefs(None).get("turbo"):
-        def _cloud_draft(conf):
-            status(f"asking {conf['name']} \u00b7 cloud")
+        def _cloud_draft(lbl, conf):
+            status(f"asking {lbl} \u00b7 cloud")
             t = strip_think(cloud_text(conf, messages))
             if t and not _looks_degenerate(t):
-                took_part(conf["name"], t)
+                took_part(lbl, t)
             else:
-                took_part(conf["name"], "(no answer \u2014 cloud)")
-        for _c in cloud_ok_providers():
-            _th = threading.Thread(target=_cloud_draft, args=(_c,),
-                                   daemon=True)
+                took_part(lbl, "(no answer \u2014 cloud)")
+        for _lbl, _c in cloud_bench():
+            _th = threading.Thread(target=_cloud_draft,
+                                   args=(_lbl, _c), daemon=True)
             _th.start()
             cloud_threads.append(_th)
 
@@ -3645,7 +3688,7 @@ def run_council(labels: list, messages: list, emit, status,
     # feed the merger only the strongest few answers, each truncated:
     # an unbounded merge prompt overflows small models' context and sends
     # them into repetition loops (seen in the wild with 8 full drafts)
-    cloud_names = {p["name"] for p in cloud_ok_providers()}
+    cloud_names = {lbl for lbl, _c in cloud_bench()}
     rank = {l: i for i, l in enumerate(MERGE_RANK)}
     good.sort(key=lambda d: -1 if d[0] in cloud_names
               else rank.get(d[0], 99))
@@ -3696,12 +3739,11 @@ def run_council(labels: list, messages: list, emit, status,
     # merge — seen in the wild as "engine returned nothing" after 3 good
     # drafts), the best draft still ships: with good answers in hand there
     # is no failure mode where the user gets nothing.
-    # OFFLOAD THE MERGE (6b219): the composite is the heaviest single
-    # step — hand it to the active cloud model when a key works. Local
-    # Gemma remains the no-key/failed path, unchanged below.
+    # THE COMPOSITOR LADDER (6b220): try the strongest working cloud
+    # first — Claude, then Gemini (pro when available), then Groq —
+    # falling through on any failure. Local Gemma stays the floor.
     if load_prefs(None).get("turbo"):
-        _cc = cloud_conf()
-        if _cc:
+        for _cc in compositor_ladder():
             _t = strip_think(cloud_text(_cc, synth))
             if _t and len(_t) > 120 and not _looks_degenerate(_t):
                 emit(_t)
@@ -5794,7 +5836,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("X-Web-Search", "1" if query else "0")
         xm_names = list(council)
         if len(council) > 1 and load_prefs(None).get("turbo"):
-            xm_names += [c["name"] for c in cloud_ok_providers()]
+            xm_names += [lbl for lbl, _c in cloud_bench()]
         xm = ", ".join(xm_names)[:300]
         self.send_header("X-Models", xm)
         self.end_headers()

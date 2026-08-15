@@ -2031,3 +2031,23 @@ Five gaps that read as backyard-project, all closed:
 - Verified live with Patrick's real Groq key: Thinking run showed
   compositing… then settled to tier, and the meta badge read CLOUD —
   the composite came from Groq's 120B, not local Gemma.
+
+## 6 beta 220 — the bench and the ladder
+- PATRICK'S QUESTION ("will this still use gemma 4 to composite?")
+  had the right instinct and an outdated premise: Gemma 4 was only
+  ever the best LOCAL compositor. With frontier keys live the answer
+  is a LADDER, not a name.
+- CLOUD BENCH v2: each working provider fields its picked model PLUS
+  one alternate from its stored inventory (pro/120b/70b-class
+  preferred), capped at two per provider for free-tier rate limits —
+  all drafting simultaneously with the local loop. On Patrick's real
+  config that's Groq 120B + Gemini 3 Flash + Gemini 2.5 Pro, three
+  frontier drafts beside three local ones.
+- COMPOSITOR LADDER: Claude -> Gemini (auto-upgraded to its pro
+  model when the inventory has one) -> Groq -> local Gemma 4 as the
+  floor. First non-degenerate result ships; every failure falls
+  through. cloud_bench()/compositor_ladder() are shared by
+  run_council and the X-Models header so the who-label and drafts
+  panel name the frontier voices correctly.
+- Verified live on real keys: Thinking run -> cloud badge, tier at
+  rest, and the final text reads like the pro model that wrote it.
