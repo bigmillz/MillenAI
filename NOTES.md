@@ -1860,3 +1860,14 @@ Five gaps that read as backyard-project, all closed:
 - SHELL LESSON No. 2 this beta line: a bare "cat >> file" with no
   input hangs reading stdin — it ate a 10-minute timeout between the
   gauntlet and the release.
+
+## 6 beta 208 — version numbers that say something
+- UPDATE OFFERS name both beta builds: check_update appends the tag's
+  build when the release title ends in "beta" ("6 beta 208"), and
+  "current" ships as short_version() — so the dialog reads
+  "6 beta 208 • you have 6 beta 207", never "6.0.0 to 6.0.0".
+- TRAILING-ZERO TRUNCATION everywhere a version is DISPLAYED:
+  short_version() loops off .0s — 6.0.0 -> 6, 6.1.0 -> 6.1, 6.1.1
+  untouched. Artifacts/compare paths still use APP_VERSION raw.
+  The same truncation applies to the numeric part of release titles
+  in the offer.
