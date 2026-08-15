@@ -1,4 +1,4 @@
-"""MillenAI app icon (5.3.7: diagonal bars).
+"""Concorde app icon (6.1: touching full-bleed greyscale bars).
 
 The artwork fills the FULL Apple icon grid — an 824x824 squircle on
 the 1024 canvas (margins 100, corner radius ~185); anything bigger
@@ -19,8 +19,8 @@ M0 = 100            # Apple grid margin
 SQ = S - 2 * M0     # 824 squircle
 RAD = 185           # Apple's corner radius at this scale
 
-# the About-panel SVG's gradient: #8b5cf6 -> #7d8fff -> #4cc9e0
-G_STOPS = [(139, 92, 246), (125, 143, 255), (76, 201, 224)]
+# 6.1: greyscale — bright silver at the diagonal, steel at the corner
+G_STOPS = [(242, 243, 246), (183, 188, 198), (120, 126, 137)]
 # viewBox-120 geometry straight from the SVG in millenai.py
 BARS = [(18, 62, 14, 40), (39, 44, 14, 58), (60, 30, 14, 72),
         (81, 52, 14, 50)]
@@ -60,21 +60,20 @@ def bars_layer():
     d = ImageDraw.Draw(lay)
     u = (math.sqrt(.5), -math.sqrt(.5))     # bar axis: up-right "/"
     v = (math.sqrt(.5), math.sqrt(.5))      # step: toward bottom-right
-    w = 72 * X                              # bar thickness
-    step = 108 * X                          # centre-to-centre spacing
-    off0 = 70 * X                           # first bar past the diagonal
-    lens = [540, 392, 244, 104]             # tuned to the 824 grid
-    for k, L in enumerate(lens):
-        Lx = L * X
-        c = grad_at(k / (len(lens) - 1) * 0.9)
-        cx = S2 / 2 + v[0] * (off0 + step * k)
-        cy = S2 / 2 + v[1] * (off0 + step * k)
-        x0, y0 = cx - u[0] * Lx / 2, cy - u[1] * Lx / 2
-        x1, y1 = cx + u[0] * Lx / 2, cy + u[1] * Lx / 2
+    # 6.1, per Patrick: bars TOUCH (step == width) and STRETCH past the
+    # tile — the squircle mask at composite time crops them flush to
+    # the icon edge, so the stripes bleed edge-to-edge with no margin.
+    w = 118 * X
+    n = 6                                    # covers centre -> corner
+    L = int(S * 1.6) * X                     # crosses the whole tile
+    for k in range(n):
+        c = grad_at(k / (n - 1))
+        off = (w / 2 + w * k) / X            # touching: no gap
+        cx = S2 / 2 + v[0] * off * X
+        cy = S2 / 2 + v[1] * off * X
+        x0, y0 = cx - u[0] * L / 2, cy - u[1] * L / 2
+        x1, y1 = cx + u[0] * L / 2, cy + u[1] * L / 2
         d.line([(x0, y0), (x1, y1)], fill=c + (255,), width=w)
-        for (ex, ey) in ((x0, y0), (x1, y1)):
-            d.ellipse((ex - w / 2, ey - w / 2, ex + w / 2, ey + w / 2),
-                      fill=c + (255,))
     return lay.resize((S, S), Image.LANCZOS)
 
 

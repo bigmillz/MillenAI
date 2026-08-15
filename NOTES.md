@@ -1692,3 +1692,28 @@ Five gaps that read as backyard-project, all closed:
 - brand() is a GLOBAL replace on served HTML — before shipping,
   grep the page for URLs containing the repo name (a link to
   bigmillz/MillenAI would be rewritten into a 404). Zero today.
+
+## 6.1 — chrome
+- THE LOOK (per Patrick: "greyscale… techno… not bland, not a visual
+  shitshow"): every rainbow became THE SILVER RAMP (9/7/5-stop
+  greyscale loops with first==last so the shimmer animations keep
+  cycling) — wordmark, canvas halo, LFG drop, celebrate sweep, all
+  progress shimmers, pinwheel, splash, About mark. Violet glow tints
+  went neutral chrome. KEPT COLOURED on purpose: the backdrops (the
+  cinema), content (maps/photos), the red error accent, and the
+  red/blue chromatic-aberration flash in the letter slam — that
+  glitch accent is the "still fun".
+- THE FACE: nailfairy.art loads pragmatica-extended via Adobe Fonts
+  (plus ibm-plex-mono — already ours). Pragmatica is licence-locked;
+  Michroma is the free wide-techno stand-in. New --disp var on
+  display surfaces only: hero h1, .vghost, #lfg, splash. Wide faces
+  run ~1.4x — sizes stepped down (hero 132px -> clamp 8.2vw,
+  vghost 22 -> 16.5) and tracking flipped positive. Michroma has ONE
+  weight: bold requests would synthesize, so weights are pinned 400.
+  Canvas halo font string must match the h1 face by hand — it
+  measures and draws text itself. The splash window is self-contained
+  and needed its own Google Fonts link or it falls back silently.
+- ICON: bars now TOUCH (step == width) and BLEED — drawn overlong and
+  cropped flush by the squircle mask at composite. Silver ramp,
+  brightest at the diagonal. Body copy and answers keep their faces —
+  readability is not a mood.

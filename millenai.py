@@ -4055,8 +4055,7 @@ body{background:#07080c;color:#ececec;display:flex;align-items:center;
 .wrap{position:relative;display:inline-block;margin:0 0 10px}
 h1{font-size:clamp(44px,9vw,74px);letter-spacing:.01em;margin:0;
   font-weight:700;line-height:1.05;
-  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff,#ff8fd8,#ff8f8f);
+  background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#aeb3bd,#c8ccd5,#f5f6f8);
   background-size:200% 100%;
   -webkit-background-clip:text;background-clip:text;color:transparent;
   -webkit-text-fill-color:transparent;
@@ -4242,8 +4241,7 @@ body{background:#0f1117;color:#ececec;display:flex;align-items:center;
 .door{text-align:center;padding:24px}
 h1{font-size:clamp(44px,9vw,76px);letter-spacing:.06em;margin:0 0 6px;
   font-weight:700;
-  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff,#ff8fd8);
+  background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#f5f6f8,#ff8fd8);
   -webkit-background-clip:text;background-clip:text;color:transparent;
   filter:drop-shadow(0 0 22px rgba(140,150,255,.25))}
 p{color:#8e8e8e;margin:0 0 26px;font-size:15px}
@@ -5868,7 +5866,7 @@ if("__WIN_WIPE__"==="1"&&
 </script>
 <title>MillenAI __APP_VER__</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Michroma&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{
   --bg:#212121;
@@ -5888,6 +5886,7 @@ if("__WIN_WIPE__"==="1"&&
   --mono:'IBM Plex Mono',ui-monospace,monospace;
   --sans:'Space Grotesk',system-ui,sans-serif;
   --helv:'Helvetica Neue',Helvetica,Arial,sans-serif;
+  --disp:'Michroma','Space Grotesk',system-ui,sans-serif;  /* the wide techno face (6.1) */
 }
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%}
@@ -6004,12 +6003,12 @@ body.resizing{cursor:col-resize;user-select:none}
 /* same face as the startup wordmark (5.3, per Patrick) — Space Grotesk
    with the hero's tight tracking; the greys stay exactly as they were */
 .vghost{
-  font-family:var(--sans);font-size:22px;letter-spacing:-.012em;
+  font-family:var(--disp);font-size:16.5px;letter-spacing:.04em;
   color:rgba(255,255,255,.62);user-select:none;cursor:pointer;
   padding-top:0;margin-right:auto;line-height:1.1;
   display:flex;align-items:baseline;gap:8px;
 }
-.vghost b{font-weight:700}
+.vghost b{font-weight:400}
 .vghost i{font-style:normal;font-weight:400;font-size:.82em;
   font-family:var(--mono);color:rgba(255,255,255,.42)}
 .vghost:hover{color:rgba(255,255,255,.85)}
@@ -6064,8 +6063,7 @@ body.resizing{cursor:col-resize;user-select:none}
   background:rgba(255,255,255,.09);
   border:1px solid rgba(255,255,255,.14)}
 #dlstrip .dlfill{height:100%;width:0;border-radius:3px;
-  background:linear-gradient(90deg,#ffdede,#ffedcf,#fbf6cf,#d9f8e6,
-             #d3e9ff,#e0dcff,#ffdede);
+  background:linear-gradient(90deg,#f0f1f4,#c6cad3,#e6e8ec,#a9aeb9,#f0f1f4);
   background-size:220% 100%;transition:width .6s ease}
 body:not(.perf) #dlstrip .dlfill{animation:skyshimmer 3.2s linear infinite}
 #dlstrip .dllbl{font-family:var(--mono);font-size:9.5px;
@@ -6362,8 +6360,7 @@ body.gen #skyload{display:none!important}
   box-shadow:0 6px 30px -10px rgba(0,0,0,.7),
              inset 0 1px 3px rgba(0,0,0,.35)}
 #skyload .fill{height:100%;width:0;border-radius:10px;
-  background:linear-gradient(90deg,#ffdede,#ffedcf,#fbf6cf,#d9f8e6,
-             #d3e9ff,#e0dcff,#ffdede);
+  background:linear-gradient(90deg,#f0f1f4,#c6cad3,#e6e8ec,#a9aeb9,#f0f1f4);
   background-size:220% 100%;
   box-shadow:0 0 22px rgba(255,255,255,.4);
   transition:width .5s ease}
@@ -6380,26 +6377,25 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
    sparks eject, and the whole line pulls through the camera on exit. */
 #lfg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
   z-index:5;pointer-events:none;
-  font-family:'Space Grotesk',sans-serif;font-weight:700;
-  font-size:clamp(34px,4.6vw,58px);letter-spacing:.04em;
+  font-family:var(--disp);font-weight:400;
+  font-size:clamp(30px,4vw,50px);letter-spacing:.06em;
   white-space:nowrap;
-  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff);
+  background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#f5f6f8);
   -webkit-background-clip:text;background-clip:text;color:transparent;
-  filter:drop-shadow(0 4px 26px rgba(140,150,255,.5))}
+  filter:drop-shadow(0 4px 26px rgba(220,225,235,.5))}
 #lfg[hidden]{display:none}
 
 /* wash mode: the parent's own gradient goes dark — each letter carries
    its slice of the palette instead, because animating children under a
    parent background-clip:text repaints unreliably */
-#lfg.wash{background:none;font-size:clamp(46px,7vw,96px);
+#lfg.wash{background:none;font-size:clamp(36px,5.4vw,72px);
   animation:lfgOut .55s cubic-bezier(.5,0,.9,.4) 2.05s forwards}
 @keyframes lfgOut{
   from{opacity:1;transform:translate(-50%,-50%) scale(1);filter:blur(0)}
   to{opacity:0;transform:translate(-50%,-50%) scale(1.65);
      filter:blur(18px)}}
 #lfg.wash .ch{display:inline-block;color:transparent;
-  background:linear-gradient(120deg,var(--c1,#ff8f8f),var(--c2,#8f9dff));
+  background:linear-gradient(120deg,var(--c1,#f5f6f8),var(--c2,#9aa0ac));
   -webkit-background-clip:text;background-clip:text;
   animation:chIn .5s cubic-bezier(.18,.9,.28,1.18) both;
   animation-delay:var(--d,0s)}
@@ -6430,8 +6426,8 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
 #lfg.wash::after{content:"";position:absolute;left:50%;top:50%;
   width:112%;height:2.6em;border-radius:50%;
   border:2px solid rgba(255,255,255,.85);
-  box-shadow:0 0 30px rgba(160,170,255,.8),
-             inset 0 0 20px rgba(160,170,255,.5);
+  box-shadow:0 0 30px rgba(228,231,238,.8),
+             inset 0 0 20px rgba(228,231,238,.5);
   transform:translate(-50%,-50%) scale(.25);opacity:0;
   animation:lfgRing 1s cubic-bezier(.1,.7,.2,1) .95s forwards}
 @keyframes lfgRing{
@@ -6474,7 +6470,8 @@ body.perf #chat-scroll{scroll-behavior:auto}
    same diagonal mask that rides with the band, so glow and colour arrive
    together under it. */
 #hero h1{
-  font-size:132px;font-weight:700;letter-spacing:-.012em;
+  font-family:var(--disp);
+  font-size:clamp(48px,8.2vw,104px);font-weight:400;letter-spacing:.02em;
   position:relative;z-index:0;color:#9a9a9a;-webkit-text-fill-color:#9a9a9a;
 }
 /* The halo is a REAL child element (.halo > span), not ::before: Blink
@@ -6486,8 +6483,7 @@ body.perf #chat-scroll{scroll-behavior:auto}
   position:absolute;left:0;top:0;white-space:nowrap;pointer-events:none;
   /* tile starts and ends on the same color; sliding one full tile
      (background-size 200% -> position 200%) loops seamlessly */
-  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff,#ff8fd8,#ff8f8f);
+  background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#aeb3bd,#c8ccd5,#f5f6f8);
   background-size:200% 100%;
   -webkit-background-clip:text;background-clip:text;
   color:transparent;-webkit-text-fill-color:transparent;
@@ -6617,7 +6613,7 @@ body.perf .msg{animation:none}
 .wtbar{height:3px;border-radius:2px;background:rgba(255,255,255,.09);
   overflow:hidden;margin-bottom:10px}
 .wtbar i{display:block;height:100%;border-radius:2px;
-  background:linear-gradient(90deg,#ffdede,#fbf6cf,#d9f8e6,#d3e9ff,#e0dcff);
+  background:linear-gradient(90deg,#f0f1f4,#c6cad3,#e6e8ec,#b4b9c3,#dfe2e7);
   background-size:220% 100%;transition:width .45s ease}
 body:not(.perf) .wtbar i{animation:skyshimmer 3s linear infinite}
 /* the living pinwheel (5.2): Claude has its flower — ours spins the
@@ -6626,10 +6622,9 @@ body:not(.perf) .wtbar i{animation:skyshimmer 3s linear infinite}
 .wthead .wtbar{flex:1;margin-bottom:0}
 .wtspin{display:inline-block;flex:none;font-style:normal;font-size:14px;
   line-height:1;
-  background:linear-gradient(120deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff);
+  background:linear-gradient(120deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#f5f6f8);
   -webkit-background-clip:text;background-clip:text;color:transparent;
-  filter:drop-shadow(0 0 8px rgba(140,150,255,.35))}
+  filter:drop-shadow(0 0 8px rgba(220,225,235,.35))}
 body:not(.perf) .wtspin{animation:wtspin 1.5s linear infinite}
 @keyframes wtspin{to{transform:rotate(360deg)}}
 .wtrow{display:flex;align-items:center;gap:9px;padding:3px 0;
@@ -7230,8 +7225,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
    an object passing by. A gentle scale-breathe keeps the field liquid. */
 #celebrate .sweep{
   position:absolute;top:-8%;left:-8%;width:116%;height:116%;
-  background:linear-gradient(114deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff,#ff8fd8);
+  background:linear-gradient(114deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#f5f6f8,#ff8fd8);
   opacity:0;mix-blend-mode:screen;filter:saturate(1.2) blur(2px);
   -webkit-mask-image:linear-gradient(114deg,#000 0 28%,transparent 72% 100%);
           mask-image:linear-gradient(114deg,#000 0 28%,transparent 72% 100%);
@@ -7604,13 +7598,13 @@ __AGENT_ROWS__
     <div id="about-head">
     <svg id="about-icon" viewBox="0 0 120 120" aria-hidden="true">
       <defs><linearGradient id="ag" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0" stop-color="#8b5cf6"/><stop offset=".5" stop-color="#7d8fff"/>
-        <stop offset="1" stop-color="#4cc9e0"/></linearGradient></defs>
+        <stop offset="0" stop-color="#f2f3f5"/><stop offset=".5" stop-color="#b7bcc6"/>
+        <stop offset="1" stop-color="#788089"/></linearGradient></defs>
       <rect x="18" y="62" width="14" height="40" rx="6" fill="url(#ag)"/>
       <rect x="39" y="44" width="14" height="58" rx="6" fill="url(#ag)"/>
       <rect x="60" y="30" width="14" height="72" rx="6" fill="url(#ag)"/>
       <rect x="81" y="52" width="14" height="50" rx="6" fill="url(#ag)"/>
-      <circle cx="95" cy="24" r="7" fill="#4cc9e0"/>
+      <circle cx="95" cy="24" r="7" fill="#d5d8df"/>
     </svg>
     <div id="about-name">MillenAI</div>
     <div id="about-ver">Version __APP_VER__</div>
@@ -9596,8 +9590,8 @@ setInterval(()=>{
 // The glow behind the wordmark is PAINTED, not filtered (5.3.5): live
 // CSS blur raster-clipped in Blink and misrendered in WebKit — canvas
 // pixels blurred at draw time leave nothing for a compositor to clip.
-const HALO_PAL=["#ff8f8f","#ffc46e","#f5e663","#7ef0a6",
-                "#6ec7ff","#8f9dff","#c98fff","#ff8fd8","#ff8f8f"];
+const HALO_PAL=["#f5f6f8","#c8ccd5","#9aa0ac","#e2e5ea",
+                "#8f95a1","#d5d8df","#aeb3bd","#c8ccd5","#f5f6f8"];
 let haloOK=null;
 function haloCap(){
   // a no-op ctx.filter would paint SHARP text behind the wordmark —
@@ -9635,8 +9629,8 @@ function haloTick(){
   const x=cv.getContext("2d");
   x.clearRect(0,0,W,H);
   const cs=getComputedStyle(h1);
-  x.font="700 "+(parseFloat(cs.fontSize)*dpr)
-    +"px 'Space Grotesk',sans-serif";
+  x.font="400 "+(parseFloat(cs.fontSize)*dpr)
+    +"px 'Michroma','Space Grotesk',sans-serif";
   x.textBaseline="middle";x.textAlign="center";
   // same travelling phase as the CSS `rainbow` 16s loop on the ::after
   const tw=Math.max(1,x.measureText("MillenAI").width);
@@ -9932,8 +9926,8 @@ function rainbowWipe(){
       // palette and a stagger delay; ring + sparks detonate as the
       // last letters land (~0.95s in), exit pulls through the camera
       const txt="LET’S FUCKING GO.";
-      const pal=["#ff8f8f","#ffc46e","#f5e663","#7ef0a6",
-                 "#6ec7ff","#8f9dff","#c98fff"];
+      const pal=["#f5f6f8","#c8ccd5","#9aa0ac","#e2e5ea",
+                 "#8f95a1","#d5d8df","#f5f6f8"];
       let html="";
       for(let k=0;k<txt.length;k++){
         const f=k/Math.max(1,txt.length-1)*(pal.length-1);
@@ -9945,12 +9939,12 @@ function rainbowWipe(){
       }
       for(let k=0;k<16;k++){
         const a=Math.random()*Math.PI*2,d=90+Math.random()*240;
-        const hue=Math.round(Math.random()*360);
+        const lum=Math.round(70+Math.random()*30);
         html+='<i class="lspk" style="--dx:'+Math.round(Math.cos(a)*d)
           +'px;--dy:'+Math.round(Math.sin(a)*d*.55)
           +'px;--d:'+Math.round(920+Math.random()*260)+'ms;'
-          +'background:hsl('+hue+' 100% 72%);'
-          +'box-shadow:0 0 12px 2px hsl('+hue+' 100% 62%)"></i>';
+          +'background:hsl(220 12% '+lum+'%);'
+          +'box-shadow:0 0 12px 2px hsl(220 14% '+Math.max(45,lum-15)+'%)"></i>';
       }
       g.innerHTML=html;
       g.hidden=false;g.classList.add("wash");
@@ -10560,7 +10554,9 @@ def _mlx_janitor():
 # frameless transparent always-on-top window over the whole screen:
 # WELCOME TO x.y.z zooms out of a blur, a light band sweeps it, and the
 # window destroys itself. Pure theatre, ~3 seconds, Mac only.
-SPLASH_HTML = """<!doctype html><html><head><meta charset="utf-8"><style>
+SPLASH_HTML = """<!doctype html><html><head><meta charset="utf-8">
+<link href="https://fonts.googleapis.com/css2?family=Michroma&display=swap"
+      rel="stylesheet"><style>
 html,body{margin:0;height:100%;background:transparent;overflow:hidden}
 #w{position:fixed;inset:0;display:flex;flex-direction:column;
   align-items:center;justify-content:center;
@@ -10569,12 +10565,11 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
   letter-spacing:.55em;color:#cfcfcf;text-transform:uppercase;
   text-shadow:0 2px 18px rgba(0,0,0,.8);opacity:0;
   animation:helloIn .5s ease .25s forwards}
-#v{font-family:'Helvetica Neue',sans-serif;font-weight:800;
-  font-size:16vw;letter-spacing:.02em;margin-top:6px;
-  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff);
+#v{font-family:'Michroma','Helvetica Neue',sans-serif;font-weight:400;
+  font-size:10.5vw;letter-spacing:.02em;margin-top:6px;
+  background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#f5f6f8);
   -webkit-background-clip:text;background-clip:text;color:transparent;
-  filter:drop-shadow(0 4px 30px rgba(120,140,255,.45));
+  filter:drop-shadow(0 4px 30px rgba(222,226,234,.45));
   animation:vIn 1.1s cubic-bezier(.16,.8,.24,1) both}
 #flash{position:fixed;inset:-20%;pointer-events:none;opacity:0;
   background:linear-gradient(105deg,transparent 30%,
@@ -10584,18 +10579,17 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
   animation:sweep .7s ease-out 1.15s forwards}
 @keyframes vIn{
   0%{opacity:0;transform:scale(3.2);filter:blur(40px)
-     drop-shadow(0 4px 30px rgba(120,140,255,0))}
+     drop-shadow(0 4px 30px rgba(222,226,234,0))}
   55%{opacity:1;filter:blur(4px)
      drop-shadow(-10px 0 rgba(255,60,90,.7))
      drop-shadow(10px 0 rgba(60,170,255,.7))}
   100%{opacity:1;transform:scale(1);filter:blur(0)
-     drop-shadow(0 4px 30px rgba(120,140,255,.45))}}
-#lfgline{font-family:'Helvetica Neue',sans-serif;font-weight:800;
-  font-size:3.1vw;letter-spacing:.09em;margin-top:1.4vh;opacity:0;
-  background:linear-gradient(90deg,#ff8f8f,#ffc46e,#f5e663,#7ef0a6,
-             #6ec7ff,#8f9dff,#c98fff);
+     drop-shadow(0 4px 30px rgba(222,226,234,.45))}}
+#lfgline{font-family:'Michroma','Helvetica Neue',sans-serif;font-weight:400;
+  font-size:2.2vw;letter-spacing:.09em;margin-top:1.4vh;opacity:0;
+  background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#f5f6f8);
   -webkit-background-clip:text;background-clip:text;color:transparent;
-  filter:drop-shadow(0 3px 22px rgba(140,150,255,.45));
+  filter:drop-shadow(0 3px 22px rgba(220,225,235,.45));
   animation:lfgline .8s cubic-bezier(.16,.8,.24,1) 1.35s both}
 @keyframes lfgline{
   0%{opacity:0;transform:translateY(14px) scale(.94);filter:blur(9px)}
@@ -10606,10 +10600,7 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
 @keyframes allout{to{opacity:0;transform:scale(1.07)}}
 #aura{position:fixed;left:50%;top:50%;width:900px;height:900px;
   transform:translate(-50%,-50%) scale(.3);border-radius:50%;opacity:0;
-  background:conic-gradient(from 0deg,rgba(255,143,143,.5),
-    rgba(255,196,110,.5),rgba(245,230,99,.5),rgba(126,240,166,.5),
-    rgba(110,199,255,.5),rgba(143,157,255,.5),rgba(201,143,255,.5),
-    rgba(255,143,143,.5));
+  background:conic-gradient(from 0deg,rgba(245,246,248,.5),rgba(160,166,178,.45),rgba(226,229,234,.5),rgba(140,146,158,.45),rgba(245,246,248,.5));
   filter:blur(70px);mix-blend-mode:screen;
   animation:auraIn 1.4s cubic-bezier(.16,.8,.3,1) .15s both,
             auraSpin 3s linear infinite,allout .5s ease 2.3s forwards}
@@ -10633,7 +10624,7 @@ for(let i=0;i<30;i++){
   const a=Math.random()*Math.PI*2,d=180+Math.random()*380;
   s.style.setProperty("--dx",Math.round(Math.cos(a)*d)+"px");
   s.style.setProperty("--dy",Math.round(Math.sin(a)*d*.6)+"px");
-  s.style.background="hsl("+Math.round(Math.random()*360)+" 100% 70%)";
+  s.style.background="hsl(220 12% "+Math.round(72+Math.random()*26)+"%)";
   s.style.boxShadow="0 0 12px 2px "+s.style.background;
   document.body.appendChild(s);
 }
