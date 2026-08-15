@@ -108,7 +108,7 @@ def short_version(v: str = None) -> str:
     v = v or APP_VERSION
     v = v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 206               # integer compared against the GitHub release tag
+APP_BUILD = 207               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -6078,6 +6078,7 @@ body.resizing{cursor:col-resize;user-select:none}
   display:inline-block;line-height:1.2;white-space:nowrap;
 }
 .vghost b{font-weight:400}
+#vmark{width:15px;height:15px;margin-right:2px;vertical-align:-2.5px}
 .vsub{font-style:normal;font-family:var(--mono);font-size:9.5px;
   letter-spacing:.22em;text-transform:uppercase;
   color:rgba(255,255,255,.38);margin-right:auto;align-self:center}
@@ -6089,7 +6090,9 @@ body.resizing{cursor:col-resize;user-select:none}
   color:var(--accent-hot);cursor:pointer;padding:0;
   transition:border-color .15s,background .15s,color .15s;
 }
-#settings-btn{margin-left:6px;color:var(--dim)}
+#settings-btn{color:var(--dim);margin-top:14px}
+#settings{display:flex;align-items:center;gap:8px}
+#settings #perf-toggle{flex:1}
 #newchat svg{width:15px;height:15px}
 #settings-btn svg{width:15px;height:15px}
 #newchat:hover,#settings-btn:hover{border-color:var(--accent-hot);background:var(--accent-dim);color:var(--text)}
@@ -6655,10 +6658,14 @@ body.perf .msg{animation:none}
   border-radius:18px;padding:11px 16px;white-space:pre-wrap;
   max-width:78%;
 }
+/* precise sans (6.0b207, per Patrick: "match claude code… current
+   font and line gaps don't look very precise") — SF on Mac, tuned
+   tracking, steadier rhythm than the old serif */
 .msg.ai .body{
   padding:0 2px;
-  font-family:ui-serif,Georgia,'Times New Roman',serif;
-  font-size:15.5px;line-height:1.62;letter-spacing:.001em;
+  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
+    'Segoe UI',Inter,sans-serif;
+  font-size:14.75px;line-height:1.7;letter-spacing:-.006em;
 }
 /* code, tables and chips stay in their own faces inside the serif flow */
 .msg.ai .body code,.msg.ai .body pre{font-family:var(--mono)}
@@ -7540,7 +7547,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
     <div id="brand-row">
-    <span class="vghost" title="MillenAI"><b>MillenAI</b></span>
+    <span class="vghost" title="MillenAI"><svg id="vmark" viewBox="0 0 20 20" aria-hidden="true"><defs><linearGradient id="vmg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f2f3f6"/><stop offset="1" stop-color="#787e89"/></linearGradient></defs><g stroke="url(#vmg)" stroke-width="3" stroke-linecap="round"><line x1="3" y1="16.5" x2="15" y2="4.5"/><line x1="8.5" y1="18" x2="17" y2="9.5"/><line x1="14" y1="19.5" x2="19" y2="14.5"/></g></svg><b>MillenAI</b></span>
     <i class="vsub">__APP_VER__</i>
 <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
@@ -7549,7 +7556,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
         <path d="M18.4 2.6a1.7 1.7 0 0 1 2.4 2.4L12.8 13l-3.2.8.8-3.2z"/>
       </svg>
     </button>
-    <button id="settings-btn" title="Settings — preferences &amp; about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg></button>
+    
     <div id="update-flag" hidden title="Install the update">UPDATE</div>
     <div id="models-flag" hidden
          title="More models fit this machine">MODELS AVAILABLE</div>
@@ -7608,6 +7615,7 @@ __AGENT_ROWS__
       <div class="switch"></div>
       Performance mode
     </div>
+    <button id="settings-btn" title="Settings — preferences &amp; about"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1 1.55V21a2 2 0 1 1-4 0v-.09a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.55-1H3a2 2 0 1 1 0-4h.09a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34h.01a1.7 1.7 0 0 0 1-1.55V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.55 1H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.55 1z"/></svg></button>
   </div>
 
   <div id="telemetry">
