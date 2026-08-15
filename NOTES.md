@@ -1759,3 +1759,20 @@ Five gaps that read as backyard-project, all closed:
   pane, rAF loops do NOT.
 - Old .sweep CSS stays (inert); downloads-complete celebration uses
   the cube wave too via the shared rainbowWipe path.
+
+## 6.0 beta 4 — corner mark + the beta channel
+- WORDMARK: frame-wide lasted one beta — now a gpt/gemini-style corner
+  mark (Michroma 12.5px, .18em tracking) inline with the version and
+  controls. The frame-wide look moved to NOTES history.
+- BETA CHANNEL, THE REAL ONE: Settings grew "Beta updates — new
+  builds first, kinks included" above the maintenance stack (styled
+  with the checkbox family). Server: _channel_release() — stable
+  reads /releases/latest (GitHub excludes prereleases), beta opt-in
+  lists releases and takes the newest non-draft. Verified live on
+  /api/update/check: unchecked -> 5.3.7 (v197); checked -> 6.0 beta
+  (v201). Toggling ON immediately re-runs the update check so a
+  waiting beta surfaces at once. download_links() (the DOWNLOAD NOW
+  chip for web guests) deliberately stays stable-only.
+- NB the test instance SHARES prefs.json with the desktop app —
+  toggling prefs in tests must reset them (done here), or the
+  desktop quietly changes channels.

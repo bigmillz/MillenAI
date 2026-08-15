@@ -113,8 +113,12 @@ check("no raw NUL bytes", b"\x00" not in b)
 # assert the MARKUP is gone, not the substring
 check("hero is greeting-only", '<p class="greet"' in page
       and 'class="h1row"' not in page)
-check("frame-wide sidebar wordmark", "--sbw,384px)*.105" in page
+# 6.0b4: the wordmark went SMALL (gpt/gemini corner mark) — assert the
+# compact form + the beta-updates opt-in
+check("corner wordmark + version row", "font-size:12.5px" in page
       and 'class="vsub"' in page)
+check("beta updates opt-in present", 'id="betaup"' in page
+      and "beta_updates" in page)
 check("mobile drawer present", 'id="mburger"' in page)
 check("tier dropdown js present", "tierRows.classList" in page)
 check("arena removed", "arena" not in page.lower())
