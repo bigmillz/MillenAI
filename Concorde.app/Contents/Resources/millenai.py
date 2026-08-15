@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 213               # integer compared against the GitHub release tag
+APP_BUILD = 214               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -4511,8 +4511,6 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     .replace("__SKY_N__", str(len(SKY_SOURCES)))
                     .replace("__SKY_DARK__", json.dumps(SKY_DARK))
                     .replace("__SKY_NYC__", json.dumps(SKY_NYC))
-                    .replace("__SPLASH_LFG__",
-                             "1" if _splash_shown[0] else "0")
                     .replace("__APP_VER__", short_version()))
             body = brand(html).encode("utf-8")
             self.send_response(200)
@@ -6537,78 +6535,6 @@ body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
 #skyload .lbl{margin-top:13px;font-size:13px;letter-spacing:.24em;
   text-transform:uppercase;color:#dfe3ee;font-family:var(--mono);
   text-shadow:0 2px 14px rgba(0,0,0,.7)}
-/* THE DROP (5.2, per Patrick: "insane yet clean", "vertically and
-   horizontally center"): dead center of the WINDOW, both axes. Letters
-   slam in one after another with a chromatic flash, an aurora blooms
-   behind them, an elliptical ring detonates as the word completes,
-   sparks eject, and the whole line pulls through the camera on exit. */
-#lfg{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);
-  z-index:5;pointer-events:none;
-  font-family:var(--disp);font-weight:400;
-  font-size:clamp(30px,4vw,50px);letter-spacing:.06em;
-  white-space:nowrap;
-  background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#f5f6f8);
-  -webkit-background-clip:text;background-clip:text;color:transparent;
-  filter:drop-shadow(0 4px 26px rgba(220,225,235,.5))}
-#lfg[hidden]{display:none}
-
-/* wash mode: the parent's own gradient goes dark — each letter carries
-   its slice of the palette instead, because animating children under a
-   parent background-clip:text repaints unreliably */
-#lfg.wash{background:none;font-size:clamp(36px,5.4vw,72px);
-  animation:lfgOut .55s cubic-bezier(.5,0,.9,.4) 2.05s forwards}
-@keyframes lfgOut{
-  from{opacity:1;transform:translate(-50%,-50%) scale(1);filter:blur(0)}
-  to{opacity:0;transform:translate(-50%,-50%) scale(1.65);
-     filter:blur(18px)}}
-#lfg.wash .ch{display:inline-block;color:transparent;
-  background:linear-gradient(120deg,var(--c1,#f5f6f8),var(--c2,#9aa0ac));
-  -webkit-background-clip:text;background-clip:text;
-  animation:chIn .5s cubic-bezier(.18,.9,.28,1.18) both;
-  animation-delay:var(--d,0s)}
-@keyframes chIn{
-  0%{opacity:0;transform:translateY(.55em) scale(1.6) rotate(6deg);
-     filter:blur(14px) drop-shadow(-8px 0 rgba(255,60,90,.8))
-            drop-shadow(8px 0 rgba(60,170,255,.8))}
-  62%{opacity:1;transform:translateY(-.04em) scale(1);
-     filter:blur(0) drop-shadow(-3px 0 rgba(255,60,90,.5))
-            drop-shadow(3px 0 rgba(60,170,255,.5))}
-  100%{opacity:1;transform:none;filter:blur(0)}}
-/* aurora bloom behind the line, screen-blended so the city glows through */
-#lfg.wash::before{content:"";position:absolute;left:50%;top:50%;
-  width:2.4em;height:2.4em;border-radius:50%;z-index:-1;
-  background:conic-gradient(from 40deg,rgba(255,143,143,.5),
-    rgba(255,196,110,.5),rgba(245,230,99,.5),rgba(126,240,166,.5),
-    rgba(110,199,255,.5),rgba(143,157,255,.5),rgba(201,143,255,.5),
-    rgba(255,143,143,.5));
-  filter:blur(46px);mix-blend-mode:screen;
-  transform:translate(-50%,-50%) scale(.3);opacity:0;
-  animation:lfgBloom 2.1s cubic-bezier(.16,.8,.3,1) .1s forwards}
-@keyframes lfgBloom{
-  0%{opacity:0;transform:translate(-50%,-50%) scale(.3)}
-  30%{opacity:.85}
-  70%{opacity:.7;transform:translate(-50%,-50%) scale(1.5)}
-  100%{opacity:0;transform:translate(-50%,-50%) scale(1.7)}}
-/* the shockwave: an ellipse hugging the line, detonating as it lands */
-#lfg.wash::after{content:"";position:absolute;left:50%;top:50%;
-  width:112%;height:2.6em;border-radius:50%;
-  border:2px solid rgba(255,255,255,.85);
-  box-shadow:0 0 30px rgba(228,231,238,.8),
-             inset 0 0 20px rgba(228,231,238,.5);
-  transform:translate(-50%,-50%) scale(.25);opacity:0;
-  animation:lfgRing 1s cubic-bezier(.1,.7,.2,1) .95s forwards}
-@keyframes lfgRing{
-  0%{opacity:.9;transform:translate(-50%,-50%) scale(.25)}
-  100%{opacity:0;transform:translate(-50%,-50%) scale(2.6)}}
-#lfg.wash .lspk{position:absolute;left:50%;top:50%;width:6px;height:6px;
-  border-radius:50%;mix-blend-mode:screen;opacity:0;
-  animation:lspkOut 1s cubic-bezier(.1,.75,.2,1) forwards;
-  animation-delay:var(--d,1s)}
-@keyframes lspkOut{
-  0%{opacity:0;transform:translate(0,0) scale(1)}
-  12%{opacity:1}
-  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.25)}}
-
 /* the band crosses the full viewport ~0.55s..2.0s; the backdrop's reveal
    follows it edge-for-edge, unlike the wordmark's tighter window */
 body.painting #sky-color{
@@ -7735,7 +7661,6 @@ __CODE_ROWS__
     <div class="track"><div class="fill"></div></div>
     <div class="lbl">loading the backdrop</div>
   </div>
-<div id="lfg" hidden>LET&rsquo;S FUCKING GO.</div>
 <div id="palette" hidden>
   <div class="pbox">
     <input id="pq" placeholder="Search chats, or type a command\u2026"
@@ -10292,7 +10217,6 @@ function finishSetupChrome(st,stars,anyDl){
    collapses into the wordmark. Shared by the app-open flourish and the
    downloads-complete celebration so the two are always identical. */
 let wipeBusy=false;
-let lfgWashed=false;
 // THE CUBE WAVE (6.0b3, per Patrick: "dark techno party… not chrome
 // chevrolet", after Claude Code's dithered effort meter): a grid of
 // quantized cells sweeps the window as one front — dark rumble ahead
@@ -10347,50 +10271,6 @@ function rainbowWipe(){
   const cel=$("#celebrate");
   if(perf||!cel||wipeBusy)return;         // performance mode: no theatre
   wipeBusy=true;
-  // the boot ritual: once per launch, "LFG, BITCH." washes over the
-  // hero right as the wordmark and version settle
-  // the version splash carries the line after an update — don't say it
-  // twice in ten seconds (per Patrick: "so it's not redundant")
-  let splashSaidIt="__SPLASH_LFG__"==="1";
-  try{splashSaidIt=splashSaidIt
-    ||sessionStorage.getItem("millen.splashlfg")==="1";
-    if(splashSaidIt)sessionStorage.setItem("millen.splashlfg","1");}
-  catch(e){}
-  if(!lfgWashed&&$("#hero")&&!splashSaidIt){
-    lfgWashed=true;
-    setTimeout(()=>{
-      const g=$("#lfg");
-      if(!g||!$("#hero"))return;
-      // THE DROP: each char is its own span carrying a slice of the
-      // palette and a stagger delay; ring + sparks detonate as the
-      // last letters land (~0.95s in), exit pulls through the camera
-      const txt="LET’S FUCKING GO.";
-      const pal=["#f5f6f8","#c8ccd5","#9aa0ac","#e2e5ea",
-                 "#8f95a1","#d5d8df","#f5f6f8"];
-      let html="";
-      for(let k=0;k<txt.length;k++){
-        const f=k/Math.max(1,txt.length-1)*(pal.length-1);
-        const c1=pal[Math.floor(f)];
-        const c2=pal[Math.min(pal.length-1,Math.floor(f)+1)];
-        html+='<span class="ch" style="--d:'+(k*38)+'ms;--c1:'+c1
-          +';--c2:'+c2+'">'+(txt[k]===" "?"&nbsp;":esc(txt[k]))
-          +'</span>';
-      }
-      for(let k=0;k<16;k++){
-        const a=Math.random()*Math.PI*2,d=90+Math.random()*240;
-        const lum=Math.round(70+Math.random()*30);
-        html+='<i class="lspk" style="--dx:'+Math.round(Math.cos(a)*d)
-          +'px;--dy:'+Math.round(Math.sin(a)*d*.55)
-          +'px;--d:'+Math.round(920+Math.random()*260)+'ms;'
-          +'background:hsl(220 12% '+lum+'%);'
-          +'box-shadow:0 0 12px 2px hsl(220 14% '+Math.max(45,lum-15)+'%)"></i>';
-      }
-      g.innerHTML=html;
-      g.hidden=false;g.classList.add("wash");
-      setTimeout(()=>{g.hidden=true;g.classList.remove("wash");
-        g.textContent="LET’S FUCKING GO.";},2700);
-    },2350);
-  }
   cel.hidden=false;
   cel.innerHTML="";
   techParty(cel);
@@ -11061,15 +10941,6 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
      drop-shadow(10px 0 rgba(60,170,255,.7))}
   100%{opacity:1;transform:scale(1);filter:blur(0)
      drop-shadow(0 4px 30px rgba(222,226,234,.45))}}
-#lfgline{font-family:'Michroma','Helvetica Neue',sans-serif;font-weight:400;
-  font-size:2.2vw;letter-spacing:.09em;margin-top:1.4vh;opacity:0;
-  background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#f5f6f8);
-  -webkit-background-clip:text;background-clip:text;color:transparent;
-  filter:drop-shadow(0 3px 22px rgba(220,225,235,.45));
-  animation:lfgline .8s cubic-bezier(.16,.8,.24,1) 1.35s both}
-@keyframes lfgline{
-  0%{opacity:0;transform:translateY(14px) scale(.94);filter:blur(9px)}
-  100%{opacity:1;transform:none;filter:blur(0)}}
 @keyframes helloIn{to{opacity:1}}
 @keyframes sweep{0%{opacity:1;background-position:120% 0}
   100%{opacity:0;background-position:-20% 0}}
@@ -11092,7 +10963,7 @@ html,body{margin:0;height:100%;background:transparent;overflow:hidden}
 </style></head><body>
 <div id="aura"></div>
 <div id="w"><div id="hello">Welcome to</div><div id="v">__V__</div>
-<div id="lfgline">LET&rsquo;S FUCKING GO.</div></div>
+</div>
 <div id="flash"></div>
 <script>
 for(let i=0;i<30;i++){
