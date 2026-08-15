@@ -1776,3 +1776,18 @@ Five gaps that read as backyard-project, all closed:
 - NB the test instance SHARES prefs.json with the desktop app —
   toggling prefs in tests must reset them (done here), or the
   desktop quietly changes channels.
+
+## 6.0 beta 5 — settings truthfulness
+- THE MISSING CHECKBOX WASN'T MISSING: beta 4's /Applications patch
+  never ran — the && chain died at release.sh's TLS timeout and took
+  the cp with it, while the summary still said "app patched". RULE:
+  the app patch is its OWN command with its own grep-verification,
+  never the tail of a release chain.
+- Beta row moved to the TOP of Settings (first set-sec, above
+  Personality) with the running version baked in ("you're on 6.0
+  beta") — discoverable without scrolling past the cloud card.
+- FOLDING POWER: the fleet box hides when Contribute is unchecked;
+  the frontier-cloud key card hides when Use cloud power is
+  unchecked; both restore on re-check (verified with dispatched
+  change events both directions) and populate folded/open from prefs
+  when Settings opens.
