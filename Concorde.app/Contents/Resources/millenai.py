@@ -108,7 +108,7 @@ def short_version(v: str = None) -> str:
     v = v or APP_VERSION
     v = v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 205               # integer compared against the GitHub release tag
+APP_BUILD = 206               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -185,6 +185,18 @@ SYSTEM_PROMPT = {
         "to have real sections. Never on a short answer.\n"
         "- Tables for anything genuinely tabular (prices, specs, "
         "comparisons across the same fields).\n"
+        "- ALL code goes in fenced blocks with the language tag "
+        "(```python, ```js, ```bash) — never inline a multi-line "
+        "snippet into prose. Name files, commands and identifiers "
+        "with single backticks.\n"
+        "- When you explain a SYSTEM — an architecture, a pipeline, "
+        "how components talk — include a flow diagram in a ```flow "
+        "fence. One edge per line, 'A -> B', with an optional note "
+        "in parentheses: 'Hermes runtime (loop, memory, tools) -> "
+        "Model endpoint (local or hosted)'. Three to eight edges; "
+        "node names stay short. The app renders it as a real "
+        "diagram, so use it whenever boxes-and-arrows would beat a "
+        "paragraph.\n"
         "- No wall of text, no run-on paragraphs, no bullet soup where a "
         "sentence would do.\n\n"
         "When you don't know, say so plainly. NEVER "
@@ -6781,6 +6793,35 @@ body:not(.perf) .wtrow.run .wtdot{animation:blink 1s ease-in-out infinite}
   border-radius:var(--radius);padding:13px 15px;overflow-x:auto;margin:0 0 10px;
 }
 .body pre code{background:none;border:none;padding:0;color:var(--text);font-size:12.5px}
+/* code CARDS (6.0b206): language bar on top, mono body, token colors —
+   inline code goes warm so it pops against the serif like Claude's */
+.codecard{margin:0 0 12px;border-radius:var(--radius);overflow:hidden;
+  border:1px solid rgba(255,255,255,.10)}
+.codecard .codebar{font-family:var(--mono);font-size:9.5px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
+  padding:6px 14px;background:rgba(255,255,255,.045);
+  border-bottom:1px solid rgba(255,255,255,.07)}
+.codecard pre{margin:0;border:none;border-radius:0}
+.body code{color:#e8a08f}
+.body pre code{color:#dfe2e8}
+.hkw{font-style:normal;color:#9fb8e8;font-weight:600}
+.hstr{font-style:normal;color:#a8cf9f}
+.hnum{font-style:normal;color:#d8c08f}
+.hcom{font-style:normal;color:#7c7e85}
+/* flow diagrams: glass boxes in layers, SVG wires behind them */
+.flowchart{position:relative;margin:6px 0 14px;padding:6px 0}
+.frow{display:flex;justify-content:center;gap:18px;margin:0 0 34px}
+.frow:last-of-type{margin-bottom:0}
+.fnode{position:relative;z-index:1;min-width:130px;max-width:220px;
+  text-align:center;padding:10px 14px;border-radius:11px;
+  background:rgba(22,24,30,.88);border:1px solid rgba(255,255,255,.16);
+  box-shadow:0 8px 24px -12px rgba(0,0,0,.8)}
+.fnode b{display:block;font-family:var(--sans);font-size:13px;
+  font-weight:600;color:#fff;letter-spacing:.01em}
+.fnode span{display:block;font-family:var(--mono);font-size:10px;
+  color:var(--faint);margin-top:3px;letter-spacing:.02em}
+.fwires{position:absolute;inset:0;width:100%;height:100%;
+  pointer-events:none;z-index:0}
 .body strong{color:#fff;font-weight:600}
 .body em{color:var(--text)}
 .body a{color:var(--accent-hot);text-decoration:none;
@@ -8078,6 +8119,100 @@ modeShow("ai");
 // open one tier of the ladder at a time instead of a wall of models
 /* ------------------------------------------------------ markdown-lite */
 function esc(s){return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");}
+/* mini-highlighter (6.0b206): four token classes, good enough to make
+   code read as CODE — comments, strings, keywords, numbers. Input is
+   already HTML-escaped. */
+const HL_KW=new Set(("def return if else elif for while import from as with try except finally "
+ +"class lambda pass break continue yield async await raise in not and or is None True False "
+ +"function const let var new typeof instanceof this null undefined true false export default "
+ +"switch case do fn pub struct impl match mut use mod echo fi then esac done local sudo").split(" "));
+function hilite(code,lang){
+  return code.replace(
+    /(&quot;.*?&quot;|&#39;.*?&#39;|`[^`]*`)|((?:^|\s)(?:#|\/\/)[^\n]*)|\b(\d+(?:\.\d+)?)\b|\b([A-Za-z_][A-Za-z0-9_]*)\b/gm,
+    (m,str,com,num,word)=>{
+      if(str)return '<i class="hstr">'+str+"</i>";
+      if(com)return '<i class="hcom">'+com+"</i>";
+      if(num)return '<i class="hnum">'+num+"</i>";
+      if(word&&HL_KW.has(word))return '<i class="hkw">'+word+"</i>";
+      return m;
+    });
+}
+/* the flow renderer (6.0b206, per Patrick: "diagrams like claude"):
+   parses 'A -> B' edges (optional '(note)' per node), layers nodes by
+   topology, and lays them out as glass boxes with SVG arrows. Small
+   graphs only — exactly the boxes-and-arrows an explanation needs. */
+function flowDiagram(src){
+  const edges=[],nodes=new Map();
+  const norm=t=>{
+    t=t.trim();
+    const m=/^(.*?)\s*\(([^)]*)\)\s*$/.exec(t);
+    const name=(m?m[1]:t).trim(),note=m?m[2].trim():"";
+    if(name&&!nodes.has(name))nodes.set(name,{note:note});
+    else if(name&&note&&!nodes.get(name).note)nodes.get(name).note=note;
+    return name;
+  };
+  src.split(/\n/).forEach(line=>{
+    const parts=line.split(/-+&gt;|→/).map(x=>x.trim()).filter(Boolean);
+    for(let i=0;i+1<parts.length;i++){
+      const a=norm(parts[i]),b=norm(parts[i+1]);
+      if(a&&b)edges.push([a,b]);
+    }
+  });
+  if(!edges.length)return "<pre><code>"+src+"</code></pre>";
+  if(nodes.size>14)return "<pre><code>"+src+"</code></pre>";
+  // layer = longest path from a root
+  const depth={};
+  const inc={};edges.forEach(([a,b])=>{inc[b]=(inc[b]||0)+1;});
+  const dfs=(n,d)=>{
+    if(d>nodes.size)return;                 // cycle guard
+    depth[n]=Math.max(depth[n]||0,d);
+    edges.filter(e=>e[0]===n).forEach(e=>dfs(e[1],d+1));
+  };
+  [...nodes.keys()].filter(n=>!inc[n]).forEach(n=>dfs(n,0));
+  [...nodes.keys()].forEach(n=>{if(depth[n]==null)dfs(n,0);});
+  const layers=[];
+  [...nodes.keys()].forEach(n=>{
+    (layers[depth[n]]=layers[depth[n]]||[]).push(n);
+  });
+  const rows=layers.map(names=>
+    '<div class="frow">'+names.map(n=>
+      '<div class="fnode" data-n="'+esc(n)+'"><b>'+esc(n)+"</b>"
+      +(nodes.get(n).note?"<span>"+esc(nodes.get(n).note)+"</span>":"")
+      +"</div>").join("")+"</div>").join("");
+  // arrows are drawn AFTER layout by wireFlow (needs real positions)
+  // URI-encoded: esc() leaves double quotes alone, which truncated the
+  // attribute at the JSON's first quote (seen live)
+  return '<div class="flowchart" data-edges="'
+    +encodeURIComponent(JSON.stringify(edges))+'">'+rows
+    +'<svg class="fwires"></svg></div>';
+}
+// connect the boxes once they have geometry; re-run on resize
+function wireFlow(scope){
+  (scope||document).querySelectorAll(".flowchart").forEach(fc=>{
+    const svg=fc.querySelector(".fwires");if(!svg)return;
+    let edges=[];
+    try{edges=JSON.parse(decodeURIComponent(fc.dataset.edges));}
+    catch(e){return;}
+    const R=fc.getBoundingClientRect();
+    svg.setAttribute("viewBox","0 0 "+R.width+" "+R.height);
+    svg.innerHTML='<defs><marker id="farr" viewBox="0 0 8 8" refX="7" refY="4" '
+      +'markerWidth="6" markerHeight="6" orient="auto">'
+      +'<path d="M0 0L8 4L0 8z" fill="rgba(255,255,255,.55)"/></marker></defs>'
+      +edges.map(([a,b])=>{
+        const na=fc.querySelector('.fnode[data-n="'+CSS.escape(a)+'"]');
+        const nb=fc.querySelector('.fnode[data-n="'+CSS.escape(b)+'"]');
+        if(!na||!nb)return "";
+        const ra=na.getBoundingClientRect(),rb=nb.getBoundingClientRect();
+        const x1=ra.left-R.left+ra.width/2,y1=ra.bottom-R.top;
+        const x2=rb.left-R.left+rb.width/2,y2=rb.top-R.top;
+        const my=(y1+y2)/2;
+        return '<path d="M'+x1+" "+y1+" C"+x1+" "+my+","+x2+" "+my+","
+          +x2+" "+(y2-2)+'" fill="none" stroke="rgba(255,255,255,.4)" '
+          +'stroke-width="1.5" marker-end="url(#farr)"/>';
+      }).join("");
+  });
+}
+addEventListener("resize",()=>wireFlow());
 function renderMD(raw){
   // pull out think blocks first (DeepSeek R1)
   let thinks=[];
@@ -8086,8 +8221,15 @@ function renderMD(raw){
   if(openThink){thinks.push(openThink[1].trim());raw=raw.replace(/<think>[\s\S]*$/,"\u0000THINKOPEN"+(thinks.length-1)+"\u0000");}
 
   let s=esc(raw);
-  // fenced code
-  s=s.replace(/```(\w*)\n?([\s\S]*?)(```|$)/g,(_,lang,code)=>"<pre><code>"+code.replace(/\n$/,"")+"</code></pre>");
+  // fenced code — ```flow becomes a real diagram, everything else a
+  // language-labeled card with the mini-highlighter (6.0b206)
+  s=s.replace(/```(\w*)\n?([\s\S]*?)(```|$)/g,(_,lang,code)=>{
+    code=code.replace(/\n$/,"");
+    if(lang.toLowerCase()==="flow")return flowDiagram(code);
+    return '<div class="codecard">'
+      +(lang?'<div class="codebar">'+esc(lang)+'</div>':"")
+      +"<pre><code>"+hilite(code,lang)+"</code></pre></div>";
+  });
   // inline code, bold, italics, headings
   s=s.replace(/`([^`\n]+)`/g,"<code>$1</code>");
   s=s.replace(/\*\*([^*]+)\*\*/g,"<strong>$1</strong>");
@@ -8109,15 +8251,23 @@ function renderMD(raw){
     return pre+"<table><thead><tr>"+head+"</tr></thead><tbody>"
            +body+"</tbody></table>";
   });
+  // setext headers FIRST (small models love them: text over ----- /
+  // =====) or the underline renders as a stray <hr> after plain text
+  s=s.replace(/(^|\n)([^\n]{1,90})\n={3,}[ \t]*(?=\n|$)/g,"$1<h1>$2</h1>");
+  s=s.replace(/(^|\n)([^\n]{1,90})\n-{3,}[ \t]*(?=\n|$)/g,"$1<h2>$2</h2>");
   // horizontal rules and block quotes
   s=s.replace(/(^|\n)(?:---|\*\*\*|___)[ \t]*(?=\n|$)/g,"$1<hr>");
   s=s.replace(/(^|\n)((?:&gt; ?.*(?:\n|$))+)/g,(m,pre,block)=>
     pre+"<blockquote>"+block.trim().split(/\n/)
       .map(l=>l.replace(/^&gt; ?/,"")).join("<br>")+"</blockquote>");
-  // lists
+  // lists — bulleted and numbered
   s=s.replace(/(^|\n)((?:[-*] .*(?:\n|$))+)/g,(m,pre,block)=>{
     const items=block.trim().split(/\n/).map(l=>"<li>"+l.replace(/^[-*] /,"")+"</li>").join("");
     return pre+"<ul>"+items+"</ul>";
+  });
+  s=s.replace(/(^|\n)((?:\d+[.)] .*(?:\n|$)){2,})/g,(m,pre,block)=>{
+    const items=block.trim().split(/\n/).map(l=>"<li>"+l.replace(/^\d+[.)] /,"")+"</li>").join("");
+    return pre+"<ol>"+items+"</ol>";
   });
   s=s.replace(/(^|\n)((?:\d+\. .*(?:\n|$))+)/g,(m,pre,block)=>{
     const items=block.trim().split(/\n/).map(l=>"<li>"+l.replace(/^\d+\. /,"")+"</li>").join("");
@@ -8423,7 +8573,7 @@ function addMsg(role,text,drafts,srcs,mapd,ph,places,loc){
   const who=role==="user"?"you":(whoLabel(lastModels)||tier);
   div.innerHTML='<div class="who">'+who+'</div><div class="body"></div>';
   const body=div.querySelector(".body");
-  if(role==="user")body.textContent=text; else body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text)+photoRow(ph)+(places&&places.length?placesModule(places,loc,mapd):mapCard(mapd));
+  if(role==="user")body.textContent=text; else{body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text)+photoRow(ph)+(places&&places.length?placesModule(places,loc,mapd):mapCard(mapd));requestAnimationFrame(()=>wireFlow(body));}
   if(role!=="user"&&drafts&&drafts.length)paintDrafts(div,drafts,false);
   if(text)msgActions(div,role,text);
   inner.appendChild(div);
@@ -8653,6 +8803,7 @@ async function send(){
            +esc(status)+'…</span>':"")
         +(searched?srcRow(sources):"")
         +renderMD(full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,""))+'<span class="caret"></span>';
+      requestAnimationFrame(()=>wireFlow(body));
       if(curChat===myChat)autoScroll();
     }
   }catch(err){
