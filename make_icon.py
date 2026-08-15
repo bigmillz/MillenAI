@@ -1,11 +1,10 @@
-"""MillenAI app icon (5.3.1: the gradient-bars mark, reverted by ask).
+"""MillenAI app icon (5.3.7: diagonal bars).
 
 The artwork fills the FULL Apple icon grid — an 824x824 squircle on
-the 1024 canvas (margins 100, corner radius ~185), the same envelope
-every stock macOS icon uses; anything bigger gets shrunk by the OS
-and reads SMALLER in the Dock (learned in 5.2). Inside: the About
-panel's bar-chart mark — four rounded bars sweeping purple to teal
-with the teal dot — on quiet charcoal. Bars are drawn 2x and
+the 1024 canvas (margins 100, corner radius ~185); anything bigger
+gets shrunk by the OS and reads SMALLER in the Dock (learned in 5.2).
+Inside: four parallel 45-degree capsules in the lower-right triangular
+half, purple sweeping to teal, on quiet charcoal. Drawn 2x and
 downsampled because PIL draws without antialiasing.
 """
 import os
@@ -46,43 +45,37 @@ def squircle_mask():
 
 
 def bars_layer():
-    """The mark, rendered 2x and downsampled, on transparency.
-
-    Each bar takes its colour from where its centre sits along the
-    group's sweep — matching how the mark reads in the app (left bars
-    violet, right bars toward teal) — with a slight vertical lift so
-    the tops feel lit.
+    """Diagonal bars (5.3.7, per Patrick): four parallel capsules at
+    45 degrees filling the LOWER-RIGHT triangular half of the tile.
+    Centres march down the main diagonal; each bar runs along the
+    anti-diagonal ("/") and shortens toward the corner, so the group
+    reads as a triangle. Purple nearest the centre, teal at the
+    corner — the same sweep as the old upright mark. Drawn 2x
+    (line + end circles = capsule) and LANCZOS-downsampled.
     """
-    X = 2                       # supersample factor
-    scale = (SQ * 0.60) / 120.0   # mark spans ~60% of the tile
-    w = int(120 * scale * X)
-    lay = Image.new("RGBA", (w, w), (0, 0, 0, 0))
+    import math
+    X = 2
+    S2 = S * X
+    lay = Image.new("RGBA", (S2, S2), (0, 0, 0, 0))
     d = ImageDraw.Draw(lay)
-    for (bx, by, bw, bh) in BARS:
-        cx_norm = (bx + bw / 2 - 18) / (95 - 18)   # 0 at first bar, 1 at dot
-        base = grad_at(cx_norm * 0.9)
-        top = lerp(base, (255, 255, 255), 0.18)
-        x0, y0 = bx * scale * X, by * scale * X
-        x1, y1 = (bx + bw) * scale * X, (by + bh) * scale * X
-        r = 6 * scale * X
-        # vertical mini-gradient inside the bar: lit top, base bottom
-        n = max(1, int(y1 - y0))
-        bar = Image.new("RGBA", (int(x1 - x0) + 2, n + 2), (0, 0, 0, 0))
-        bp = bar.load()
-        for yy in range(n):
-            c = lerp(top, base, yy / n)
-            for xx in range(bar.size[0]):
-                bp[xx, yy] = c + (255,)
-        m = Image.new("L", bar.size, 0)
-        ImageDraw.Draw(m).rounded_rectangle(
-            (0, 0, bar.size[0] - 2, n), radius=r, fill=255)
-        lay.paste(bar, (int(x0), int(y0)), m)
-    cx, cy, r = DOT
-    d.ellipse(((cx - r) * scale * X, (cy - r) * scale * X,
-               (cx + r) * scale * X, (cy + r) * scale * X),
-              fill=(76, 201, 224, 255))
-    out_px = int(120 * scale)
-    return lay.resize((out_px, out_px), Image.LANCZOS)
+    u = (math.sqrt(.5), -math.sqrt(.5))     # bar axis: up-right "/"
+    v = (math.sqrt(.5), math.sqrt(.5))      # step: toward bottom-right
+    w = 72 * X                              # bar thickness
+    step = 108 * X                          # centre-to-centre spacing
+    off0 = 70 * X                           # first bar past the diagonal
+    lens = [540, 392, 244, 104]             # tuned to the 824 grid
+    for k, L in enumerate(lens):
+        Lx = L * X
+        c = grad_at(k / (len(lens) - 1) * 0.9)
+        cx = S2 / 2 + v[0] * (off0 + step * k)
+        cy = S2 / 2 + v[1] * (off0 + step * k)
+        x0, y0 = cx - u[0] * Lx / 2, cy - u[1] * Lx / 2
+        x1, y1 = cx + u[0] * Lx / 2, cy + u[1] * Lx / 2
+        d.line([(x0, y0), (x1, y1)], fill=c + (255,), width=w)
+        for (ex, ey) in ((x0, y0), (x1, y1)):
+            d.ellipse((ex - w / 2, ey - w / 2, ex + w / 2, ey + w / 2),
+                      fill=c + (255,))
+    return lay.resize((S, S), Image.LANCZOS)
 
 
 def build():
