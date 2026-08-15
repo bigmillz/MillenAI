@@ -1737,3 +1737,25 @@ Five gaps that read as backyard-project, all closed:
 - STILL 6.0.0 BETA: released as v200 PRERELEASE via the APP_BETA
   path — fleet stays parked on v197; the live instance (raw tags)
   picks the beta up for remote kink-hunting.
+
+## 6.0 beta 3 — the box and the cubes
+- CLAUDE-STYLE EMPTY STATE: the composer floats mid-panel under the
+  greeting, IN FLOW (a pinned top-% collided with two-line greetings,
+  seen live) — #main:has(#hero) flips chat-scroll to auto-height and
+  the wrap to static; with a chat open the same DOM docks back to the
+  bottom untouched. The engine chip moved INSIDE the box (#crow:
+  pill left, actions right) and clicking it opens the sidebar tier
+  picker — with stopPropagation, because the document-level
+  dropdown-closer re-adds "closed" on any outside click and undid the
+  open in the same tick (caught live).
+- THE CUBE WAVE replaces the chrome sweep (per Patrick: "dark techno
+  party… not chrome chevrolet", after Claude Code's dithered meter):
+  a canvas grid of quantized grey cells swept by one diagonal front —
+  dark rumble ahead, strobing decay behind, rare white pings. Sized
+  LAZILY because the viewport can measure 0 at boot. Verified by
+  pixel audit (888/1280 mid-row cells lit at t=0.5, zero colored);
+  the pane throttles rAF when document.hidden, so the loop needs a
+  setTimeout-shimmed rAF to test there — CSS animations run in the
+  pane, rAF loops do NOT.
+- Old .sweep CSS stays (inert); downloads-complete celebration uses
+  the cube wave too via the shared rainbowWipe path.

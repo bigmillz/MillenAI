@@ -6947,6 +6947,14 @@ body:not(.perf) .caret{animation:blink .9s step-end infinite}
   background:linear-gradient(transparent,rgba(5,6,10,.62) 78%);
 }
 body.perf #composer-wrap{background:var(--bg);border-top:1px solid var(--line-soft);padding-top:14px}
+/* the box sits IN FLOW under the greeting — a pinned percentage
+   collided with two-line greetings (seen live) */
+#main:has(#hero) #chat-scroll{flex:0 0 auto;overflow:visible}
+#main:has(#hero) #chat-inner{padding-bottom:0}
+#main:has(#hero) #composer-wrap{
+  position:static;background:none;padding:26px 24px 0}
+#main:has(#hero) #hero{min-height:0;padding-top:23vh;
+  justify-content:flex-start}
 #skyline video{transition:transform 1.1s cubic-bezier(.22,.61,.36,1),
   opacity .9s ease;will-change:transform,opacity}
 /* a new city FADES in — never a hard cut (per Patrick) */
@@ -6979,8 +6987,9 @@ body.perf .msg.ai .body{animation:none}
   border:1px solid rgba(255,255,255,.13);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.07),
              0 18px 50px -22px rgba(0,0,0,.85);
-  border-radius:24px;display:flex;align-items:flex-end;gap:6px;
-  padding:10px 12px;
+  border-radius:24px;display:flex;flex-direction:column;
+  align-items:stretch;gap:2px;
+  padding:12px 14px 10px;
   transition:border-color .18s ease,box-shadow .25s ease;
 }
 #composer:focus-within{
@@ -7022,11 +7031,16 @@ body.perf #composer{box-shadow:none}
 #voicebtn svg{width:17px;height:17px}
 #voicebtn.on{color:var(--accent-hot);background:var(--accent-dim)}
 body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
+/* the settings row INSIDE the box (6.0b3, Claude-style): engine pill
+   left, actions right */
+#crow{display:flex;align-items:center;justify-content:space-between;
+  gap:8px;margin-top:4px}
 #model-chip{
-  max-width:780px;margin:0 auto 8px;pointer-events:auto;
-  font-family:var(--mono);font-size:10.5px;color:var(--faint);
-  padding:0 4px;display:flex;gap:6px;
-}
+  font-family:var(--mono);font-size:10px;color:var(--faint);
+  padding:4px 11px;display:flex;gap:6px;align-items:center;
+  border:1px solid var(--line);border-radius:999px;cursor:pointer;
+  transition:border-color .15s,color .15s;user-select:none}
+#model-chip:hover{border-color:rgba(255,255,255,.3);color:var(--dim)}
 #model-chip b{color:var(--dim);font-weight:500}
 
 /* -------------------------------------------------------------- about */
@@ -7226,6 +7240,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 
 #celebrate{position:fixed;inset:0;z-index:90;pointer-events:none;overflow:hidden}
 #celebrate[hidden]{display:none}
+#cubecv{position:absolute;inset:0}
 /* a diagonal band of light that travels across the window */
 /* What made this read as a ribbon dragged over the window: evenly spaced
    colour stops at uniform opacity, a light blur, and hard rectangular ends
@@ -7541,13 +7556,14 @@ __AGENT_ROWS__
   </div></div>
 
   <div id="composer-wrap">
-    <div id="model-chip">engine <b id="chip-model">Llama 3.2 3B</b></div>
     <div id="imgchips" hidden></div>
     <div id="composer">
 
       <input type="file" id="fpick" multiple hidden
         accept="image/*,.txt,.md,.markdown,.csv,.json,.js,.ts,.py,.html,.css,.log,.sh,.yaml,.yml,.xml,.toml,.rtf">
       <textarea id="input" rows="1" placeholder="How can I help you today?"></textarea>
+      <div id="crow">
+      <div id="model-chip" title="Change engine — opens the picker">engine <b id="chip-model">Llama 3.2 3B</b></div>
       <div id="cbtns">
       <button class="cbtn" id="attach" title="Attach a file">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -7576,6 +7592,7 @@ __AGENT_ROWS__
           <path d="M12 19V5.5"/><path d="M5.8 11.7 12 5.4l6.2 6.3"/>
         </svg>
       </button>
+      </div>
       </div>
     </div>
   </div>
@@ -7845,6 +7862,13 @@ function hideTierPop(){tierPop.hidden=true;}
 // with a caret; clicking it unfolds the rest, picking one folds it back
 const tierRows=$("#tier-rows");
 tierRows.classList.add("closed");
+// the composer's engine pill opens the picker where it lives.
+// stopPropagation: the document-level dropdown-closer re-adds
+// "closed" on any outside click, which undid this instantly
+$("#model-chip").addEventListener("click",ev=>{
+  ev.stopPropagation();
+  modeShow("ai");tierRows.classList.remove("closed");
+});
 $$(".tier").forEach(el=>{
   el.addEventListener("click",ev=>{
     if(tierRows.classList.contains("closed")){
@@ -9920,6 +9944,56 @@ function finishSetupChrome(st,stars,anyDl){
    downloads-complete celebration so the two are always identical. */
 let wipeBusy=false;
 let lfgWashed=false;
+// THE CUBE WAVE (6.0b3, per Patrick: "dark techno party… not chrome
+// chevrolet", after Claude Code's dithered effort meter): a grid of
+// quantized cells sweeps the window as one front — dark rumble ahead
+// of it, strobing greys behind it, rare white pings, everything
+// decaying to black. Pure canvas, ~2.6s, one rAF loop.
+function techParty(cel){
+  const cv=document.createElement("canvas");
+  cv.id="cubecv";cel.appendChild(cv);
+  const ctx=cv.getContext("2d");
+  // sized LAZILY: at boot the viewport can briefly measure 0 (seen in
+  // the pane) — wait for real dimensions instead of drawing into 0x0
+  let W=0,H=0,CS=26,cols=0,rows=0,seed=null;
+  function size(){
+    if(innerWidth<50||innerHeight<50)return false;
+    W=cv.width=innerWidth;H=cv.height=innerHeight;
+    cv.style.width=W+"px";cv.style.height=H+"px";
+    cols=Math.ceil(W/CS);rows=Math.ceil(H/CS);
+    seed=new Float32Array(cols*rows);
+    for(let i=0;i<seed.length;i++)seed[i]=Math.random();
+    return true;
+  }
+  size();
+  const t0=performance.now(),DUR=2600;
+  (function tick(){
+    if(!cel.contains(cv))return;
+    const t=(performance.now()-t0)/DUR;
+    if(t>=1){cv.remove();return;}
+    if(!seed&&!size()){requestAnimationFrame(tick);return;}
+    ctx.clearRect(0,0,W,H);
+    const front=t*1.5-0.15;              // diagonal wavefront, L→R
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+      const u=c/cols*0.8+r/rows*0.2;
+      const sd=seed[r*cols+c];
+      const d=u-front;
+      let a=0,l=0;
+      if(d>0&&d<0.22){                   // ahead: dark rumble
+        a=(1-d/0.22)*0.5*sd;l=6+sd*22;
+      }else if(d<=0&&d>-0.5){            // behind: the party, decaying
+        const k=1+d/0.5;
+        const fl=Math.sin(t*40+sd*80)>0.6-k?1:0.35;   // strobe
+        a=k*0.85*fl;
+        l=sd<0.05?90:14+sd*sd*52*k;      // rare near-white pings
+      }
+      if(a<=0.02)continue;
+      ctx.fillStyle="hsl(228 8% "+Math.round(l)+"% / "+a.toFixed(2)+")";
+      ctx.fillRect(c*CS+1,r*CS+1,CS-2,CS-2);
+    }
+    requestAnimationFrame(tick);
+  })();
+}
 function rainbowWipe(){
   const cel=$("#celebrate");
   if(perf||!cel||wipeBusy)return;         // performance mode: no theatre
@@ -9969,7 +10043,8 @@ function rainbowWipe(){
     },2350);
   }
   cel.hidden=false;
-  cel.innerHTML='<div class="sweep"></div>';
+  cel.innerHTML="";
+  techParty(cel);
   // the wordmark flies in under the band. Measure first — once .flyin is on,
   // the element is scaled and the rect no longer describes its resting place.
   const hero1=$("#hero h1");
