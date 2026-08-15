@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 210               # integer compared against the GitHub release tag
+APP_BUILD = 211               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -6041,9 +6041,15 @@ body.perf #sidebar{
 body.resizing{cursor:col-resize;user-select:none}
 /* the 34px brand outgrew a single row (clipped to "lenAI" beside the
    buttons): the name owns its line now, controls sit beneath it */
-#brand-wrap{padding:0 6px 5px}
-#brand-row{display:flex;align-items:baseline;gap:8px;flex-wrap:wrap}
-#brand-row button{align-self:center}
+#brand-wrap{padding:0 2px 5px}
+/* one axis for everything (6b211): with wordmark and version at the
+   same size/line-height their baselines already agree — centering the
+   row puts the button on the same visual line instead of below it */
+/* NOWRAP (6b211): the new-chat button BELONGS to this line — if the
+   sidebar ever gets truly cramped the version ellipsizes, the button
+   never drops below the text */
+#brand-row{display:flex;align-items:center;gap:5px;flex-wrap:nowrap}
+#brand-row .vsub{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #brand-row #newchat{margin-left:2px}
 #update-flag{margin-top:4px}
 #update-flag{
@@ -6093,7 +6099,7 @@ body.resizing{cursor:col-resize;user-select:none}
    quiet, one row with the version and controls */
 .vghost{
   font-family:var(--disp);text-transform:uppercase;
-  font-size:12.5px;letter-spacing:.18em;
+  font-size:12.5px;letter-spacing:.15em;
   color:rgba(255,255,255,.72);user-select:none;
   display:inline-block;line-height:1.2;white-space:nowrap;
 }
@@ -6101,11 +6107,11 @@ body.resizing{cursor:col-resize;user-select:none}
 #vmark{width:15px;height:15px;margin-right:2px;vertical-align:-2.5px}
 /* same size as the wordmark, baselines locked (6b210) */
 .vsub{font-style:normal;font-family:var(--mono);font-size:12.5px;
-  letter-spacing:.18em;text-transform:uppercase;line-height:1.2;
+  letter-spacing:.06em;text-transform:uppercase;line-height:1.2;
   color:rgba(255,255,255,.38);margin-right:auto}
 
 #newchat,#settings-btn{
-  width:28px;height:28px;flex-shrink:0;
+  width:26px;height:26px;flex-shrink:0;
   display:flex;align-items:center;justify-content:center;
   background:none;border:1px solid var(--line);border-radius:8px;
   color:var(--accent-hot);cursor:pointer;padding:0;
