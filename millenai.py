@@ -929,6 +929,12 @@ def resolve_agent(name):
     return None, a
 
 
+# AGENTS UI IS PULLED (6 beta 209, per Patrick: "until i get the
+# logistics of that sorted") — the AGENTS dict, AGENT_META and the
+# Code tab's two specialists stay live; the Agents TAB and the
+# specialist list are gone from the page until this flips back.
+SHOW_AGENTS = False
+
 # The CODE tab owns the two code specialists (5.2, per Patrick: "pull
 # coding from agents and make it into a 3rd tab"); Agents keeps the rest.
 CODE_AGENTS = ("Coding", "Workspace")
@@ -6161,13 +6167,12 @@ body:not(.perf) #dlstrip .dlfill{animation:skyshimmer 3.2s linear infinite}
    translateX(%) is relative to the pill's OWN width, so 100%/200% land
    exactly on the 2nd/3rd third — no container math needed. */
 #tab-glide{position:absolute;top:3px;bottom:3px;left:3px;
-  width:calc(33.334% - 2px);border-radius:9px;
+  width:calc(50% - 3px);border-radius:9px;
   background:rgba(240,242,248,.94);
   box-shadow:0 2px 10px -3px rgba(0,0,0,.5);
   transition:transform .34s cubic-bezier(.34,1.3,.44,1);
   pointer-events:none}
 #mode-tabs.code #tab-glide{transform:translateX(100%)}
-#mode-tabs.agents #tab-glide{transform:translateX(200%)}
 body.perf #tab-glide{transition:none}
 #mode-tabs .ltab{
   position:relative;z-index:1;
@@ -7594,11 +7599,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
       stroke="currentColor" stroke-width="2" stroke-linecap="round"
       stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/>
       <polyline points="8 6 2 12 8 18"/></svg>Code</span>
-    <span class="ltab" data-m="agents"><svg viewBox="0 0 24 24" fill="none"
-      stroke="currentColor" stroke-width="2" stroke-linecap="round"
-      stroke-linejoin="round"><path
-      d="M12 3l2.1 6.9L21 12l-6.9 2.1L12 21l-2.1-6.9L3 12l6.9-2.1z"/>
-      </svg>Agents</span>
   </div>
   <div id="tier-rows">__TIER_ROWS__</div>
   <div id="code-wrap" hidden>
@@ -7613,10 +7613,6 @@ __CODE_ROWS__
       <div id="ws-note"></div>
     </div>
   </div>
-  <div id="agents-wrap" hidden>
-__AGENT_ROWS__
-  </div>
-
   <div id="model-list">
   <div class="group-label chats">Chats</div>
   <div id="chat-list"></div>
@@ -8041,8 +8037,6 @@ document.addEventListener("click",e=>{
   // clicking anywhere outside the tier list folds it
   if(!e.target.closest||!e.target.closest("#tier-rows"))
     tierRows.classList.add("closed");
-  if(!e.target.closest||!e.target.closest("#agents-wrap"))
-    agentsWrap.classList.add("closed");
   const em=document.getElementById("engmenu");
   if(em&&!e.target.closest("#engmenu")&&!e.target.closest("#model-chip"))
     em.hidden=true;
@@ -8059,11 +8053,9 @@ function modeShow(which){
   uiMode=which;
   $("#tier-rows").hidden=which!=="ai";
   $("#code-wrap").hidden=which!=="code";
-  $("#agents-wrap").hidden=which!=="agents";
   $$("#mode-tabs .ltab").forEach(t=>
     t.classList.toggle("on",t.dataset.m===which));
   $("#mode-tabs").classList.toggle("code",which==="code");
-  $("#mode-tabs").classList.toggle("agents",which==="agents");
   // deferred a tick: setTier(tier) reaches here DURING boot, before the
   // chat state (let chats/curChat, PIN_SVG) below has initialized — a
   // synchronous renderChats() call here is a TDZ crash that kills the
@@ -8088,7 +8080,7 @@ $$("#mode-tabs .ltab").forEach(t=>
 // model path. Picking a tier or model flips back to Standard.
 agent="";localStorage.setItem("millen.agent","");   // AI is the default view
 function paintAgents(){
-  $$("#agents-wrap .agent, #code-wrap .agent").forEach(el=>
+  $$("#code-wrap .agent").forEach(el=>
     el.classList.toggle("on",(el.dataset.agent||"")===agent));
   const chip=$("#chip-model");
   if(agent&&chip)chip.textContent=agent+" agent";
@@ -8102,16 +8094,6 @@ function setAgent(name){
   paintAgents();
   if(typeof wsRefresh==="function")wsRefresh();
 }
-const agentsWrap=$("#agents-wrap");
-agentsWrap.classList.add("closed");
-$$("#agents-wrap .agent").forEach(el=>
-  el.addEventListener("click",ev=>{
-    if(agentsWrap.classList.contains("closed")){
-      ev.stopPropagation();agentsWrap.classList.remove("closed");return;
-    }
-    setAgent(el.dataset.agent||"");
-    agentsWrap.classList.add("closed");
-  }));
 // the CODE tab's two rows: always visible, plain radio behavior
 $$("#code-wrap .agent").forEach(el=>
   el.addEventListener("click",()=>setAgent(el.dataset.agent||"")));
@@ -8128,7 +8110,7 @@ function showAgentPop(el,name){
   tierPop.style.left=Math.round(r.right+10)+"px";
   tierPop.style.top=Math.round(r.top-4)+"px";
 }
-$$("#agents-wrap .agent, #code-wrap .agent").forEach(el=>{
+$$("#code-wrap .agent").forEach(el=>{
   const nm=el.dataset.agent;if(!nm)return;
   el.addEventListener("mouseenter",()=>showAgentPop(el,nm));
   el.addEventListener("mouseleave",hideTierPop);
@@ -9079,7 +9061,10 @@ function renderChats(){
   const el=$("#chat-list");
   // the sidebar shows the ACTIVE LANE only, like Claude: Code lists
   // code chats, Agents lists specialist chats, Chat lists the rest
-  const laneOK=c=>(c.lane||"ai")===uiMode;
+  // agents tab pulled: its lane's chats show under Chat so nothing
+  // a user made ever vanishes from every list
+  const laneOK=c=>uiMode==="code"?(c.lane||"ai")==="code"
+                                 :(c.lane||"ai")!=="code";
   const mine=chats.filter(laneOK);
   const pins=mine.filter(c=>c.pin);
   const rest=mine.filter(c=>!c.pin);
@@ -9101,8 +9086,7 @@ function renderChats(){
     html+=row(c);
   });
   if(!html)html='<div class="cempty">'
-    +(uiMode==="code"?"No code chats yet"
-      :uiMode==="agents"?"No agent chats yet":"No chats yet")+'</div>';
+    +(uiMode==="code"?"No code chats yet":"No chats yet")+'</div>';
   el.innerHTML=html;
   el.querySelectorAll(".chat-item").forEach(it=>{
     const id=it.dataset.id;

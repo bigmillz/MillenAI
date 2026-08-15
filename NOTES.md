@@ -1871,3 +1871,17 @@ Five gaps that read as backyard-project, all closed:
   untouched. Artifacts/compare paths still use APP_VERSION raw.
   The same truncation applies to the numeric part of release titles
   in the offer.
+
+## 6 beta 209 — agents pulled
+- THE AGENTS TAB AND SPECIALIST LIST ARE GONE (per Patrick: "until i
+  get the logistics of that sorted"). Two tabs again — Chat | Code —
+  glide back to halves. DORMANT, NOT DELETED: the AGENTS dict,
+  AGENT_META, showAgentPop and the Hermes definition all stay live
+  (the Code tab's Coding/Workspace rows and their hover cards run on
+  the same machinery). SHOW_AGENTS=False marks the intent; re-adding
+  is the b205 markup + the thirds glide from git history.
+- LANES: chats born in the agents lane fold into the Chat list while
+  the tab is gone (laneOK: code vs not-code) — nothing a user made
+  vanishes from every list. The Hermes hot-dog chat survives visibly.
+- Inert leftovers kept on purpose: #agents-wrap CSS rules (no matching
+  DOM) and the __AGENT_ROWS__ token replace (no token in the page).

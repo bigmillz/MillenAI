@@ -122,8 +122,14 @@ check("beta updates opt-in present", 'id="betaup"' in page
 # 6.0b7: engine dropdown at the chip, Hermes agent, 300px rail
 check("engine dropdown js + meta", "openEngMenu" in page
       and '"Fast"' in page and "engrow" in page)
-check("Hermes agent present with popup meta",
-      'data-agent="Hermes"' in page and "showAgentPop" in page)
+# 6b209: agents UI pulled until the logistics are sorted — two tabs
+# only, no specialist list; the machinery stays dormant (AGENT_META
+# still feeds the Code tab's popups, Hermes waits inside it)
+check("agents tab pulled, machinery dormant",
+      'data-m="agents"' not in page and 'id="agents-wrap"' not in page
+      and "showAgentPop" in page and '"Hermes"' in page)
+check("glide back to halves", "width:calc(50% - 3px)" in page
+      and "translateX(200%)" not in page)
 check("sidebar defaults to 300px", "width:300px;min-width:300px" in page)
 # 6.0b206: rich answers — flow diagrams, code cards, highlighter
 check("flow diagram renderer", "flowDiagram" in page and "wireFlow" in page
