@@ -119,6 +119,12 @@ check("corner wordmark + version row", "font-size:12.5px" in page
       and 'class="vsub"' in page)
 check("beta updates opt-in present", 'id="betaup"' in page
       and "beta_updates" in page)
+# 6.0b7: engine dropdown at the chip, Hermes agent, 300px rail
+check("engine dropdown js + meta", "openEngMenu" in page
+      and '"Fast"' in page and "engrow" in page)
+check("Hermes agent present with popup meta",
+      'data-agent="Hermes"' in page and "showAgentPop" in page)
+check("sidebar defaults to 300px", "width:300px;min-width:300px" in page)
 check("mobile drawer present", 'id="mburger"' in page)
 check("tier dropdown js present", "tierRows.classList" in page)
 check("arena removed", "arena" not in page.lower())

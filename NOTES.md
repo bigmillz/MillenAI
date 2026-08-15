@@ -1801,3 +1801,22 @@ Five gaps that read as backyard-project, all closed:
   updates → check → Include Beta Releases → forget), label shortened
   to exactly that. Top-of-settings placement lasted one beta —
   betas are for finding this out.
+
+## 6.0 beta 205 — slim rail, engine menu, Hermes
+- SIDEBAR defaults 384 -> 300px (was ~30% of the window); dblclick
+  reset and the --sbw fallback follow. SB_MIN 210 still governs.
+- ENGINE MENU: clicking the composer's "engine" pill drops a glass
+  card RIGHT THERE — emoji + name + desc per tier (TIER_META token),
+  hover reuses showTierPop so the bubble lists the actual resolved
+  models, click picks. Positions below the chip on the empty state,
+  above when docked. The document dropdown-closer learned about it.
+  The old behavior (chip opened the SIDEBAR rows) is gone.
+- HERMES, the infamous one: first-class agent (🪽, first among the
+  specialists), picks Hermes 3 8B first. The system prompt sets TONE
+  not permissions — direct, opinionated, no disclaimers, refuses in
+  one sentence when it must. Verified live: "is a hot dog a
+  sandwich" -> flat "No," one argument, zero hedging, on Hermes 3 8B.
+- AGENT POPUPS: hovering any specialist row shows a tierpop-style
+  card (icon, desc, top picks) from the AGENT_META token — the
+  "popup description" ask, and it covers every agent, not just
+  Hermes.
