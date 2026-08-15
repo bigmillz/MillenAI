@@ -1897,3 +1897,14 @@ Five gaps that read as backyard-project, all closed:
   from 9.5px, tracking matched at .18em, and #brand-row switched to
   align-items:baseline (buttons opt back to center) — the version no
   longer floats above the wordmark's line.
+
+## 6 beta 211 — the brand row settles
+- The new-chat button now sits on the TEXT's axis: brand-row is
+  nowrap + center (baseline flex parked the text high against the
+  28px button — measured mids 29/29/29 after). The version never
+  drops or wraps: white-space:nowrap + ellipsis as the cramped-width
+  fallback, and enough width reclaimed (vsub tracking .06em, gaps
+  5px, buttons 26px, wrap padding 2px) that the full "6 beta 210"
+  fits untruncated at the 300px default.
+- Lesson that cost four rounds: flex baseline + tall centered
+  siblings + flex-wrap is a three-way trap — measure mids, not vibes.
