@@ -108,7 +108,7 @@ def short_version(v: str = None) -> str:
     v = v or APP_VERSION
     v = v[:-2] if v.count(".") == 2 and v.endswith(".0") else v
     return v + (" beta" if APP_BETA else "")
-APP_BUILD = 201               # integer compared against the GitHub release tag
+APP_BUILD = 202               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1753,16 +1753,36 @@ def download_links() -> dict:
     return out
 
 
+def _channel_release():
+    """The newest release this machine's CHANNEL allows. Stable reads
+    /releases/latest (GitHub excludes prereleases there); the beta
+    opt-in (Settings) scans the list and takes the newest non-draft —
+    prereleases included. That's the whole beta programme (6.0b4)."""
+    hdrs = {"Accept": "application/vnd.github+json",
+            "User-Agent": "MillenAI"}
+    if load_prefs(None).get("beta_updates"):
+        req = urllib.request.Request(
+            "https://api.github.com/repos/%s/releases?per_page=10"
+            % UPDATE_REPO, headers=hdrs)
+        with urllib.request.urlopen(req, timeout=8) as r:
+            rels = json.loads(r.read().decode("utf-8"))
+        rels = [x for x in rels if not x.get("draft")]
+        if not rels:
+            raise urllib.error.HTTPError(
+                UPDATE_REPO, 404, "no releases", None, None)
+        return rels[0]                    # GitHub lists newest first
+    req = urllib.request.Request(
+        "https://api.github.com/repos/%s/releases/latest" % UPDATE_REPO,
+        headers=hdrs)
+    with urllib.request.urlopen(req, timeout=8) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
 def check_update():
     if not UPDATE_REPO:
         return {"configured": False, "available": False}
     try:
-        req = urllib.request.Request(
-            "https://api.github.com/repos/%s/releases/latest" % UPDATE_REPO,
-            headers={"Accept": "application/vnd.github+json",
-                     "User-Agent": "MillenAI"})
-        with urllib.request.urlopen(req, timeout=8) as r:
-            rel = json.loads(r.read().decode("utf-8"))
+        rel = _channel_release()
     except urllib.error.HTTPError as exc:
         # 404 simply means the repo has no releases yet — not a failure
         note = ("no releases published yet" if exc.code == 404
@@ -6013,15 +6033,13 @@ body.resizing{cursor:col-resize;user-select:none}
    sitting it on the wordmark's baseline hangs it low against the taller type */
 /* same face as the startup wordmark (5.3, per Patrick) — Space Grotesk
    with the hero's tight tracking; the greys stay exactly as they were */
-/* FRAME-WIDE (6.0b2, per Patrick, after nailfairy's NAIL FAIRY):
-   the wordmark spans the sidebar edge to edge and scales with it —
-   --sbw is kept current by setSidebar */
+/* corner mark (6.0b4, per Patrick: "think gpt and gemini") — small,
+   quiet, one row with the version and controls */
 .vghost{
   font-family:var(--disp);text-transform:uppercase;
-  font-size:calc(var(--sbw,384px)*.105);letter-spacing:.045em;
-  color:rgba(255,255,255,.66);user-select:none;
-  display:block;line-height:1.05;white-space:nowrap;
-  padding:2px 0 6px;
+  font-size:12.5px;letter-spacing:.18em;
+  color:rgba(255,255,255,.72);user-select:none;
+  display:inline-block;line-height:1.2;white-space:nowrap;
 }
 .vghost b{font-weight:400}
 .vsub{font-style:normal;font-family:var(--mono);font-size:9.5px;
@@ -7157,24 +7175,25 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #turbo-row{display:flex;gap:8px;align-items:flex-start;font-size:11.5px;
   color:var(--dim);margin:12px 2px 2px;cursor:pointer;line-height:1.5;
   text-align:left}
-#turbo-row input,#contrib-row input,#nolimits-row input,#share-row input{
+#turbo-row input,#contrib-row input,#nolimits-row input,#share-row input,#beta-row input{
   appearance:none;-webkit-appearance:none;
   width:17px;height:17px;flex:none;margin:0;border-radius:5px;
   border:1.5px solid var(--faint);background:rgba(255,255,255,.04);
   cursor:pointer;position:relative;transition:all .15s;
 }
 #turbo-row input:hover,#contrib-row input:hover,#nolimits-row input:hover,
-#share-row input:hover{
+#share-row input:hover,#beta-row input:hover{
   border-color:var(--accent-hot)}
 #turbo-row input:checked,#contrib-row input:checked,
-#nolimits-row input:checked,#share-row input:checked{
+#nolimits-row input:checked,#share-row input:checked,#beta-row input:checked{
   background:var(--accent);border-color:var(--accent)}
 #turbo-row input:checked::after,#contrib-row input:checked::after,
-#nolimits-row input:checked::after,#share-row input:checked::after{
+#nolimits-row input:checked::after,#share-row input:checked::after,
+#beta-row input:checked::after{
   content:"";position:absolute;left:5px;top:1.5px;
   width:4px;height:9px;border:solid #14161c;
   border-width:0 2.2px 2.2px 0;transform:rotate(45deg)}
-#turbo-row,#contrib-row,#nolimits-row,#share-row{
+#turbo-row,#contrib-row,#nolimits-row,#share-row,#beta-row{
   display:flex;align-items:center;gap:10px;font-size:13px;
   color:var(--text);padding:8px 2px;cursor:pointer;line-height:1.4}
 #share-row[hidden]{display:none}
@@ -7439,8 +7458,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 <aside id="sidebar">
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
-    <span class="vghost" title="MillenAI"><b>MillenAI</b></span>
     <div id="brand-row">
+    <span class="vghost" title="MillenAI"><b>MillenAI</b></span>
     <i class="vsub">__APP_VER__</i>
 <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
@@ -7679,6 +7698,8 @@ __AGENT_ROWS__
       </div>
     </div>
     <div class="set-sec">
+      <label id="beta-row"><input type="checkbox" id="betaup">
+        <span>Beta updates — new builds first, kinks included</span></label>
       <div id="adv-grid">
         <button class="about-btn" id="open-setup">Model updates&hellip;</button>
         <button class="about-btn" id="about-check">Check for updates</button>
@@ -10401,6 +10422,7 @@ async function openAbout(){
       const mine=await(await fetch("/api/fleet/mine")).json();
       $("#turbo").checked=!!pr2.turbo;
       $("#contrib").checked=!!pr2.contrib_on;
+      $("#betaup").checked=!!pr2.beta_updates;
       try{
         const cs=await(await fetch("/api/cloud")).json();
         $("#turbo-row").hidden=!cs.configured;
@@ -10507,6 +10529,14 @@ $("#turbo").addEventListener("change",()=>{
   fetch("/api/prefs",{method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({turbo:$("#turbo").checked})});
+});
+$("#betaup").addEventListener("change",async()=>{
+  await fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({beta_updates:$("#betaup").checked})});
+  // joining the beta should feel like something happened: re-check
+  // immediately so a waiting beta shows the UPDATE flag right away
+  if($("#betaup").checked)$("#about-check").click();
 });
 $("#contrib").addEventListener("change",async()=>{
   const on=$("#contrib").checked;
