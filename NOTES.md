@@ -1974,3 +1974,18 @@ Five gaps that read as backyard-project, all closed:
   gauntlet gets a QUIET instance, never one mid-generation; (2) NO
   heredocs inside release chains — NOTES first, then gauntlet, then
   release, each its own command with its exit code checked.
+
+## 6 beta 217 — the brand row, engine-proof
+- Patrick's b212 screenshot showed the b210/211 "fixed" alignment
+  still broken IN THE APP — Blink and WKWebView compute different
+  line boxes for Michroma vs Plex Mono, so flex centering that
+  measured 29/29/29 in the pane landed differently in WebKit. Fourth
+  round on this row; the flex approach is abandoned.
+- THE INVARIANT FIX: the version moved INSIDE the wordmark's span —
+  one inline formatting context = one shared baseline, in every
+  engine, by CSS law rather than by metric luck. vsub is 13px mono
+  (caps optically match Michroma 12.5 caps), the combined span
+  ellipsizes as one unit, buttons flex beside it.
+- screencapture(1) needs Screen Recording permission — no Safari
+  screenshots from the harness shell; WebKit checks ride on
+  construction-level invariants or Patrick's own eyes.
