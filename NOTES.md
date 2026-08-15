@@ -1989,3 +1989,22 @@ Five gaps that read as backyard-project, all closed:
 - screencapture(1) needs Screen Recording permission — no Safari
   screenshots from the harness shell; WebKit checks ride on
   construction-level invariants or Patrick's own eyes.
+
+## 6 beta 218 — the provider board
+- THE CLOUD CARD'S LIST IS PROVIDERS NOW, not models (per Patrick):
+  three fixed rows — Gemini / Groq / Claude — grey until a key is
+  saved, green ✓ (with "· in use" on the active one) when its key
+  works, red ✗ with the provider's reason when it doesn't. The rows
+  never change with the dropdown.
+- MULTI-KEY STORAGE: cloud.json became {providers:{id:{...,status,
+  note}}, active} — adding a Gemini key no longer overwrites the
+  Groq one. Legacy single-provider files wrap transparently on read
+  (provider inferred from the base URL; Patrick's real Groq config
+  migrated live without a touch). cloud_conf() still returns the
+  classic single-provider shape for everything downstream, so
+  cloud_stream and the tiers never knew anything changed. Failed
+  saves are RECORDED (status fail + note) so the ✗ persists with its
+  reason instead of evaporating with the toast.
+- Verified end-to-end on the shared store: fake Gemini key -> ✗ row
+  with "Please pass a valid API key" while ✓ Groq · in use stayed
+  put; probe entry removed from the real config afterwards.

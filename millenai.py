@@ -464,14 +464,47 @@ def free_cloud_stream(messages: list, emit, timeout: int = 15) -> bool:
     return True
 
 
-def cloud_conf():
+def _cloud_all() -> dict:
+    """Full multi-provider state (6b218): {providers:{id:{...}}, active}.
+    Legacy single-provider files are wrapped on read — the provider id
+    is inferred from the base URL."""
     try:
         with open(CLOUD_FILE) as f:
             c = json.load(f)
-        if c.get("base") and c.get("key") and c.get("model"):
-            return c
+    except Exception:
+        return {"providers": {}, "active": ""}
+    if "providers" in c:
+        return c
+    if c.get("base") and c.get("key"):
+        which = ("gemini" if "generativelanguage" in c["base"]
+                 else "claude" if "anthropic" in c["base"] else "groq")
+        c["status"] = "ok"
+        return {"providers": {which: c}, "active": which}
+    return {"providers": {}, "active": ""}
+
+
+def _cloud_save_state(which: str, entry: dict, make_active=False):
+    d = _cloud_all()
+    d.setdefault("providers", {})[which] = entry
+    if make_active or not d.get("active"):
+        if entry.get("status") == "ok":
+            d["active"] = which
+    try:
+        with open(CLOUD_FILE, "w") as f:
+            json.dump(d, f)
+        os.chmod(CLOUD_FILE, 0o600)
     except Exception:
         pass
+
+
+def cloud_conf():
+    """The ACTIVE working provider in the classic shape — everything
+    downstream (cloud_stream, tiers) keeps its old contract."""
+    d = _cloud_all()
+    c = (d.get("providers") or {}).get(d.get("active") or "", None)
+    if c and c.get("base") and c.get("key") and c.get("model") \
+            and c.get("status", "ok") == "ok":
+        return c
     return None
 
 
@@ -4652,10 +4685,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"err": "owner only"})
                 return
             c = cloud_conf()
+            d = _cloud_all()
+            provs = {k: {"status": v.get("status", ""),
+                         "note": v.get("note", "")[:80]}
+                     for k, v in (d.get("providers") or {}).items()}
             self._send_json({"configured": bool(c),
                              "name": (c or {}).get("name", ""),
                              "model": (c or {}).get("model", ""),
-                             "models": (c or {}).get("models", [])})
+                             "active": d.get("active", ""),
+                             "providers": provs})
         elif self.path == "/api/downloads":
             self._send_json(download_links())
         elif self.path == "/api/stats":
@@ -5029,21 +5067,31 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 if which == "gemini" and len(key) < 35:
                     hint = (" — this key is only %d characters; the "
                             "paste may have been cut off" % len(key))
+                _cloud_save_state(which, {"name": name, "base": base,
+                                          "key": key, "model": model,
+                                          "status": "fail",
+                                          "note": detail
+                                          or ("HTTP %s" % exc.code)})
                 self._send_json({"ok": False,
                                  "err": "that key didn't work: %s%s"
                                         % (detail or ("HTTP %s"
                                            % exc.code), hint)})
                 return
             except Exception as exc:
+                _cloud_save_state(which, {"name": name, "base": base,
+                                          "key": key, "model": model,
+                                          "status": "fail",
+                                          "note": str(exc)[:80]})
                 self._send_json({"ok": False,
                                  "err": "that key didn't work (%s)"
                                         % str(exc)[:60]})
                 return
             try:
-                with open(CLOUD_FILE, "w") as f:
-                    json.dump({"name": name, "base": base, "key": key,
-                               "model": model, "models": found}, f)
-                os.chmod(CLOUD_FILE, 0o600)
+                _cloud_save_state(which, {"name": name, "base": base,
+                                          "key": key, "model": model,
+                                          "models": found,
+                                          "status": "ok"},
+                                  make_active=True)
             except Exception as exc:
                 self._send_json({"ok": False, "err": str(exc)[:80]})
                 return
@@ -7031,6 +7079,9 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .ckm.on{color:#fff}
 .ckm.act i{font-style:normal;color:var(--faint)}
 .ckm .ckt{color:#7ddba0;font-weight:700}
+.ckm.bad{color:var(--dim)}
+.ckm .ckx{color:#e26d5a;font-weight:700}
+.ckm.bad i{font-style:normal;color:var(--faint)}
 #ck-note{font-size:11px;color:var(--faint);margin-top:7px;
   line-height:1.5;min-height:14px}
 /* the places module: dark multi-pin map + card rail */
@@ -10451,24 +10502,27 @@ function shareDone(on){
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contrib_on:true})});
 }
-// the model list under the key box (6b213): grey possibilities until
-// a key is live, then the REAL inventory in white with green checks
-const CK_PLACEHOLDER={
-  gemini:["Gemini Flash","Gemini Pro"],
-  groq:["GPT-OSS 120B","Llama 4","Qwen 3"],
-  claude:["Claude Sonnet","Claude Haiku"]};
-function ckModels(list,live,active){
+// THE PROVIDER BOARD (6b218, per Patrick): three fixed rows —
+// Gemini / Groq / Claude — grey until a key is saved, green ✓ when
+// its key works, red ✗ with the reason when it doesn't. The rows
+// never change with the dropdown; add keys one by one and watch the
+// board fill in.
+const CK_PROVS=[["gemini","Gemini"],["groq","Groq"],["claude","Claude"]];
+function ckBoard(provs,active){
   const box=$("#ck-models");if(!box)return;
-  const rows=(list&&list.length?list
-    :CK_PLACEHOLDER[$("#ck-provider").value]||[]);
-  box.innerHTML=rows.map(m=>
-    '<div class="ckm'+(live?" on":"")
-    +(live&&m===active?' act':'')+'">'
-    +(live?'<span class="ckt">✓</span>':"")
-    +esc(m)+(live&&m===active?' <i>· in use</i>':"")+'</div>').join("");
+  provs=provs||{};
+  box.innerHTML=CK_PROVS.map(([id,label])=>{
+    const st=(provs[id]||{}).status||"";
+    const note=(provs[id]||{}).note||"";
+    const mark=st==="ok"?'<span class="ckt">✓</span>'
+      :st==="fail"?'<span class="ckx">✗</span>':"";
+    return '<div class="ckm'+(st==="ok"?" on":st==="fail"?" bad":"")
+      +'">'+mark+label
+      +(st==="ok"&&id===active?' <i>· in use</i>':"")
+      +(st==="fail"&&note?' <i>· '+esc(note)+'</i>':"")+'</div>';
+  }).join("");
 }
-$("#ck-provider").addEventListener("change",()=>ckModels(null,false));
-ckModels(null,false);
+ckBoard(null,"");
 $("#ck-save").addEventListener("click",async()=>{
   const note=$("#ck-note"),key=$("#ck-key").value.trim();
   if(!key){note.textContent="paste a key first";return;}
@@ -10479,9 +10533,10 @@ $("#ck-save").addEventListener("click",async()=>{
       body:JSON.stringify({provider:$("#ck-provider").value,key:key})})).json();
     if(d.ok){note.textContent="✓ "+d.name+" is live — cloud answers "
       +"are on.";$("#ck-key").value="";
-      $("#turbo-row").hidden=false;$("#turbo").checked=true;
-      ckModels(d.models,!!(d.models&&d.models.length),d.model);}
+      $("#turbo-row").hidden=false;$("#turbo").checked=true;}
     else note.textContent=d.err||"that didn't work";
+    try{const cs2=await(await fetch("/api/cloud")).json();
+        ckBoard(cs2.providers,cs2.active);}catch(e){}
   }catch(e){note.textContent="network error — try again";}
 });
 if(!IS_LOCAL){const b=$("#cloudkey-box");if(b)b.hidden=true;}
@@ -10688,9 +10743,8 @@ async function openAbout(){
       try{
         const cs=await(await fetch("/api/cloud")).json();
         $("#turbo-row").hidden=!cs.configured;
-        if(typeof ckModels==="function")
-          ckModels(cs.models,
-            !!(cs.configured&&cs.models&&cs.models.length),cs.model);
+        if(typeof ckBoard==="function")
+          ckBoard(cs.providers,cs.active);
         if(cs.name)$("#turbo-hint").title=
           "Answers come from "+cs.name+" instead of this Mac \u2014 much "
           +"faster, but your prompts leave this computer while it is on.";
