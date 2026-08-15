@@ -147,11 +147,10 @@ check("tab selector with Code lane", 'data-m="code"' in page
 check("code tab carries Coding + Workspace",
       'data-agent="Coding"' in page and 'data-agent="Workspace"' in page)
 check("query pinwheel css", ".wtspin" in page and "wtspin 1.5s" in page)
-# NB: the JS boolean `lfgWashed` legitimately survives — only the old
-# keyframes must be gone
-check("centered LFG drop replaces the drive-by",
-      "lfgOut" in page and "lfgBloom" in page
-      and "keyframes lfgWash{" not in page)
+# 6b214: the LFG moment is fully retired — no element, no wash, no
+# splash line, and the boot (cube wave + reveal) runs without it
+check("LFG removed entirely",
+      "lfg" not in page.lower() and "FUCKING" not in page)
 check("backdrop pantry js", "millen.skynext" in page
       and "fillPantry" in page and "PANTRY=5" in page)
 # 5.3.2 surface: lane-aware sidebar + iconed tabs, AI renamed Chat

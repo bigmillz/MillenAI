@@ -1937,3 +1937,13 @@ Five gaps that read as backyard-project, all closed:
   the active one. Old configs without an inventory stay grey until
   re-saved (a configured key with no model list must NOT check
   placeholder names — caught live).
+
+## 6 beta 214 — LFG retired
+- THE WHOLE MOMENT IS GONE (per Patrick: "entirely"): the #lfg
+  element, the letter-cascade wash and its five keyframe families,
+  the sparks, the splash's LFG line, the __SPLASH_LFG__ token and its
+  sessionStorage dedupe. Grep says zero refs in source AND the served
+  page; the boot (cube wave -> reveal -> greeting) runs clean without
+  it — painted/paintdone land, no console errors.
+- It was born in 3.x as the loading-bar payoff and got its own drop
+  in 5.2. Pour one out; the greeting carries the personality now.
