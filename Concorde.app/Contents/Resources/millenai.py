@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 218               # integer compared against the GitHub release tag
+APP_BUILD = 219               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -544,6 +544,53 @@ def _anthropic_stream(c: dict, messages: list, emit) -> bool:
     except Exception:
         return got
     return got
+
+
+def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
+    """One buffered completion from a SPECIFIC provider conf — the
+    council/merge offload path (6b219). Empty string = didn't work."""
+    try:
+        if "anthropic.com" in c.get("base", ""):
+            sys_txt = "\n\n".join(m["content"] for m in messages
+                                   if m["role"] == "system")
+            payload = json.dumps({
+                "model": c["model"], "max_tokens": 4096,
+                "system": sys_txt,
+                "messages": [m for m in messages
+                             if m["role"] != "system"]}).encode()
+            req = urllib.request.Request(
+                c["base"].rstrip("/") + "/messages", data=payload,
+                headers={"x-api-key": c["key"],
+                         "anthropic-version": "2023-06-01",
+                         "Content-Type": "application/json",
+                         "User-Agent": "MillenAI/%s" % APP_VERSION})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                d = json.loads(r.read().decode("utf-8", "replace"))
+            return "".join(b.get("text", "")
+                           for b in d.get("content", []))
+        payload = json.dumps({"model": c["model"], "messages": messages,
+                              "max_tokens": 4096,
+                              "temperature": 0.75}).encode()
+        req = urllib.request.Request(
+            c["base"].rstrip("/") + "/chat/completions", data=payload,
+            headers={"Content-Type": "application/json",
+                     "User-Agent": "MillenAI/%s" % APP_VERSION,
+                     "Authorization": "Bearer " + c["key"]})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            d = json.loads(r.read().decode("utf-8", "replace"))
+        return (((d.get("choices") or [{}])[0].get("message") or {})
+                .get("content", "") or "")
+    except Exception:
+        return ""
+
+
+def cloud_ok_providers() -> list:
+    """Every provider whose key currently reports ok — the council's
+    cloud bench."""
+    d = _cloud_all()
+    return [v for v in (d.get("providers") or {}).values()
+            if v.get("status", "ok") == "ok" and v.get("key")
+            and v.get("base") and v.get("model")]
 
 
 def cloud_stream(messages: list, emit) -> bool:
@@ -3496,6 +3543,24 @@ def run_council(labels: list, messages: list, emit, status,
         except Exception:
             pass          # never let the display break the answer
 
+    # THE CLOUD BENCH (6b219, per Patrick: "offload as much as
+    # possible"): every working key drafts IN PARALLEL with the local
+    # loop — frontier voices join the council at zero local cost.
+    cloud_threads = []
+    if load_prefs(None).get("turbo"):
+        def _cloud_draft(conf):
+            status(f"asking {conf['name']} \u00b7 cloud")
+            t = strip_think(cloud_text(conf, messages))
+            if t and not _looks_degenerate(t):
+                took_part(conf["name"], t)
+            else:
+                took_part(conf["name"], "(no answer \u2014 cloud)")
+        for _c in cloud_ok_providers():
+            _th = threading.Thread(target=_cloud_draft, args=(_c,),
+                                   daemon=True)
+            _th.start()
+            cloud_threads.append(_th)
+
     for i, label in enumerate(labels, 1):
         # free RAM drops as each engine loads — re-check before committing
         if i > 1 and not model_fits_memory(label):
@@ -3521,6 +3586,9 @@ def run_council(labels: list, messages: list, emit, status,
             # an engine that returns NOTHING is left out of the blend, but
             # recorded — the contributor count must never lie
             took_part(label, "(no answer — empty)")
+
+    for _th in cloud_threads:
+        _th.join(timeout=75)
 
     good = [d for d in drafts if not d[1].startswith("(no answer")]
     if not good:
@@ -3577,8 +3645,10 @@ def run_council(labels: list, messages: list, emit, status,
     # feed the merger only the strongest few answers, each truncated:
     # an unbounded merge prompt overflows small models' context and sends
     # them into repetition loops (seen in the wild with 8 full drafts)
+    cloud_names = {p["name"] for p in cloud_ok_providers()}
     rank = {l: i for i, l in enumerate(MERGE_RANK)}
-    good.sort(key=lambda d: rank.get(d[0], 99))
+    good.sort(key=lambda d: -1 if d[0] in cloud_names
+              else rank.get(d[0], 99))
     good = good[:5]
 
     status("compositing\u2026")
@@ -3626,6 +3696,16 @@ def run_council(labels: list, messages: list, emit, status,
     # merge — seen in the wild as "engine returned nothing" after 3 good
     # drafts), the best draft still ships: with good answers in hand there
     # is no failure mode where the user gets nothing.
+    # OFFLOAD THE MERGE (6b219): the composite is the heaviest single
+    # step — hand it to the active cloud model when a key works. Local
+    # Gemma remains the no-key/failed path, unchanged below.
+    if load_prefs(None).get("turbo"):
+        _cc = cloud_conf()
+        if _cc:
+            _t = strip_think(cloud_text(_cc, synth))
+            if _t and len(_t) > 120 and not _looks_degenerate(_t):
+                emit(_t)
+                return
     try:
         _stream_guarded(merger, synth, emit, status, good[0][1],
                         "showing the best single answer")
@@ -4693,6 +4773,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                              "name": (c or {}).get("name", ""),
                              "model": (c or {}).get("model", ""),
                              "active": d.get("active", ""),
+                             "turbo": bool(load_prefs(None).get("turbo")),
                              "providers": provs})
         elif self.path == "/api/downloads":
             self._send_json(download_links())
@@ -5711,7 +5792,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("X-Accel-Buffering", "no")
         self.send_header("X-Web-Search", "1" if query else "0")
-        xm = ", ".join(council)[:300]
+        xm_names = list(council)
+        if len(council) > 1 and load_prefs(None).get("turbo"):
+            xm_names += [c["name"] for c in cloud_ok_providers()]
+        xm = ", ".join(xm_names)[:300]
         self.send_header("X-Models", xm)
         self.end_headers()
 
@@ -7079,6 +7163,7 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .ckm.on{color:#fff}
 .ckm.act i{font-style:normal;color:var(--faint)}
 .ckm .ckt{color:#7ddba0;font-weight:700}
+.gcheck{font-style:normal;color:#7ddba0;font-weight:700}
 .ckm.bad{color:var(--dim)}
 .ckm .ckx{color:#e26d5a;font-weight:700}
 .ckm.bad i{font-style:normal;color:var(--faint)}
@@ -8021,14 +8106,21 @@ function setTier(name){
 }
 const tierPop=$("#tierpop");
 async function showTierPop(el,name){
-  let info={};
-  try{info=(await(await fetch("/api/tiers")).json())[name]||{};}catch(e){}
+  let info={},cloudOn=false;
+  try{
+    const [ti,ci]=await Promise.all([
+      (await fetch("/api/tiers")).json(),
+      (await fetch("/api/cloud")).json()]);
+    info=ti[name]||{};cloudOn=!!(ci.configured&&ci.turbo);
+  }catch(e){}
   const list=(info.models||[]);
   tierPop.innerHTML="<b>"+esc(name)+"</b>"+
     (list.length
       ? list.map(m=>'<div class="mline">'+esc(m)+'</div>').join("")+
-        (list.length>1?'<span class="note">answers blended by Gemma</span>'
-                      :'<span class="note">single model — fastest</span>')
+        (cloudOn
+          ?'<span class="note"><i class="gcheck">✓</i> Cloud Enabled</span>'
+          :list.length>1?'<span class="note">answers blended by Gemma</span>'
+                        :'<span class="note">single model — fastest</span>')
       : '<div class="mline">nothing downloaded yet</div>')+
     ((info.skipped||[]).length
       ? '<span class="note">skipped, needs more memory: '+
