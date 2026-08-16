@@ -2065,3 +2065,20 @@ Five gaps that read as backyard-project, all closed:
   its keep at the top of the compositor ladder instead. All three
   providers ok: bench = Groq 120B, Gemini, gemini-2.5-pro, Claude;
   ladder = Claude -> gemini-2.5-pro -> Groq 120B -> local Gemma.
+
+## 6 beta 222 — the About window grows up
+- POWER reordered (per Patrick): Use cloud power + the key card
+  first, Contribute GPU power below it. The "CLOUD FREE KEY · 2
+  MINUTES" header is gone — the card explains itself.
+- FLEET COPY: the "Your fleet: 0 friends online / contributing" trio
+  collapsed into one grey-italic line, "Contributing to N users"
+  (N = live hub users from /api/stats). fleet-own and its CSS
+  removed; pending-approval requests still render.
+- THE LOGO IS A BANNER: the About icon is the dock icon's diagonal
+  stripes stretched across the card — seven 45° silver strokes,
+  gradient fading in from the left edge and out at the right,
+  full-width viewBox with preserveAspectRatio none.
+- SELF-INFLICTED: a malformed replacement string in the edit script
+  landed mid-file and broke the fleet JS into an unterminated string
+  (caught by inspection before it shipped). Rule reinforced: every
+  scripted edit batch gets a page-load check before anything else.

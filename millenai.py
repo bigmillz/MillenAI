@@ -7420,7 +7420,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   border-top:1px solid var(--line-soft);background:var(--panel2);
 }
 #about-foot .about-btn{margin-top:0}
-#about-icon{width:54px;height:54px;margin-bottom:8px}
+#about-icon{width:100%;height:44px;margin-bottom:10px;display:block}
 #persona-label{
   font-family:var(--mono);font-size:10px;letter-spacing:.12em;
   text-transform:uppercase;color:var(--faint);text-align:left;
@@ -7496,9 +7496,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 .hint:hover{color:var(--text);border-color:var(--dim)}
 
 #fleet-box{margin:10px 2px 4px;margin:14px 0 4px;text-align:left}
-#fleet-own{font-family:var(--mono);font-size:10.5px;color:var(--dim);
-  margin-bottom:8px;line-height:1.6}
 #contrib-state{font-family:var(--mono);font-size:10px;color:var(--faint);
+  font-style:italic;
   margin:4px 0 6px;min-height:12px}
 #fleet-pending .preq{display:flex;align-items:center;gap:8px;
   font-size:12.5px;color:var(--text);margin-bottom:6px}
@@ -7943,15 +7942,25 @@ __CODE_ROWS__
 <div id="about-veil" hidden>
   <div id="about-card">
     <div id="about-head">
-    <svg id="about-icon" viewBox="0 0 120 120" aria-hidden="true">
-      <defs><linearGradient id="ag" x1="0" y1="0" x2="1" y2="0">
-        <stop offset="0" stop-color="#f2f3f5"/><stop offset=".5" stop-color="#b7bcc6"/>
-        <stop offset="1" stop-color="#788089"/></linearGradient></defs>
-      <rect x="18" y="62" width="14" height="40" rx="6" fill="url(#ag)"/>
-      <rect x="39" y="44" width="14" height="58" rx="6" fill="url(#ag)"/>
-      <rect x="60" y="30" width="14" height="72" rx="6" fill="url(#ag)"/>
-      <rect x="81" y="52" width="14" height="50" rx="6" fill="url(#ag)"/>
-      <circle cx="95" cy="24" r="7" fill="#d5d8df"/>
+    <svg id="about-icon" viewBox="0 0 320 44" aria-hidden="true" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id="abg" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0" stop-color="#f2f3f6" stop-opacity="0"/>
+          <stop offset=".18" stop-color="#f2f3f6" stop-opacity=".9"/>
+          <stop offset=".5" stop-color="#b7bcc6"/>
+          <stop offset=".82" stop-color="#787e89" stop-opacity=".9"/>
+          <stop offset="1" stop-color="#787e89" stop-opacity="0"/>
+        </linearGradient>
+      </defs>
+      <g stroke="url(#abg)" stroke-width="7" stroke-linecap="round">
+        <line x1="30"  y1="52" x2="82"  y2="-8"/>
+        <line x1="66"  y1="52" x2="118" y2="-8"/>
+        <line x1="102" y1="52" x2="154" y2="-8"/>
+        <line x1="138" y1="52" x2="190" y2="-8"/>
+        <line x1="174" y1="52" x2="226" y2="-8"/>
+        <line x1="210" y1="52" x2="262" y2="-8"/>
+        <line x1="246" y1="52" x2="298" y2="-8"/>
+      </g>
     </svg>
     <div id="about-name">MillenAI</div>
     <div id="about-ver">Version __APP_VER__</div>
@@ -7966,19 +7975,10 @@ __CODE_ROWS__
     </div>
     <div class="set-sec">
       <div class="set-h">Power</div>
-      <label id="contrib-row"><input type="checkbox" id="contrib">
-        <span>Contribute GPU power</span><i class="hint" id="contrib-hint"
-        title="When this machine is idle, it answers questions for friends on MillenAI — and theirs answer yours. Nothing runs while you are using it.">i</i></label>
-      <div id="fleet-box">
-        <div id="fleet-own" hidden><span id="fleet-n"></span></div>
-        <div id="fleet-pending"></div>
-        <div id="contrib-state"></div>
-      </div>
       <label id="turbo-row" hidden><input type="checkbox" id="turbo">
         <span>Use cloud power</span><i class="hint" id="turbo-hint"
         title="Answers come from a cloud GPU instead of this Mac — much faster, but your prompts leave this computer while it is on.">i</i></label>
       <div id="cloudkey-box">
-        <div id="cloudkey-head">Cloud <em>free key &middot; 2 minutes</em></div>
         <div id="cloudkey-row">
           <select id="ck-provider">
             <option value="gemini">Gemini (free tier)</option>
@@ -7991,6 +7991,13 @@ __CODE_ROWS__
         </div>
         <div id="ck-note"></div>
         <div id="ck-models"></div>
+      </div>
+      <label id="contrib-row"><input type="checkbox" id="contrib">
+        <span>Contribute GPU power</span><i class="hint" id="contrib-hint"
+        title="When this machine is idle, it answers questions for friends on MillenAI — and theirs answer yours. Nothing runs while you are using it.">i</i></label>
+      <div id="fleet-box">
+        <div id="fleet-pending"></div>
+        <div id="contrib-state"></div>
       </div>
     </div>
     <div class="set-sec">
@@ -10861,10 +10868,6 @@ async function openAbout(){
     try{
       const fs=await(await fetch("/api/fleet/status")).json();
       if(fs.key!==undefined){
-        $("#fleet-own").hidden=false;
-        $("#fleet-n").textContent="Your fleet: "+fs.workers.length+" friend"
-          +(fs.workers.length===1?"":"s")+" online"
-          +(fs.workers.some(w=>w.busy)?" \u00b7 working":"");
         $("#fleet-pending").innerHTML=(fs.pending||[]).map(p=>
           '<div class="preq">\u26a1 '+esc(p.name)
           +' wants to contribute<button data-id="'+esc(p.id)
@@ -10896,8 +10899,13 @@ async function openAbout(){
           "Answers come from "+cs.name+" instead of this Mac \u2014 much "
           +"faster, but your prompts leave this computer while it is on.";
       }catch(e){}
-      $("#contrib-state").textContent=
-        pr2.contrib_on&&mine.state!=="off"?mine.state:"";
+      if(pr2.contrib_on&&mine.state!=="off"){
+        let n=0;
+        try{const stt=await(await fetch("/api/stats")).json();
+            n=stt.users_online||stt.users_total||0;}catch(e){}
+        $("#contrib-state").textContent=
+          "Contributing to "+n+" user"+(n===1?"":"s");
+      }else $("#contrib-state").textContent="";
     }catch(e){}
     const ready=st.models.filter(x=>x.status==="ready").length;
     $("#about-facts").textContent=
