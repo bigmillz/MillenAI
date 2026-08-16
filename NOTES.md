@@ -2814,3 +2814,73 @@ Five gaps that read as backyard-project, all closed:
   the <style> blocks specifically — a whole-file scan reports false
   positives from `*/` inside JS regex literals like /\*\*(...)\*\*/g.
   Style blocks now 118 opens / 118 closes.
+
+## 6 beta 243 (pending release) — Settings becomes rail and pane
+- The dialog was one column of unrelated widgets. Now a 212px named rail
+  on the left and ONE pane at a time on the right: Personality, Cloud
+  power, Community, Models, Updates. The surface stops growing — the next
+  setting gets a rail entry, not another row on a stack.
+- EVERY CONTROL KEPT ITS ID and its markup; they were only reparented, so
+  the JS wired to each one is untouched. Verified all 15 still resolve
+  (persona, len-slider, turbo, ck-*, contrib, open-setup, about-check,
+  betaup, about-forget, about-close) and every pane shows on click.
+- THE SPEC LIST. "6 BETA 238 · M4 PRO" wrapped mid-word in a narrow rail
+  and read as debris. It is a definition list now — label left, value
+  right, one fact per line, so it cannot wrap and there is room for the
+  memory Patrick asked for plus the accelerator:
+      version 6 beta 238 · chip M4 PRO · memory 52 GB
+      accel MLX · models 11 / 20
+  Memory comes from /api/stats mem_total_gb, accel from /api/setup.
+- TAG-COUNT CHECKED before running it: 26 <div> / 26 </div>, 5/5
+  <section>, 1/1 <nav>. The 5.1 rebuild dropped one closing div and
+  swallowed every veil below into the hidden modal; that is the failure
+  this restructure was most likely to repeat.
+- FALSE ALARM WORTH RECORDING: `#about-card` is a DUPLICATED id — the
+  update and new-models dialogs reuse it. `querySelector("#about-card")`
+  returns #new-veil's hidden copy and measures 0x0, which looks exactly
+  like the old 0x0 bug. The settings CSS is ancestor-scoped
+  (`#about-veil #about-card`) so it targets the right one; only the
+  measurement was wrong. Measure with the ancestor in the selector.
+
+## 6 beta 243 — answer type, chip width, hairline, vendor names
+- Answer prose moves to the sidebar's own face: Space Grotesk 13px
+  against the sidebar's measured 12.5. The system stack (SF here, Segoe
+  on Windows) was a stranger in its own window and at 16px read as cheap.
+  Heading scale came back down with it (18 / 15.5 / 13.5).
+- Starter chips are PINNED TO THE COMPOSER: #composer-wrap is full width,
+  so on a maximised window they ran 1252px against the composer's 780.
+  Same max-width and auto margins — measured left 560 = 560, right
+  1340 = 1340 at a 1600px viewport.
+- The hairline under the hero was `body.perf #composer-wrap`'s border-top
+  — perf mode only, which is why it looked intermittent. Gone.
+- The accelerator chip names the VENDOR now, not the toolkit: NVIDIA
+  rather than CUDA, AMD when rocm-smi answers, MLX unchanged. Each
+  branch forced and verified. An AMD card without ROCm reads as CPU,
+  which is honest.
+- Gauntlet 60/60.
+
+## 6 beta 243 — the stacked lockup, uniform everywhere
+- Study 06 wins, in Michroma: wing centred ABOVE the wordmark. That is
+  the primary mark wherever there is vertical room. The horizontal form —
+  bars to the LEFT of the wordmark — stays as the compact variant for
+  tight inline spots, which is the sidebar header.
+- AUDITED EVERY SURFACE THAT DRAWS THE WORDMARK, and two of four were
+  not even in the right face:
+      sidebar        Michroma, horizontal   (already correct)
+      settings rail  now Michroma, STACKED
+      welcome door   was the body sans -> Michroma
+      gate page      was the body sans AND never loaded the font at all
+  So a new user's first sight of the logo was a different logo from the
+  one inside the app. Both now load Michroma and render at weight 400 —
+  the 700 they were using is a synthetic bold Michroma has no cut for.
+- Measured after: rail brand and sidebar brand both report Michroma,
+  wing 40x16 sits above a 114px wordmark inside a 211px rail, nothing
+  clipped.
+- SECOND DUPLICATE-ID TRAP TODAY: `#about-name` exists THREE times (the
+  update and new-models dialogs reuse it), so
+  `querySelector("#about-name")` returns a hidden copy in another veil
+  and reports Helvetica at 0px wide. `#about-card` did the same thing an
+  hour earlier. The CSS is fine because it is ancestor-scoped; it is
+  MEASUREMENT that has to carry the ancestor. Scope every settings query
+  to `#set-brand`/`#about-veil`, never a bare id.
+- Gauntlet 60/60.

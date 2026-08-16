@@ -3145,17 +3145,32 @@ def _gpu_nvidia():
 _accel_cache = []
 
 
+def _gpu_amd() -> bool:
+    """An AMD card with a working ROCm stack — rocm-smi ships with it."""
+    try:
+        return subprocess.run(
+            ["rocm-smi", "--showid"], capture_output=True, timeout=2,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).returncode == 0
+    except Exception:
+        return False
+
+
 def accel_name() -> str:
-    """What is actually accelerating local models on this machine (6b238):
-    MLX on Apple Silicon, CUDA on an NVIDIA box, CPU otherwise. Cached —
-    nvidia-smi is a subprocess and this is read on every boot."""
+    """What is actually accelerating local models here (6b243, per
+    Patrick): the VENDOR, not the toolkit — NVIDIA rather than CUDA, and
+    AMD when ROCm answers. MLX keeps its own name because on Apple
+    Silicon the framework IS the thing people recognise. Cached: these
+    are subprocesses and the silicon does not change while we run."""
     if _accel_cache:
         return _accel_cache[0]
     name = "CPU"
     if IS_MAC and IS_ARM and _has_mlx():
         name = "MLX"
     elif _gpu_nvidia() is not None:
-        name = "CUDA"
+        name = "NVIDIA"
+    elif _gpu_amd():
+        name = "AMD"
     _accel_cache.append(name)
     return name
 
@@ -5250,8 +5265,12 @@ body{background:#07080c;color:#ececec;display:flex;align-items:center;
   from{opacity:0;transform:translateY(26px) scale(.97);filter:blur(9px)}
   to{opacity:1;transform:none;filter:blur(0)}}
 .wrap{position:relative;display:inline-block;margin:0 0 10px}
-h1{font-size:clamp(44px,9vw,74px);letter-spacing:.01em;margin:0;
-  font-weight:700;line-height:1.05;
+/* 6b243: the wordmark is Michroma everywhere it appears — the door page
+   was rendering it in the body sans, so the first thing a new user saw
+   was a different logo from the one inside the app. */
+h1{font-family:'Michroma','Space Grotesk',sans-serif;
+  font-size:clamp(30px,6.2vw,52px);letter-spacing:.06em;margin:0;
+  font-weight:400;line-height:1.05;
   background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#aeb3bd,#c8ccd5,#f5f6f8);
   background-size:200% 100%;
   -webkit-background-clip:text;background-clip:text;color:transparent;
@@ -5431,13 +5450,17 @@ GATE_PAGE = """<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex">
 <title>MillenAI</title>
+<link href="https://fonts.googleapis.com/css2?family=Michroma&display=swap"
+      rel="stylesheet">
 <style>
 html,body{height:100%;margin:0}
 body{background:#0f1117;color:#ececec;display:flex;align-items:center;
   justify-content:center;font-family:'Helvetica Neue',system-ui,sans-serif}
 .door{text-align:center;padding:24px}
-h1{font-size:clamp(44px,9vw,76px);letter-spacing:.06em;margin:0 0 6px;
-  font-weight:700;
+/* 6b243: same face as everywhere else — this page didn't even load it */
+h1{font-family:'Michroma','Space Grotesk',sans-serif;
+  font-size:clamp(28px,5.6vw,50px);letter-spacing:.06em;margin:0 0 6px;
+  font-weight:400;
   background:linear-gradient(90deg,#f5f6f8,#c8ccd5,#9aa0ac,#e2e5ea,#8f95a1,#d5d8df,#f5f6f8,#ff8fd8);
   -webkit-background-clip:text;background-clip:text;color:transparent;
   filter:drop-shadow(0 0 22px rgba(140,150,255,.25))}
@@ -8179,11 +8202,19 @@ body.perf .msg{animation:none}
    column still lands around 70 characters, which is where prose wants
    to be. Tracking goes a hair tighter because the larger size needs
    less of it. */
+/* 6b243, per Patrick: the answer reads in the SAME FACE as the sidebar.
+   The system stack was a stranger in its own window — SF on this Mac,
+   Segoe on Windows, and at 16px it read as cheap next to the app's own
+   Space Grotesk. One typeface across both panels is what makes a window
+   feel designed rather than assembled.
+   Size is 13 against the sidebar's measured 12.5: a chat title is a
+   glanced label and a paragraph is read for minutes, so they want
+   slightly different sizes even in the same face. Trivial to take it to
+   12.5 exactly if you'd rather they match to the pixel. */
 .msg.ai .body{
   padding:0 2px;
-  font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
-    'Segoe UI',Inter,sans-serif;
-  font-size:16px;line-height:1.72;letter-spacing:-.009em;
+  font-family:var(--sans);
+  font-size:13px;line-height:1.7;letter-spacing:.005em;
 }
 /* code, tables and chips stay in their own faces inside the serif flow */
 .msg.ai .body code,.msg.ai .body pre{font-family:var(--mono)}
@@ -8282,11 +8313,10 @@ body:not(.perf) .wtrow.run .wtdot{animation:blink 1s ease-in-out infinite}
   line-height:1.3;letter-spacing:-.005em;
   margin:1.8em 0 .6em;
 }
-/* the scale moves with the body: at 16px prose, an 18px h2 barely read
-   as a heading at all */
-.body h1{font-size:23px}
-.body h2{font-size:19.5px}
-.body h3{font-size:17px;color:var(--text)}
+/* the scale moves with the body — back down with it (6b243) */
+.body h1{font-size:18px}
+.body h2{font-size:15.5px}
+.body h3{font-size:13.5px;color:var(--text)}
 .body>h1:first-child,.body>h2:first-child,.body>h3:first-child{margin-top:0}
 .body ul,.body ol{margin:0 0 1.2em;padding-left:1.35em}
 .body li{margin-bottom:.5em;padding-left:.15em}
@@ -8576,7 +8606,10 @@ body:not(.perf) .caret{animation:blink .9s step-end infinite}
      bottom of the backdrop read as a rendering bug (seen live) */
   background:linear-gradient(transparent,rgba(5,6,10,.62) 78%);
 }
-body.perf #composer-wrap{background:var(--bg);border-top:1px solid var(--line-soft);padding-top:14px}
+/* 6b243, per Patrick: no hairline. Perf mode drew a 1px rule right
+   across the window under the hero — the backdrop is off in perf mode
+   so nothing needed separating, and it read as a rendering artefact. */
+body.perf #composer-wrap{background:var(--bg);padding-top:14px}
 /* the box sits IN FLOW under the greeting — a pinned percentage
    collided with two-line greetings (seen live) */
 #main:has(#hero) #chat-scroll{flex:0 0 auto;overflow:visible}
@@ -8673,7 +8706,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
    its width and never becomes a wall. */
 #suggest{
   display:flex;flex-wrap:wrap;gap:7px;justify-content:center;
-  margin:0 0 12px;padding:0 2px;
+  /* 6b243, per Patrick: PINNED TO THE COMPOSER. #composer-wrap is full
+     width, so on a maximised window the chips ran edge to edge — 1252px
+     against the composer's 780 (measured). Same max-width and the same
+     auto margins means the row sits exactly over the box at every
+     window size, instead of only at the size it was designed on. */
+  max-width:780px;margin:0 auto 12px;padding:0 2px;
 }
 #suggest[hidden]{display:none}
 .sugg{
@@ -8725,7 +8763,8 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #accel-chip i{width:5px;height:5px;border-radius:50%;flex:0 0 auto;
   background:var(--ac,#9aa0aa);box-shadow:0 0 7px -1px var(--ac,#9aa0aa)}
 #accel-chip b{color:var(--dim);font-weight:600;letter-spacing:.2em}
-#accel-chip.cuda{--ac:#76b900}          /* NVIDIA green */
+#accel-chip.nvidia{--ac:#76b900}        /* NVIDIA green */
+#accel-chip.amd{--ac:#ed1c24}           /* AMD red */
 #accel-chip.mlx{--ac:#c9ccd2}           /* Apple silver */
 #accel-chip.cpu{--ac:#6b6f77}
 
@@ -8779,6 +8818,67 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   border-radius:16px;text-align:center;
   box-shadow:0 24px 80px rgba(0,0,0,.6);
   display:flex;flex-direction:column;overflow:hidden;
+}
+/* ---------------------------------------- settings: rail and pane (6b243)
+   The old dialog was one column of unrelated widgets — "a pile". A named
+   rail on the left and ONE pane at a time on the right means the surface
+   never grows: the next setting gets a rail entry, not another row on a
+   stack. Every control kept its id, so the JS behind it is untouched. */
+#about-veil #about-card{
+  width:660px;text-align:left;
+  display:grid;grid-template-columns:212px 1fr;align-items:stretch;
+}
+#set-rail{
+  background:var(--panel);border-right:1px solid var(--line-soft);
+  padding:18px 0 14px;display:flex;flex-direction:column;min-width:0;
+}
+/* THE STACKED LOCKUP (6b243, per Patrick — study 06). Wing centred above,
+   wordmark beneath in the same boxy Michroma the sidebar uses. This is the
+   primary mark wherever there is vertical room; the horizontal form, bars
+   to the LEFT of the wordmark, is the compact variant for tight inline
+   spots like the sidebar header. Same face, same wing, one identity. */
+#set-brand{display:flex;flex-direction:column;align-items:center;
+  gap:7px;padding:2px 14px 15px}
+#set-wing{width:40px;height:16.4px;flex:none;display:block}
+#set-brand b{font-family:var(--disp);font-size:11.5px;letter-spacing:.2em;
+  text-transform:uppercase;color:#fff;font-weight:400;line-height:1;
+  max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* THE SPEC LIST. "6 BETA 238 · M4 PRO" wrapped mid-word in a narrow rail
+   and read as debris. Label left, value right, one fact per line — it
+   cannot wrap, and there is room for memory and the accelerator too. */
+#set-spec{padding:0 16px 14px;margin-bottom:12px;
+  border-bottom:1px solid var(--line-soft);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;
+  text-transform:uppercase}
+#set-spec > div{display:flex;align-items:baseline;gap:8px;padding:2.5px 0}
+#set-spec dt{color:var(--faint);flex:none}
+#set-spec dd{color:var(--dim);margin-left:auto;text-align:right;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.snav{
+  display:block;width:100%;text-align:left;background:none;border:none;
+  font-family:var(--sans);font-size:12.5px;color:var(--dim);
+  padding:8px 16px;cursor:pointer;border-left:2px solid transparent;
+  transition:color .13s,background .13s;
+}
+.snav:hover{color:var(--text);background:rgba(255,255,255,.035)}
+.snav.on{color:#fff;background:rgba(255,255,255,.055);
+  border-left-color:#ececec}
+.snav:focus-visible{outline:2px solid rgba(255,255,255,.35);
+  outline-offset:-2px}
+#set-main{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+#about-veil #about-body{padding:18px 22px 4px}
+#about-veil #about-foot{border-top:1px solid var(--line-soft);
+  padding:12px 22px 14px;display:flex}
+#about-veil #about-foot .about-btn{margin-left:auto;width:auto;
+  padding:9px 30px}
+.spane{display:none;animation:paneIn .16s ease both}
+.spane.on{display:flex;flex-direction:column}
+@keyframes paneIn{from{opacity:0;transform:translateY(3px)}
+  to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.spane{animation:none}}
+@media (max-width:720px){
+  #about-veil #about-card{width:min(94vw,660px);
+    grid-template-columns:168px 1fr}
 }
 /* the small dialogs (update, new models) have no head/body/foot — give
    them their own padding, or their buttons run to the card's edge */
@@ -9565,33 +9665,33 @@ __CODE_ROWS__
 
 <div id="about-veil" hidden>
   <div id="about-card">
-    <div id="about-head">
-    <svg id="about-icon" viewBox="0 0 320 44" aria-hidden="true" preserveAspectRatio="none">
-      <defs>
-        <linearGradient id="abg" x1="0" y1="0" x2="1" y2="0">
-          <stop offset="0" stop-color="#f2f3f6" stop-opacity="0"/>
-          <stop offset=".18" stop-color="#f2f3f6" stop-opacity=".9"/>
-          <stop offset=".5" stop-color="#b7bcc6"/>
-          <stop offset=".82" stop-color="#787e89" stop-opacity=".9"/>
-          <stop offset="1" stop-color="#787e89" stop-opacity="0"/>
-        </linearGradient>
-      </defs>
-      <g stroke="url(#abg)" stroke-width="7" stroke-linecap="round">
-        <line x1="30"  y1="52" x2="82"  y2="-8"/>
-        <line x1="66"  y1="52" x2="118" y2="-8"/>
-        <line x1="102" y1="52" x2="154" y2="-8"/>
-        <line x1="138" y1="52" x2="190" y2="-8"/>
-        <line x1="174" y1="52" x2="226" y2="-8"/>
-        <line x1="210" y1="52" x2="262" y2="-8"/>
-        <line x1="246" y1="52" x2="298" y2="-8"/>
-      </g>
-    </svg>
-    <div id="about-name">MillenAI</div>
-    <div id="about-ver">Version __APP_VER__</div>
-    <div id="about-facts"></div>
-    </div>
+    <!-- RAIL AND PANE (6b243, per Patrick). Every control keeps its id and
+         markup — they are only reparented — so the JS wired to each one
+         still finds it. The rail head is a proper spec list rather than a
+         dot-separated run that wrapped mid-word. -->
+    <nav id="set-rail">
+      <div id="set-brand">
+        <svg id="set-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="swg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#swg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b id="about-name">MillenAI</b>
+      </div>
+      <dl id="set-spec">
+        <div><dt>version</dt><dd id="about-ver">__APP_VER__</dd></div>
+        <div><dt>chip</dt><dd id="spec-chip">__CHIP__</dd></div>
+        <div><dt>memory</dt><dd id="spec-mem">&mdash;</dd></div>
+        <div><dt>accel</dt><dd id="spec-accel">&mdash;</dd></div>
+        <div><dt>models</dt><dd id="about-facts">&mdash;</dd></div>
+      </dl>
+      <div id="set-nav">
+        <button class="snav on" data-pane="p-persona">Personality</button>
+        <button class="snav" data-pane="p-cloud">Cloud power</button>
+        <button class="snav" data-pane="p-community">Community</button>
+        <button class="snav" data-pane="p-models">Models</button>
+        <button class="snav" data-pane="p-updates">Updates</button>
+      </div>
+    </nav>
+
+    <div id="set-main">
     <div id="about-body">
-    <div class="set-sec">
+    <section class="spane on" id="p-persona">
       <div class="set-h">Personality</div>
       <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
         placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
@@ -9600,8 +9700,9 @@ __CODE_ROWS__
         <div id="len-head">Response length <b id="len-val">Balanced</b></div>
         <input type="range" id="len-slider" min="1" max="5" step="1" value="3">
       </div>
-    </div>
-    <div class="set-sec">
+    </section>
+    <section class="spane" id="p-cloud">
+      <div class="set-h">Cloud power</div>
       <label id="turbo-row" hidden><input type="checkbox" id="turbo">
         <span>Use cloud power</span><i class="hint" id="turbo-hint"
         title="Answers come from a cloud GPU instead of this Mac — much faster, but your prompts leave this computer while it is on.">i</i></label>
@@ -9619,6 +9720,9 @@ __CODE_ROWS__
         <div id="ck-note"></div>
         <div id="ck-models"></div>
       </div>
+    </section>
+    <section class="spane" id="p-community">
+      <div class="set-h">Community</div>
       <label id="contrib-row"><input type="checkbox" id="contrib">
         <span>Contribute GPU power</span><i class="hint" id="contrib-hint"
         title="When this machine is idle, it answers questions for friends on MillenAI — and theirs answer yours. Nothing runs while you are using it.">i</i></label>
@@ -9626,19 +9730,22 @@ __CODE_ROWS__
         <div id="fleet-pending"></div>
         <div id="contrib-state"></div>
       </div>
-    </div>
-    <div class="set-sec">
-      <div id="adv-grid">
-        <button class="about-btn" id="open-setup">Model updates&hellip;</button>
-        <button class="about-btn" id="about-check">Check for updates</button>
-        <label id="beta-row"><input type="checkbox" id="betaup">
-          <span>Include Beta Releases</span></label>
-        <button class="about-btn danger" id="about-forget">Forget Me</button>
-      </div>
-    </div>
+    </section>
+    <section class="spane" id="p-models">
+      <div class="set-h">Models</div>
+      <button class="about-btn" id="open-setup">Model updates&hellip;</button>
+    </section>
+    <section class="spane" id="p-updates">
+      <div class="set-h">Updates</div>
+      <button class="about-btn" id="about-check">Check for updates</button>
+      <label id="beta-row"><input type="checkbox" id="betaup">
+        <span>Include Beta Releases</span></label>
+      <button class="about-btn danger" id="about-forget">Forget Me</button>
+    </section>
     </div>
     <div id="about-foot">
     <button class="about-btn primary" id="about-close">Close</button>
+    </div>
     </div>
   </div>
 </div>
@@ -9989,6 +10096,7 @@ setTier(tier);
   chip.querySelector("b").textContent=a;
   chip.title=a==="MLX"
     ?"Local models run on Apple Silicon through MLX"
+    :a==="AMD"?"Local models run on your AMD GPU through ROCm"
     :"Local models run on your NVIDIA GPU through CUDA";
   chip.hidden=false;
 })();
@@ -12863,9 +12971,15 @@ async function openAbout(){
       }else $("#contrib-state").textContent="";
     }catch(e){}
     const ready=st.models.filter(x=>x.status==="ready").length;
-    $("#about-facts").textContent=
-      st.arch+" · "+ready+"/"+st.models.length+" models ready";
-  }catch(e){$("#about-facts").textContent="";}
+    $("#about-facts").textContent=ready+" / "+st.models.length;
+    // the spec list: one fact per line, so nothing wraps (6b243)
+    if(st.accel)$("#spec-accel").textContent=st.accel;
+    try{
+      const stt=await(await fetch("/api/stats")).json();
+      $("#spec-mem").textContent=stt.mem_total_gb
+        ? Math.round(stt.mem_total_gb)+" GB" : "—";
+    }catch(e){}
+  }catch(e){$("#about-facts").textContent="—";}
 }
 /* ------------------------------------------- new models in this release */
 // Two tiers of model discovery, one card. Models the user has NEVER been
@@ -13057,6 +13171,13 @@ upGo.addEventListener("click",async()=>{
     }
   },700);
 });
+// settings rail: one pane at a time
+$$(".snav").forEach(b=>b.addEventListener("click",()=>{
+  $$(".snav").forEach(x=>x.classList.toggle("on",x===b));
+  $$(".spane").forEach(p=>p.classList.toggle("on",p.id===b.dataset.pane));
+  const bd=$("#about-body"); if(bd)bd.scrollTop=0;
+}));
+
 syncSuggest();                      // starter prompts, if the hero is up
 addEventListener("resize",()=>{     // a narrower window fits fewer chips
   const b=$("#suggest");
