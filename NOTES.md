@@ -2388,3 +2388,47 @@ Five gaps that read as backyard-project, all closed:
   cloud.json (status fail). Any test of the save path must back the file
   up and restore it — done here, verified byte-identical both times.
 - Gauntlet 60/60.
+
+## 6 beta 235 (pending release) — a spent quota is not a dead key
+- REGRESSION FROM b233/b234, found live within the hour: Settings showed
+  ✗ Gemini with "You exceeded your current quota", while `/models` on
+  the very same key answered **200**. The key was perfect. The app had
+  marked a healthy provider permanently failed over a free-tier quota
+  that refills by itself, and nothing but a manual re-paste would clear
+  it. Two builds' worth of "honest key status" had made the app
+  confidently wrong.
+- ROOT CAUSE, two places. The save path marked `fail` on ANY HTTPError —
+  and the save probe SPENDS QUOTA, so a 429 there is entirely normal on
+  a free tier. And `cloud_note_failure` classified purely on the status
+  code, treating 403 as auth; Google returns 403 for some quota
+  conditions, so a throttle could down a provider at runtime too.
+- THE BODY GETS A VOTE. `cloud_failure_kind(code, body)` returns
+  auth / quota / other, matching on the code AND on quota language
+  (quota, rate limit, resource exhausted, too many requests, billing).
+  Unit-checked against eight real messages, including 403
+  RESOURCE_EXHAUSTED (quota, not auth) and 403 "not authorized" (auth,
+  not quota).
+- A THROTTLED PROVIDER RESTS, IT DOES NOT FAIL. status stays `ok` and a
+  `cool` timestamp benches it for 10 minutes: `cloud_ok_providers()`
+  skips it so no council seat is wasted on a guaranteed 429, and it
+  returns on its own the moment the window passes. A rate-limited key
+  now SAVES successfully with a warning, because it is a good key.
+- `cloud_conf()` no longer hands back a failed or resting active
+  provider — it falls through to any other working one before giving up
+  on the turbo path. Matched on provider id, not dict equality.
+- ONE-TIME REPAIR: `_cloud_repair()` runs once per process and converts
+  any provider sitting at `fail` with a quota-shaped note back to ok
+  plus a cooldown. Anyone who ran b233/b234 heals on next launch without
+  touching a thing. Verified on this machine: gemini fail -> ok, resting.
+- Board shows a third state — amber ⏳ "resting 10m · quota" instead of
+  the red ✗ that means "go fix your key".
+- Measured end to end: repair fired on launch; bench dropped to Claude
+  alone while Gemini rested; Cloud Only took its single-provider
+  STREAMING path (first exercise of that branch) and answered; Fast-tier
+  turbo answered; the cooldown expiring put Gemini back on the bench
+  unaided, and the next 429 re-rested it — still never `fail`.
+- Gauntlet 60/60.
+- NOT CHANGED, worth a look: the Gemini pick is `gemini-3-flash-preview`,
+  chosen because "gemini-3-flash" heads the discovery preference order.
+  Preview models carry the tightest free-tier quotas, which is why this
+  keeps happening; `gemini-flash-latest` is in the same inventory.
