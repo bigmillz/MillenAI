@@ -2101,3 +2101,20 @@ Five gaps that read as backyard-project, all closed:
   wrote the answer). Singles emit their own RUN. Verified live with
   a shimmed-rAF run: Running… -> Compositor: claude-sonnet-5, text
   growing 0 -> 34 -> 238 progressively.
+
+## 6 beta 224 — search asks first, apologizes never
+- NOT A REGRESSION (verified before touching anything): search fired
+  and returned sources for triggering queries on both tiers. The gap
+  was the TRIGGER — needs_search wanted a freshness word or a
+  quality-word+place-noun pair, so "what sound system does nowadays
+  use" matched nothing and the model answered from memory with an
+  "I can't browse the web" apology (Patrick's screenshot).
+- INVERTED THE DEFAULT: a real question about the world now searches.
+  _WORLDLY_RX (leading question word, or an explicit ask for facts/
+  specs/reviews/comparisons, or a trailing "?") triggers, guarded by
+  _SELF_CONTAINED — translate/rewrite/summarize/refactor/debug/
+  creative-writing and "this code|my essay" phrasing never search,
+  because that work carries its own context.
+- Battery-tested 17 prompts (8 should / 9 shouldn't): all correct.
+  End-to-end on Fast, the exact failing question now reports
+  X-Web-Search: 1 and "Searched the web · 4 sources".

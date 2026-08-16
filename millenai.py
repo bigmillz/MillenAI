@@ -1439,6 +1439,26 @@ _FRESH_PATTERNS = (
     _ASKY_RX,
     _BOOKING_RX,
 )
+# WORK THAT CARRIES ITS OWN CONTEXT: rewriting, translating, coding,
+# creative writing and pure math need no web (6b224) — everything else
+# that ASKS something gets grounded.
+_SELF_CONTAINED = re.compile(
+    r"\b(translate|rewrite|reword|paraphrase|proofread|summari[sz]e|"
+    r"refactor|debug|fix\s+(this|my)|explain\s+(this|my)\s+(code|error)|"
+    r"write\s+(me\s+)?(a|an|some)?\s*(poem|story|song|essay|email|"
+    r"letter|caption|joke|script|cover\s+letter)|"
+    r"this\s+(code|text|file|function|error|snippet|draft)|"
+    r"my\s+(code|essay|draft|resume|cv|email))\b", re.I)
+
+# ASKS ABOUT THE WORLD: a question word, or an explicit request for
+# facts about something. Deliberately broad — a grounded answer beats a
+# remembered one, and the app shows its sources.
+_WORLDLY_RX = re.compile(
+    r"^\s*(who|what|whats|what's|when|where|which|why|how|is|are|does|"
+    r"do|did|can|should|any)\b|"
+    r"\b(tell me about|info on|details on|spec|specs|review|reviews|"
+    r"rated|compare|versus|vs\.?|near me|around here|open now)\b", re.I)
+
 # never search these — they're about the conversation, not the world
 _NO_SEARCH = re.compile(
     r"^\s*(hi|hey|hello|thanks|thank you|ok|okay|cool|nice|sure|yes|no|"
@@ -1477,7 +1497,15 @@ def needs_search(prompt: str) -> bool:
     low = p.lower()
     if any(w in low for w in _FRESH_WORDS):
         return True
-    return any(rx.search(low) for rx in _FRESH_PATTERNS)
+    if any(rx.search(low) for rx in _FRESH_PATTERNS):
+        return True
+    # 6b224, per Patrick ("make sure web search is enabled"): a real
+    # question about the world searches, unless it's self-contained
+    # work. This is what makes "what sound system does nowadays use"
+    # get sources instead of an apology (seen live).
+    if _SELF_CONTAINED.search(low):
+        return False
+    return bool(_WORLDLY_RX.search(p) or p.rstrip().endswith("?"))
 
 # words that mean "same subject, different day" — they carry no entity
 _REL_WORDS = frozenset("""
