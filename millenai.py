@@ -8273,7 +8273,14 @@ body.perf .msg{animation:none}
    the right; the answer is flat serif prose on the backdrop */
 .msg.user{display:flex;flex-direction:column;align-items:flex-end}
 .msg.user .who{display:none}
+/* 6b241, per Patrick: the question reads in the SAME face as the box it
+   was typed into. It was inheriting Helvetica Neue at 23.9 leading
+   against the composer's Space Grotesk at 21.75 — same size, different
+   typeface, so the words visibly changed shape the moment you pressed
+   enter. Matched to #input exactly, and white rather than --text. */
 .msg.user .body{
+  font-family:var(--sans);font-size:14.5px;line-height:1.5;
+  letter-spacing:normal;color:#fff;
   background:rgba(12,13,17,.44);border:1px solid rgba(255,255,255,.10);
   -webkit-backdrop-filter:blur(16px) saturate(1.2);
           backdrop-filter:blur(16px) saturate(1.2);

@@ -2968,3 +2968,16 @@ Five gaps that read as backyard-project, all closed:
   surface something dull. og:image is preferred first because it is the
   one image a page has deliberately chosen to represent itself.
 - Gauntlet 60/60.
+
+## 6 beta 241 (pending release) — the question keeps the face it was typed in
+- The user bubble was inheriting `--helv` (Helvetica Neue) at 23.9
+  leading while the composer it was typed into is Space Grotesk at
+  21.75 — same 14.5px size, different typeface, so the words visibly
+  changed shape the instant you pressed enter.
+- Matched to #input on every axis and set to pure white rather than
+  --text. Verified all five: face, size, leading, tracking, colour.
+- Both panels of the window now speak one typeface: sidebar, answer
+  prose and the question bubble are all Space Grotesk; only the
+  micro-labels (mono) and the wordmark (Michroma) differ, which is the
+  point of having them.
+- Gauntlet 60/60.
