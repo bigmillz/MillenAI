@@ -2136,3 +2136,16 @@ Five gaps that read as backyard-project, all closed:
 - Verified live: a search+council run showed bars=1 and steps
   [Searched the web · 5 sources / Read the pages · 1 image /
   Located it on the map / Consulting models · 2 of 3].
+
+## 6 beta 225 — say it once
+- THE LAST ECHO: srcRow still opened with its own "🌐 searched the
+  web" label above the chips, so the phrase appeared twice whenever
+  sources landed (tree row + chip label). The label is gone and its
+  CSS with it — the tree reports WHAT happened ("Searched the web ·
+  5 sources"), the chips report WHERE (clickable favicon+domain).
+  Informative, not repetitive.
+- POWER header removed from Settings; only Personality keeps a
+  micro-header now, and the cloud/contribute controls stand on their
+  own like the maintenance rows do.
+- Verified live: a Fast search run counts exactly ONE "searched the
+  web" in the whole message, 5 source chips, 1 bar.

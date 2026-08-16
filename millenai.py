@@ -7199,12 +7199,6 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
   border:1px solid rgba(255,255,255,.3);border-radius:3px;
   padding:0 3px;margin-left:6px;
 }
-.websrc{
-  display:inline-block;font-family:var(--mono);font-size:10px;
-  letter-spacing:.08em;color:var(--teal);background:rgba(255,255,255,.07);
-  border:1px solid rgba(255,255,255,.18);border-radius:5px;
-  padding:2px 7px;margin-bottom:9px;
-}
 /* clickable source chips under the badge — favicon + domain, opens the
    page. The graphical proof of the search, not just a claim of one. */
 .srcrow{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 12px}
@@ -8037,7 +8031,6 @@ __CODE_ROWS__
       <button class="about-btn slim" id="persona-save">Save</button>
     </div>
     <div class="set-sec">
-      <div class="set-h">Power</div>
       <label id="turbo-row" hidden><input type="checkbox" id="turbo">
         <span>Use cloud power</span><i class="hint" id="turbo-hint"
         title="Answers come from a cloud GPU instead of this Mac — much faster, but your prompts leave this computer while it is on.">i</i></label>
@@ -8630,7 +8623,10 @@ function whoLabel(s){
 // the "searched the web" badge plus clickable source chips — the answer
 // shows WHERE it looked, Google-style, not just that it looked
 function srcRow(srcs){
-  let h='<span class="websrc">🌐 searched the web</span>';
+  // no label (6b225, per Patrick): the tree row above already reports
+  // "Searched the web · N sources" — these chips only say WHERE, and
+  // saying it twice was the redundancy.
+  let h="";
   if(srcs&&srcs.length){
     h+='<div class="srcrow">'+srcs.map(s=>{
       let d="";try{d=new URL(s.u).hostname.replace(/^www\./,"");}catch(e){return "";}
