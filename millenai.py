@@ -7774,6 +7774,29 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #fleet-pending .preq button{margin-left:auto;padding:5px 12px;
   border-radius:8px;border:none;background:var(--accent);color:#1a1a1a;
   font-weight:600;cursor:pointer}
+/* response length (6b231): slim rail, full width, and the same
+   mono micro-header type as every other label in this window. The
+   earlier attempt silently no-op'd — its anchor never matched, so
+   the control fell back to the native blue slider. */
+#len-row{margin-top:12px}
+#len-head{font-family:var(--mono);font-size:9px;letter-spacing:.18em;
+  text-transform:uppercase;color:var(--faint);margin-bottom:9px;
+  display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+#len-head b{color:var(--dim);font-weight:500;letter-spacing:.1em}
+#len-slider{-webkit-appearance:none;appearance:none;display:block;
+  width:100%;height:2px;border-radius:1px;margin:0 0 2px;padding:0;
+  background:rgba(255,255,255,.16);outline:none;cursor:pointer}
+#len-slider::-webkit-slider-runnable-track{height:2px;border-radius:1px;
+  background:transparent;border:none}
+#len-slider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;
+  width:11px;height:11px;border-radius:50%;background:#e9eaee;border:none;
+  margin-top:-4.5px;box-shadow:0 1px 4px -1px rgba(0,0,0,.9);cursor:pointer;
+  transition:transform .12s ease}
+#len-slider:hover::-webkit-slider-thumb{transform:scale(1.15)}
+#len-slider::-moz-range-track{height:2px;border-radius:1px;
+  background:rgba(255,255,255,.16);border:none}
+#len-slider::-moz-range-thumb{width:11px;height:11px;border-radius:50%;
+  background:#e9eaee;border:none;cursor:pointer}
 /* compressed (5.3, per Patrick): the tall pill stack read as three
    stray buttons — tighter rows, no MAINTENANCE label */
 #adv-grid{display:flex;flex-direction:column;gap:5px;margin-top:0}

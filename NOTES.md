@@ -2240,3 +2240,17 @@ Five gaps that read as backyard-project, all closed:
   slightly wider gap; focus lightens the border on all three.
 - Measured: all three boxes 32px tall with identical top and bottom
   edges.
+
+## 6 beta 231 — the length slider gets dressed
+- THE b227 SLIDER CSS NEVER SHIPPED: its insertion anchor didn't
+  match, so `.replace()` silently no-op'd and the control fell back
+  to the native blue iOS slider with a big sans label. Third silent
+  no-op in this line — from here scripted CSS inserts assert the
+  anchor exists AND assert the result changed.
+- Now: 2px hairline track full width (290px in the panel), 11px
+  round thumb that scales slightly on hover, native appearance reset
+  on track and thumb for both WebKit and Gecko. The label is the
+  window's standard micro-header — IBM Plex Mono 9px, .18em, uppercase,
+  --faint — measured EQUAL to the PERSONALITY header's computed
+  font, size, tracking and colour, with the value right-aligned in
+  --dim.
