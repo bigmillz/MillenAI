@@ -2082,3 +2082,22 @@ Five gaps that read as backyard-project, all closed:
   landed mid-file and broke the fleet JS into an unterminated string
   (caught by inspection before it shipped). Rule reinforced: every
   scripted edit batch gets a page-load check before anything else.
+
+## 6 beta 223 — the drip, the pinwheel, the honest label
+- SMOOTH UNFOLDING (per Patrick: "not chunks magically appearing"):
+  network chunks land in `full`; a paced rAF animator reveals toward
+  the backlog (rate eases at lag*0.055, min 2 chars/frame), so text
+  flows like typing. RESET replays the replacement smoothly. Stream
+  end waits up to 1.8s for the reveal to catch up (hidden windows
+  throttle rAF — then it snaps, which nobody sees).
+- THE CARET IS DEAD: streaming text ends in the pinwheel (.scaret)
+  instead of a blinking block. The tree spinner grew to 17px and is
+  flex-centered against the bar.
+- THE LABEL SPEAKS PLAINLY: dedicated RUN markers (not
+  status-sniffing) drive it — "Running… a, b" listing every
+  simultaneously active voice (bench threads + local loop each
+  narrate add/remove under a lock), then "Compositor: name" as the
+  ladder tries each rung (the marker that sticks is the one that
+  wrote the answer). Singles emit their own RUN. Verified live with
+  a shimmed-rAF run: Running… -> Compositor: claude-sonnet-5, text
+  growing 0 -> 34 -> 238 progressively.

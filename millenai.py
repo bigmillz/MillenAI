@@ -3581,6 +3581,26 @@ def run_council(labels: list, messages: list, emit, status,
     labels = (usable or labels[:1])[:12]
 
     drafts = []
+    _running = set()
+    _run_lock = threading.Lock()
+
+    def run_mark(add=None, rm=None, compositor=None):
+        """Tell the UI exactly who is working RIGHT NOW (6b223) — the
+        label reads 'Running… a, b' for every simultaneous voice and
+        'Compositor: name' once the merge starts."""
+        try:
+            if compositor is not None:
+                emit(NUL + "RUN:" + json.dumps({"c": compositor}) + NUL)
+                return
+            with _run_lock:
+                if add:
+                    _running.add(add)
+                if rm:
+                    _running.discard(rm)
+                now = sorted(_running)
+            emit(NUL + "RUN:" + json.dumps({"r": now}) + NUL)
+        except Exception:
+            pass
 
     def took_part(label, text):
         """Record a draft and show it. Blending is the whole point of these
@@ -3599,7 +3619,9 @@ def run_council(labels: list, messages: list, emit, status,
     if load_prefs(None).get("turbo"):
         def _cloud_draft(lbl, conf):
             status(f"asking {lbl} \u00b7 cloud")
+            run_mark(add=lbl)
             t = strip_think(cloud_text(conf, messages))
+            run_mark(rm=lbl)
             if t and not _looks_degenerate(t):
                 took_part(lbl, t)
             else:
@@ -3750,10 +3772,12 @@ def run_council(labels: list, messages: list, emit, status,
     # falling through on any failure. Local Gemma stays the floor.
     if load_prefs(None).get("turbo"):
         for _cc in compositor_ladder():
+            run_mark(compositor=_cc.get("model") or _cc.get("name", ""))
             _t = strip_think(cloud_text(_cc, synth))
             if _t and len(_t) > 120 and not _looks_degenerate(_t):
                 emit(_t)
                 return
+    run_mark(compositor=merger)
     try:
         _stream_guarded(merger, synth, emit, status, good[0][1],
                         "showing the best single answer")
@@ -5985,8 +6009,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 # cloud is a pref, not a tier (Best retired in 5.3)
                 turbo = (load_prefs(None).get("turbo")
                          and cloud_conf() and not images)
+
+                def _run_lbl(names):
+                    try:
+                        emit(NUL + "RUN:"
+                             + json.dumps({"r": names}) + NUL)
+                    except Exception:
+                        pass
                 if turbo:
                     status(f"turbo \u2014 {cloud_conf().get('name','cloud')}")
+                    _run_lbl([cloud_conf().get("name", "cloud")])
                     if cloud_stream(full_messages, emit):
                         hb_stop.set()
                         return
@@ -6000,6 +6032,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         if free_cloud_stream(full_messages, emit):
                             hb_stop.set()
                             return
+                _run_lbl([lbl])
                 ftext = fleet_run(lbl, full_messages, status) \
                     if not images else ""
                 # searched answers were EXCLUDED from the polish pass, so
@@ -6900,6 +6933,8 @@ body:not(.perf) .wtbar i{animation:skyshimmer 3s linear infinite}
 /* the living pinwheel (5.2): Claude has its flower — ours spins the
    identity gradient beside whatever is in motion */
 .wthead{display:flex;align-items:center;gap:9px;margin-bottom:10px}
+.wthead .wtspin{height:17px;display:flex;align-items:center}
+.wtspin.scaret{font-size:15px;vertical-align:-2px;margin-left:6px}
 .wthead .wtbar{flex:1;margin-bottom:0}
 .wtspin{display:inline-block;flex:none;font-style:normal;font-size:14px;
   line-height:1;
@@ -8974,17 +9009,41 @@ async function send(){
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
     if(lastModels){const w=aiDiv.querySelector(".who");if(w)w.textContent=whoLabel(lastModels);}
-    // the label is LIVE (6b216, per Patrick): show the model that is
-    // running RIGHT NOW; the merge leg reads "compositing…" and never
-    // credits the merger by name
-    const whoLive=()=>{
-      const w=aiDiv.querySelector(".who");if(!w||!status)return;
-      if(/^compositing/.test(status)){w.textContent="compositing\u2026";return;}
-      const hit=(lastModels||"").split(",").map(x=>x.trim())
-        .find(m=>m&&status.indexOf(m)>=0);
-      if(hit)w.textContent=hit;
+    // the label speaks plainly (6b223, per Patrick): "Running… a, b"
+    // with every simultaneously active model, then "Compositor: name" —
+    // driven by dedicated RUN markers, not status-sniffing
+    const setWho=t=>{const w=aiDiv.querySelector(".who");if(w)w.textContent=t;};
+    if(searched)body.innerHTML=srcRow(sources)+'<i class="wtspin scaret">✱</i>';
+    // THE DRIP (6b223, per Patrick: "unfold slowly… not chunks
+    // magically appearing"): network chunks land in `full`; a paced
+    // animator reveals it at a rate that eases toward the backlog, so
+    // text flows like typing instead of teleporting. The caret is
+    // gone — the pinwheel rides the text's tail instead.
+    let dripShown=0,dripOn=false,streamEnded=false;
+    const paintStream=txt=>{
+      const hasBar=!!aiDiv.querySelector(".blendprog");
+      const treeHTML=(body.querySelector(".worktree")||{}).outerHTML||"";
+      body.innerHTML=treeHTML
+        +(status&&!txt&&!hasBar
+          ?'<span class="statusline"><i class="wtspin">✱</i> '
+           +esc(status)+'…</span>':"")
+        +(searched?srcRow(sources):"")
+        +renderMD(txt.replace(/\n?\[\[PLACES\]\][\s\S]*$/,""))
+        +(streamEnded?"":'<i class="wtspin scaret">✱</i>');
+      requestAnimationFrame(()=>wireFlow(body));
+      if(curChat===myChat)autoScroll();
     };
-    if(searched)body.innerHTML=srcRow(sources)+'<span class="caret"></span>';
+    const dripTick=()=>{
+      if(dripShown>=full.length){dripOn=false;
+        if(streamEnded)paintStream(full);
+        return;}
+      const lag=full.length-dripShown;
+      dripShown=Math.min(full.length,
+        dripShown+Math.max(2,Math.ceil(lag*0.055)));
+      paintStream(full.slice(0,dripShown));
+      requestAnimationFrame(dripTick);
+    };
+    const kickDrip=()=>{if(!dripOn){dripOn=true;requestAnimationFrame(dripTick);}};
     const reader=resp.body.getReader(),dec=new TextDecoder();
     let raw="";
     while(true){
@@ -8992,9 +9051,16 @@ async function send(){
       if(done)break;
       raw+=dec.decode(value,{stream:true});
       // pull progress markers out so they never land in the answer
-      full=raw.replace(/\u0000STATUS:(.*?)\u0000/g,(_,t)=>{
+      full=raw.replace(/\u0000RUN:(.*?)\u0000/g,(_,j)=>{
+                try{const d=JSON.parse(j);
+                  if(d.c!==undefined)setWho("Compositor: "+d.c);
+                  else if(d.r)setWho(d.r.length
+                    ?"Running\u2026 "+d.r.join(", "):"Running\u2026");
+                }catch(e){}
+                return "";})
+              .replace(/\u0000RUN:[^\u0000]*$/,"")
+              .replace(/\u0000STATUS:(.*?)\u0000/g,(_,t)=>{
                 status=t;if(seenStatus.indexOf(t)<0)seenStatus.push(t);
-                whoLive();
                 return "";})
               .replace(/\u0000STATUS:[^\u0000]*$/,"")    // partial marker
               .replace(/\u0000DRAFT:(.*?)\u0000/g,(_,j)=>{
@@ -9040,17 +9106,13 @@ async function send(){
       const secs=(performance.now()-t0)/1000;
       lastRate=secs>0.3?tokEst/secs:0;
       setToks(lastRate,"streaming");
-      const hasBar=!!aiDiv.querySelector(".blendprog");
-      const treeHTML=(body.querySelector(".worktree")||{}).outerHTML||"";
-      body.innerHTML=treeHTML
-        +(status&&!full&&!hasBar
-          ?'<span class="statusline"><i class="wtspin">✱</i> '
-           +esc(status)+'…</span>':"")
-        +(searched?srcRow(sources):"")
-        +renderMD(full.replace(/\n?\[\[PLACES\]\][\s\S]*$/,""))+'<span class="caret"></span>';
-      requestAnimationFrame(()=>wireFlow(body));
-      if(curChat===myChat)autoScroll();
+      if(cut>=0)dripShown=0;    // a RESET replays the replacement
+      kickDrip();
     }
+    streamEnded=true;
+    // let the reveal catch up (capped — a hidden window throttles rAF)
+    for(let w=0;w<60&&dripShown<full.length;w++)
+      await new Promise(r=>setTimeout(r,30));
   }catch(err){
     if(err.name==="AbortError")wasAborted=true;
     else{
