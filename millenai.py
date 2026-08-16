@@ -1896,11 +1896,27 @@ def _entity_thin(q: str) -> bool:
 _FUNNEL_PICK_RX = re.compile(r"\s→\s(.+)$")
 
 
-def _thread_terms(messages) -> str:
+# conversational throat-clearing that must never reach a search engine
+_PREAMBLE_RX = re.compile(
+    r"^\s*(no,?\s+)?(i\s+meant|i\s+mean|actually|sorry,?|scratch\s+that|"
+    r"nvm|never\s?mind|wait,?)[\s,:.-]+", re.I)
+
+
+def _thread_terms(messages, avoid: str = "") -> str:
     """The entity of the most recent searchable USER turn — so a
     follow-up ("what about tomorrow?") inherits the place it's about
-    instead of searching for the word 'tomorrow'."""
+    instead of searching for the word 'tomorrow'.
+
+    `avoid` is the query being built: BORROW ONLY WHAT IT LACKS (6b240).
+    Taking the first four tokens instead handed back "any good bars
+    clubs" from "any good bars or clubs open late/now in bushwick ny" —
+    four generic words, with the only part that mattered truncated off
+    the end. The search then had no location at all and returned
+    Virginia Beach, San Diego and Bodrum (measured). What a follow-up
+    needs from the thread is precisely the part it does not already say.
+    """
     try:
+        skip = set(re.findall(r"[a-z0-9'&-]+", (avoid or "").lower()))
         msgs = list(messages)[:-1]
         # A FINISHED FUNNEL IS THE SUBJECT (6b238). Its picks are stored
         # as ASSISTANT turns shaped "question → choice", so the user-turn
@@ -1919,7 +1935,8 @@ def _thread_terms(messages) -> str:
             words = []
             for p in picks[:3]:
                 for w in re.findall(r"[a-z0-9'&-]+", p.lower()):
-                    if w not in _PLACE_FILLER and w not in words:
+                    if (w not in _PLACE_FILLER and w not in words
+                            and w not in skip):
                         words.append(w)
             if words:
                 return " ".join(words[:4])
@@ -1931,7 +1948,10 @@ def _thread_terms(messages) -> str:
                     if w not in _REL_WORDS]
             if toks and (needs_search(c)
                          or _BOOKING_RX.search(c.lower())):
-                return " ".join(toks[:4])
+                # what the new query already says is not worth repeating;
+                # the leftovers are the location it is missing
+                fresh = [w for w in toks if w not in skip]
+                return " ".join((fresh or toks)[:4])
     except Exception:
         pass
     return ""
@@ -3384,6 +3404,153 @@ def _geocode(q: str):
     return out
 
 
+# ------------------------------------------------- places from OpenStreetMap
+# HOURS ARE THE PERISHABLE PART (6b242, per Patrick). A model cannot know
+# what is open tonight and search snippets rarely carry it — that is the
+# whole reason "any bars open late in bushwick" answered with an apology.
+# Overpass has it, structured, free, keyless, from the same project as the
+# Nominatim geocoder above. Measured on Bushwick: 40 venues in 1.1s, 33 of
+# them (82%) carrying machine-readable opening_hours. It has NO ratings —
+# that half still needs a commercial provider, and is garnish next to
+# knowing the door is open.
+_OSM_KINDS = (
+    (r"\b(night ?club|clubs?|nightlife|disco)\b", "nightclub|bar"),
+    (r"\b(bars?|pubs?|speakeas|brewer|cocktail)\b", "bar|pub|biergarten"),
+    (r"\b(cafes?|cafés?|coffee|espresso)\b", "cafe"),
+    (r"\b(bakery|bakeries|pastr)\b", "bakery"),
+    (r"\b(pizza|sushi|ramen|tacos?|burgers?|noodles?|bbq|barbecue|"
+     r"restaurants?|eater|eats|dinner|lunch|brunch|diner)\b",
+     "restaurant|fast_food"),
+    (r"\b(pharmac|chemist|drugstore)\b", "pharmacy"),
+)
+_OSM_CACHE = {}
+_OSM_TTL = 1800.0
+
+
+def _osm_kind(terms: str) -> str:
+    for rx, amenity in _OSM_KINDS:
+        if re.search(rx, terms or "", re.I):
+            return amenity
+    return ""
+
+
+def _oh_open_now(spec: str, now=None) -> bool:
+    """Is an OSM opening_hours string open right now?
+
+    A PRAGMATIC SUBSET, not the full grammar: day ranges and lists with
+    clock ranges, including past-midnight spans ("Mo-Sa 18:00-04:00"),
+    plus 24/7. Anything with holidays, weeks, months or offsets returns
+    False rather than guessing — for this feature a missed venue is a
+    small loss and a venue wrongly called open is the whole failure.
+    """
+    s = (spec or "").strip()
+    if not s:
+        return False
+    if s == "24/7":
+        return True
+    if re.search(r"\b(PH|SH|easter|week|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sep|"
+                 r"Oct|Nov|Dec)\b", s):
+        return False
+    now = now or time.localtime()
+    days = ["Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"]
+    today, mins = now.tm_wday, now.tm_hour * 60 + now.tm_min
+    yday = (today - 1) % 7
+    for rule in s.split(";"):
+        rule = rule.strip()
+        if not rule or "off" in rule.lower():
+            continue
+        m = re.match(r"^([A-Za-z,\-]+)?\s*(.*)$", rule)
+        if not m:
+            continue
+        dayspec, times = (m.group(1) or "").strip(), (m.group(2) or "").strip()
+        # every weekday this rule covers, as a set
+        cover = set()
+        if not dayspec:
+            cover = set(range(7))
+        for part in [p for p in dayspec.split(",") if p]:
+            if "-" in part:
+                a, b = part.split("-", 1)
+                if a[:2] in days and b[:2] in days:
+                    i, j = days.index(a[:2]), days.index(b[:2])
+                    cover |= {x % 7 for x in
+                              (range(i, j + 1) if i <= j else range(i, j + 8))}
+            elif part[:2] in days:
+                cover.add(days.index(part[:2]))
+        if not cover:
+            continue
+        for a, b in re.findall(r"(\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})",
+                               times):
+            ah, am_ = (int(x) for x in a.split(":"))
+            bh, bm = (int(x) for x in b.split(":"))
+            start, end = ah * 60 + am_, bh * 60 + bm
+            if end <= start:
+                # RUNS PAST MIDNIGHT, so the small hours belong to
+                # YESTERDAY's rule. At 01:58 on a Sunday a bar posting
+                # "Mo-Sa 18:00-04:00" is open — it is still inside
+                # Saturday's span — but matching only today's weekday
+                # called it shut (caught live, and "open late" is the
+                # entire point of this feature).
+                if (today in cover and mins >= start) or \
+                        (yday in cover and mins < end):
+                    return True
+            elif today in cover and start <= mins < end:
+                return True
+    return False
+
+
+def osm_places(terms: str, locality: str, limit: int = 8) -> list:
+    """Named venues near `locality` with real hours. [] on any failure —
+    this is an enhancement to the snippet path, never a dependency."""
+    amenity = _osm_kind(terms)
+    if not amenity or not locality:
+        return []
+    key = (amenity, locality.lower())
+    now = time.time()
+    hit = _OSM_CACHE.get(key)
+    if hit and now - hit[0] < _OSM_TTL:
+        return hit[1]
+    geo = _geocode(locality)
+    if not geo:
+        return []
+    q = ('[out:json][timeout:20];node["amenity"~"^(%s)$"]["name"]'
+         '(around:1400,%s,%s);out body 60;'
+         % (amenity, geo["lat"], geo["lon"]))
+    try:
+        req = urllib.request.Request(
+            "https://overpass-api.de/api/interpreter",
+            data=urllib.parse.urlencode({"data": q}).encode(),
+            headers={"User-Agent": "MillenAI/%s (contact: "
+                                   "millertechnology.net)" % APP_VERSION})
+        with urllib.request.urlopen(req, timeout=25) as r:
+            els = json.load(r).get("elements", [])
+    except Exception:
+        return []
+    rows = []
+    for e in els:
+        t = e.get("tags") or {}
+        name = (t.get("name") or "").strip()
+        if not name:
+            continue
+        oh = (t.get("opening_hours") or "").strip()
+        bits = [t.get("cuisine", "").replace(";", ", "),
+                t.get("amenity", "")]
+        rows.append({
+            "n": name[:60],
+            "d": " · ".join(b for b in bits if b)[:60],
+            "h": oh[:90],
+            "lat": e.get("lat"), "lon": e.get("lon"),
+            "open": _oh_open_now(oh) if oh else None,
+        })
+    # open now first, then anything with published hours, then the rest
+    rows.sort(key=lambda r: (r["open"] is not True,
+                             not r["h"], r["n"].lower()))
+    rows = rows[:limit]
+    if len(_OSM_CACHE) > 60:
+        _OSM_CACHE.clear()
+    _OSM_CACHE[key] = (now, rows)
+    return rows
+
+
 def run_search_deep(query: str, pages: int = 2) -> str:
     """Snippets PLUS the readable text of the top result pages — place
     queries need actual hours/addresses, which live in pages, not blurbs."""
@@ -3412,13 +3579,48 @@ _PLACE_FILLER = frozenset("""
     that the their there they this time times to today tomorrow tonight
     until up wanna want was wassup we what whats when whens where wheres
     which who whos will would yall yerr yo you your
+    any good best nice cool great spot spots place places some around
+    looking find recommend recommendation recommendations suggest
+    suggestions worth check checking
 """.split())
+# ^ the second block is 6b240. These carry no search value — "bushwick ny
+# whats a GOOD SPOT any bars" returned TikTok and a private-bar-rental
+# site, while the same question as plain keywords returned Yelp and The
+# Infatuation's Bushwick bar guide (measured). Subjective words are what
+# the READER wants; the index only has nouns.
 
 
 def _place_terms(prompt: str) -> str:
     """'is ables in bushwick open tonight' -> 'ables bushwick'."""
     words = re.findall(r"[a-z0-9'&-]+", prompt.lower())
     return " ".join(w for w in words if w not in _PLACE_FILLER)[:80]
+
+
+_GOOD_HOSTS = ("yelp.", "theinfatuation.", "timeout.", "eater.",
+               "thrillist.", "ra.co", "opentable.", "resy.",
+               # tripadvisor is deliberately NOT here: promoting it put a
+               # YOGA STUDIO at rank 0 for "bars in bushwick" (measured).
+               # Its guides are fine, its per-venue pages are noise, and
+               # the host alone cannot tell them apart.
+               "google.com/maps", "nytimes.",
+               "grubstreet.", "seriouseats.", "bkmag.",
+               "brooklynmagazine.", "secretnyc.", "atlasobscura.",
+               "michelin.", "zagat.")
+_JUNK_HOSTS = ("pinterest.", "tiktok.", "youtube.", "quora.",
+               "superpages.", "yellowpages.", "restaurantji.",
+               "tagvenue.", "manta.com", "chamberofcommerce.",
+               "bizapedia.", "translate.", "gta5-mods.", "yellowbook.",
+               "citysearch.", "hotfrog.", "brownbook.", "cylex")
+
+
+def _host_score(u: str) -> int:
+    """0 = a source worth reading, 1 = unknown, 2 = directory spam."""
+    h = (u or "").lower()
+    if any(d in h for d in _JUNK_HOSTS):
+        return 2
+    if any(d in h for d in _GOOD_HOSTS):
+        return 0
+    return 1
 
 
 def place_search(query: str) -> tuple:
@@ -3457,8 +3659,29 @@ def place_search(query: str) -> tuple:
                 hits.append(r)
         if sum(1 for r in hits if is_direct(r)) >= 2:
             break
+    # WHERE A PLACE ANSWER ACTUALLY COMES FROM (6b240). Even a perfectly
+    # clean query gets pinterest boards, tiktok discovery pages,
+    # venue-hire listings and printed-directory spam: "bushwick ny bars
+    # clubs" returned tagvenue, pinterest, tiktok and a YOGA STUDIO
+    # (measured), while the sources a person would actually open — Yelp,
+    # The Infatuation, Time Out, Eater, Resident Advisor — sat further
+    # down the SAME result list. Demote, never drop: sometimes the junk
+    # is all there is, and a thin answer beats no answer.
     direct = [r for r in hits if is_direct(r)]
-    ordered = direct + [r for r in hits if r not in direct]
+    rest = [r for r in hits if r not in direct]
+    # DISCOVERY vs A NAMED PLACE. "is ables open tonight" wants whichever
+    # result actually mentions Ables, and is_direct is exactly right for
+    # it. "bars in bushwick" is a different question: EVERY directory in
+    # the index mentions Bushwick, so is_direct stops discriminating and
+    # happily ranks yellowpages and a venue-hire site above Time Out
+    # (measured). A query naming a CATEGORY rather than a place is a
+    # discovery question — there, the host is the only real signal.
+    if _VENUE_RX.search(terms):
+        ordered = sorted(hits, key=lambda r: _host_score(r.get("href") or ""))
+    else:
+        direct.sort(key=lambda r: _host_score(r.get("href") or ""))
+        rest.sort(key=lambda r: _host_score(r.get("href") or ""))
+        ordered = direct + rest
     _stash_sources(ordered)
     ctx = "\n".join("- %s: %s" % (r.get("title") or "", r.get("body") or "")
                     for r in ordered[:8]) or "No snippets found."
@@ -3470,9 +3693,9 @@ def place_search(query: str) -> tuple:
         host = u.split("/")[2].lower() if u.count("/") >= 2 else ""
         if anchor and anchor.replace("'", "") in host.replace("-", ""):
             return 0                       # lucali.com for "lucali"
-        if any(d in host for d in ("yelp.", "tripadvisor.", "opentable.")):
-            return 1
-        return 2
+        # the two pages worth 7 seconds each are the ones a person would
+        # have opened; directory spam is never one of them
+        return 1 + _host_score(u)
     urls = sorted(((r.get("href") or "") for r in direct
                    if (r.get("href") or "").startswith("http")),
                   key=_rank)[:2]
@@ -6436,11 +6659,18 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             # the greeting is chat, not query — "Yo is abes open" once
             # produced an answer about a place called "Yo is Abe's"
             query = strip_greeting(prompt) or prompt.strip()
+            # "i meant whats a good spot…" — the correction is for the
+            # reader, not the search engine, and it dragged the results
+            # off to Virginia Beach and Bodrum (measured, 6b240)
+            query = _PREAMBLE_RX.sub("", query, count=1).strip() or query
             # FOLLOW-UP THREADING: "is it open tomorrow" names no place —
             # borrow the entity from the previous searched turn so the
-            # conversation keeps its thread
-            if _entity_thin(query):
-                prev = _thread_terms(messages)
+            # conversation keeps its thread. A PLACE question threads too
+            # even when it isn't "thin": "any bars or clubs open" names
+            # venues, so _entity_thin says it has a subject — but it has
+            # no LOCATION, and a place search without one is worthless.
+            if _entity_thin(query) or _VENUE_RX.search(query):
+                prev = _thread_terms(messages, avoid=query)
                 if prev:
                     query = prev + " " + query
         elif (auto_web and not TIERS.get(tier, {}).get("research")):
@@ -6448,13 +6678,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             # last-turn message ("what about saturday?") inherits the
             # previous entity and searches WITH it
             p2 = strip_greeting(prompt)
+            p2 = _PREAMBLE_RX.sub("", p2, count=1).strip() or p2
             if p2 and len(p2.split()) <= 10 and _FOLLOWUP_RX.search(p2):
-                prev = _thread_terms(messages)
+                prev = _thread_terms(messages, avoid=p2)
                 if prev:
                     query = prev + " " + p2
 
         if query:
             _tl_search.rows = []   # keep-alive reuses threads — no stale rows
+            _tl_search.osm = []    # ditto: last question's venues must go
             _tl_search.photos = []
             _tl_search.geo = None
             _tl_search.locq = ""
@@ -6495,6 +6727,31 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     snippets, matched = place_search(query)
                     pt_ = _place_terms(query).split()
                     _tl_search.locq = pt_[-1] if len(pt_) > 1 else ""
+                    # REAL HOURS, ON TOP OF THE SNIPPETS (6b242). Overpass
+                    # knows what is open right now; snippets almost never
+                    # do. Placed FIRST in the context and labelled as the
+                    # authority, because a blog post's stale hours must
+                    # not outrank a structured tag. Additive only — an
+                    # empty result changes nothing.
+                    _terms = _place_terms(query)
+                    _loc = " ".join(_terms.split()[-2:])
+                    _osm = osm_places(_terms, _loc) if _loc else []
+                    if _osm:
+                        _tl_search.osm = _osm
+                        _open = [p for p in _osm if p.get("open")]
+                        _lines = "\n".join(
+                            "- %s%s — %s%s" % (
+                                p["n"], (" (" + p["d"] + ")") if p["d"] else "",
+                                p["h"] or "hours not published",
+                                "  [OPEN NOW]" if p.get("open") else "")
+                            for p in _osm)
+                        snippets = (
+                            "VENUE DATA (OpenStreetMap, authoritative for "
+                            "hours — prefer these over any hours mentioned "
+                            "in the web snippets below; %d of %d are open "
+                            "right now):\n%s\n\n%s"
+                            % (len(_open), len(_osm), _lines, snippets or ""))
+                        matched = True
                     if matched:
                         # a pin only counts when the geocoder actually
                         # landed in the right neighborhood — "food
@@ -7027,7 +7284,33 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     step("draft", "Answer written", "done",
                          "%d chars" % sent[0])
                     step("polish", "Sharpened", "done", "")
-                if (query and sent[0] > 120
+                # OSM already named the venues and knows where they are,
+                # so the local extraction pass is pure cost — pin them
+                # straight from the structured rows, mentioning only the
+                # ones the answer actually talked about.
+                _osmr = getattr(_tl_search, "osm", None) or []
+                if _osmr and sent[0] > 60 and not images:
+                    _ans = "".join(answer_buf).lower()
+                    _named = [p for p in _osmr if p["n"].lower() in _ans]
+                    _pick = (_named or _osmr)[:4]
+                    step("places", "Pinned the places", "done",
+                         "%d from OpenStreetMap" % len(_pick))
+                    try:
+                        _write((NUL + "PLACES2:" + json.dumps(
+                            [{"n": p["n"],
+                              "d": p["d"],
+                              "h": (p["h"] + (" · open now" if p.get("open")
+                                              else "")) if p["h"] else ""}
+                             for p in _pick]) + NUL).encode("utf-8"))
+                        if _pick and _pick[0].get("lat"):
+                            _write((NUL + "MAP:" + json.dumps(
+                                {"lat": _pick[0]["lat"],
+                                 "lon": _pick[0]["lon"],
+                                 "name": _pick[0]["n"]}) + NUL)
+                                .encode("utf-8"))
+                    except Exception:
+                        pass
+                elif (query and sent[0] > 120
                         and (placey or bookish) and not images
                         and not cloud_only):   # pinning runs a local model
                     step("places", "Finding the places", "run", "")
@@ -7280,19 +7563,57 @@ body.resizing{cursor:col-resize;user-select:none}
 .vghost{
   font-family:var(--disp);text-transform:uppercase;
   font-size:12.5px;letter-spacing:.15em;
-  color:rgba(255,255,255,.72);user-select:none;
+  /* 6b242, per Patrick ("looks too overlapped, not one fluid piece"):
+     the wing has to go BEHIND the C, and a 72%-transparent letter
+     occludes nothing — the bars showed straight through the stroke,
+     which is what read as funky. So the TYPE is opaque and the 72%
+     moves to the group: children composite first (the C hides the bars
+     it crosses), then the whole lockup is dimmed as one. */
+  color:#fff;opacity:.72;user-select:none;
   display:inline-block;line-height:1.2;white-space:nowrap;
   margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
 }
 .vghost b{font-weight:400}
-#vmark{width:15px;height:15px;margin-right:2px;vertical-align:-2.5px}
+/* 6b241, per Patrick's sketch: the dock icon's diagonal bars become a
+   swept wedge that runs INTO the C — a delta wing whose trailing edge
+   is the letter, which is the right idea for something called Concorde.
+   Same construction as make_icon.py (parallel 45-degree bars, each
+   shorter toward the corner, so the group reads as a triangle) and the
+   same greyscale ramp, but reversed: steel at the far tip, brightest
+   where it meets the C, so the eye carries the sweep into the type.
+   It ABUTS the letter — the old 2px gap read as icon-then-word. */
+/* SAME HEIGHT AS THE C, AND CUTTING INTO IT (6b241, per Patrick).
+   The viewBox is now the STROKE's own bounding box — round caps
+   included — so the rendered height IS the wing's height with no
+   built-in padding to guess at. Measured Michroma at 12.5px: cap
+   ascent 9.57, overshoot 0.20, so the wing is 9.8 tall and sits 0.2
+   below the baseline exactly like the C's curve does. It was 16px in a
+   20-unit box, which is why it towered over the letter.
+   The negative margin pulls the C across the wing's tall edge: the
+   glyph paints after the SVG, so the letter cuts the bars — and at the
+   wordmark's own 72% alpha the gradient reads THROUGH the stroke,
+   which is the blend the sketch was after.
+   The overlap is a TUCK, not a collision: 2.6px of an 11.7px mark put
+   the bars deep into the bowl of the C. 1.3px slips the wing's tall
+   edge just under the letter's left stroke, which is what makes the
+   two read as one piece.
+   AND IT LOOKED SHORT BECAUSE IT WAS. The bars' right ends stopped at
+   staggered heights, so at the junction — the one place the eye
+   compares wing to letter — the ink covered only 84% of the box and
+   the bottom-right corner was empty. A fifth short bar carries the
+   trailing edge down to 94%, and the element is sized so that INKED
+   span, not the box, equals the C's 9.77 cap. */
+#vmark{width:12.4px;height:10.4px;margin-right:-1.3px;vertical-align:-.8px}
 /* INSIDE the wordmark's inline run (6b217): one text run = one
    baseline in every engine — flex centering diverged between Blink
    and WKWebView because the two faces carry different line metrics.
    13px mono caps optically match Michroma 12.5px caps. */
 .vsub{font-style:normal;font-family:var(--mono);font-size:13px;
   letter-spacing:.06em;text-transform:uppercase;
-  color:rgba(255,255,255,.38);margin-left:4px}
+  /* .53 under the group's .72 lands back on the .38 it has always
+     rendered at — the version row must not change because of a fix
+     to the mark beside it */
+  color:rgba(255,255,255,.53);margin-left:4px}
 
 #newchat,#settings-btn{
   width:26px;height:26px;flex-shrink:0;
@@ -7851,11 +8172,18 @@ body.perf .msg{animation:none}
 /* precise sans (6.0b207, per Patrick: "match claude code… current
    font and line gaps don't look very precise") — SF on Mac, tuned
    tracking, steadier rhythm than the old serif */
+/* 6b241, per Patrick: closer still to Claude Code. Answer prose was
+   14.75px and read cramped next to it — measured 14.75/25.08 with 15px
+   between paragraphs. Claude's reading size is ~16 with leading near
+   1.72 and a fuller gap between blocks, and at 16px the same 700px
+   column still lands around 70 characters, which is where prose wants
+   to be. Tracking goes a hair tighter because the larger size needs
+   less of it. */
 .msg.ai .body{
   padding:0 2px;
   font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text',
     'Segoe UI',Inter,sans-serif;
-  font-size:14.75px;line-height:1.7;letter-spacing:-.006em;
+  font-size:16px;line-height:1.72;letter-spacing:-.009em;
 }
 /* code, tables and chips stay in their own faces inside the serif flow */
 .msg.ai .body code,.msg.ai .body pre{font-family:var(--mono)}
@@ -7944,7 +8272,9 @@ body:not(.perf) .wtrow.run .wtdot{animation:blink 1s ease-in-out infinite}
   cursor:pointer;transition:background .15s}
 .retrybtn:hover{background:rgba(255,255,255,.14)}
 
-.body p{margin:0 0 1.05em}
+/* blocks breathe: 1.05em was 15px and ran the paragraphs together — a
+   gap slightly larger than the line height is what separates them */
+.body p{margin:0 0 1.2em}
 .body p:last-child{margin-bottom:0}
 /* a real hierarchy instead of three identical sizes */
 .body h1,.body h2,.body h3{
@@ -7952,12 +8282,14 @@ body:not(.perf) .wtrow.run .wtdot{animation:blink 1s ease-in-out infinite}
   line-height:1.3;letter-spacing:-.005em;
   margin:1.8em 0 .6em;
 }
-.body h1{font-size:21px}
-.body h2{font-size:18px}
-.body h3{font-size:16px;color:var(--text)}
+/* the scale moves with the body: at 16px prose, an 18px h2 barely read
+   as a heading at all */
+.body h1{font-size:23px}
+.body h2{font-size:19.5px}
+.body h3{font-size:17px;color:var(--text)}
 .body>h1:first-child,.body>h2:first-child,.body>h3:first-child{margin-top:0}
-.body ul,.body ol{margin:0 0 1.05em;padding-left:1.35em}
-.body li{margin-bottom:.42em;padding-left:.15em}
+.body ul,.body ol{margin:0 0 1.2em;padding-left:1.35em}
+.body li{margin-bottom:.5em;padding-left:.15em}
 .body li:last-child{margin-bottom:0}
 .body li>ul,.body li>ol{margin:.42em 0 0}
 .body ul li::marker{color:var(--faint)}
@@ -8333,6 +8665,40 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
    left, actions right */
 #crow{display:flex;align-items:center;justify-content:space-between;
   gap:8px;margin-top:4px}
+/* STARTER PROMPTS (6b242, per Patrick — Gemini-style). The row is a
+   child of #composer-wrap, so it is the composer's width by
+   construction rather than by a number that would drift. How many
+   appear is decided at RUNTIME: chips are laid out, then any that
+   wrapped past the second row are removed, so the block always fills
+   its width and never becomes a wall. */
+#suggest{
+  display:flex;flex-wrap:wrap;gap:7px;justify-content:center;
+  margin:0 0 12px;padding:0 2px;
+}
+#suggest[hidden]{display:none}
+.sugg{
+  /* the emoji fonts are named explicitly: Space Grotesk carries no
+     glyphs for them and the ZWJ sequences fell through to tofu */
+  font-family:var(--sans),'Apple Color Emoji','Segoe UI Emoji',
+    'Noto Color Emoji',sans-serif;
+  font-size:12px;line-height:1.3;
+  color:var(--dim);background:rgba(255,255,255,.045);
+  border:1px solid rgba(255,255,255,.09);border-radius:999px;
+  padding:7px 13px;cursor:pointer;white-space:nowrap;
+  /* GROW TO FILL THE ROW: centred chips left ragged gutters against a
+     full-width composer, and the brief was that the two match */
+  flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
+  transition:background .15s,border-color .15s,color .15s;
+  animation:suggIn .3s ease both;
+}
+.sugg:hover{background:rgba(255,255,255,.09);
+  border-color:rgba(255,255,255,.2);color:var(--text)}
+.sugg:focus-visible{outline:2px solid rgba(255,255,255,.35);
+  outline-offset:2px}
+@keyframes suggIn{from{opacity:0;transform:translateY(4px)}
+  to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){.sugg{animation:none}}
+
 #model-chip{
   font-family:var(--mono);font-size:10px;color:var(--faint);
   padding:4px 11px;display:flex;gap:6px;align-items:center;
@@ -8498,6 +8864,17 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #turbo-row,#contrib-row,#nolimits-row,#share-row,#beta-row{
   display:flex;align-items:center;gap:10px;font-size:13px;
   color:var(--text);padding:8px 2px;cursor:pointer;line-height:1.4}
+/* 6b241, per Patrick: beta opt-in is a preference, not a headline — it
+   sat at the same weight as "Check for updates" right above it */
+#beta-row{font-size:11.5px;font-style:italic;color:var(--faint)}
+#beta-row:hover{color:var(--dim)}
+/* "Forget Me" is the quiet way out, not a button competing with Close */
+#about-forget.about-btn.danger{
+  background:none;border:none;padding:6px 2px;
+  font-size:11.5px;color:var(--faint);
+  text-decoration:underline;text-underline-offset:3px;
+  text-align:center;width:100%}
+#about-forget.about-btn.danger:hover{color:#e8907e;border:none}
 #share-row[hidden]{display:none}
 #turbo-row[hidden]{display:none}
 .hint{
@@ -8983,7 +9360,7 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
     <div id="brand-row">
-    <span class="vghost" title="MillenAI"><svg id="vmark" viewBox="0 0 20 20" aria-hidden="true"><defs><linearGradient id="vmg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f2f3f6"/><stop offset="1" stop-color="#787e89"/></linearGradient></defs><g stroke="url(#vmg)" stroke-width="3" stroke-linecap="round"><line x1="3" y1="16.5" x2="15" y2="4.5"/><line x1="8.5" y1="18" x2="17" y2="9.5"/><line x1="14" y1="19.5" x2="19" y2="14.5"/></g></svg><b>MillenAI</b> <i class="vsub">__APP_VER__</i></span>
+    <span class="vghost" title="MillenAI"><svg id="vmark" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="vmg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#vmg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b>MillenAI</b> <i class="vsub">__APP_VER__</i></span>
 <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
@@ -9112,6 +9489,9 @@ __CODE_ROWS__
   </div></div>
 
   <div id="composer-wrap">
+    <!-- starter prompts: inside composer-wrap so the row is EXACTLY the
+         composer's width without having to restate it -->
+    <div id="suggest" hidden></div>
     <div id="imgchips" hidden></div>
     <div id="composer">
 
@@ -9253,7 +9633,7 @@ __CODE_ROWS__
         <button class="about-btn" id="about-check">Check for updates</button>
         <label id="beta-row"><input type="checkbox" id="betaup">
           <span>Include Beta Releases</span></label>
-        <button class="about-btn danger" id="about-forget">Forget me</button>
+        <button class="about-btn danger" id="about-forget">Forget Me</button>
       </div>
     </div>
     </div>
@@ -10195,6 +10575,7 @@ function editResend(text){
 }
 function addMsg(role,text,drafts,srcs,mapd,ph,places,loc){
   const hero=$("#hero"); if(hero)hero.remove();
+  const sg=$("#suggest"); if(sg)sg.hidden=true;   // hero's gone, so are these
   const sl=$("#skyload"); if(sl)sl.hidden=true;
   const div=document.createElement("div");
   div.className="msg "+(role==="user"?"user":"ai");
@@ -10680,8 +11061,66 @@ async function pushChatsToDisk(){
   }catch(e){}
 }
 
+/* ---------------------------------------------------- starter prompts */
+// Grouped so a refresh can take ONE from each area rather than five
+// dinner questions in a row — variety is the whole point of showing them.
+const SUGG_SETS=[
+["🍝 What should I make for dinner tonight?","🥘 What can I cook with what's in my fridge?","🍳 How do I cook the perfect egg?","🌮 Cheap meals that taste expensive","🍕 Is pizza actually that unhealthy?","☕ How much caffeine is too much?","🥗 Meal prep ideas for a busy week","🍞 How hard is it to bake bread at home?","🔪 Knife skills every beginner should know","🍜 Why does restaurant food taste better than mine?","🧄 Ingredients that make everything taste better","🍗 How do I stop overcooking chicken?","🍰 Desserts with 5 ingredients or less","🌶️ Why does spicy food hurt?","🍺 What's the actual difference between beers?","🥤 How bad is soda really?","🍎 Foods people think are healthy but aren't","🧊 How long does food really last in the fridge?","🍽️ How do I cook for one without wasting food?","🥑 Why is avocado so expensive?"],
+["🍔 What's good to eat near me?","✈️ Cheapest places to travel right now","🗺️ Plan me a weekend trip","🏝️ Best beaches in the world","🎒 What should I pack for a week away?","🏔️ Countries cheaper than staying home","🚗 Best road trips to take","🛂 How do I get a passport?","🌍 Safest countries for solo travelers","💺 How do I find genuinely cheap flights?","🚆 Is train travel better than flying?","🧳 How do people travel carry-on only?","🗼 Most overrated tourist attractions","🌆 Best cities in the world to live in","🏕️ How do I start camping?","🕰️ How do I beat jet lag?","🌋 Natural wonders worth seeing once","🚙 Things to do near me this weekend","💸 How much does a trip to Japan cost?","🧭 Underrated places most people skip"],
+["💰 How do I actually start investing?","📈 How does the stock market work?","🏦 Where should I keep my savings?","💳 How do I improve my credit score?","🧾 Am I paying too much in taxes?","🏠 Should I rent or buy?","💼 How do I ask for a raise?","📝 Make my resume better","🎯 Jobs that pay well without a degree","🤖 Will AI take my job?","💵 How do I make money on the side?","📊 Help me build a budget","🛒 Am I wasting money on subscriptions?","🧮 How much do I need to retire?","🕴️ How do I negotiate a job offer?","📧 Write a professional email for me","🔥 How do I quit my job gracefully?","🏢 Is remote work going away?","💡 Business ideas I could start this year","🪙 Is crypto still a thing?"],
+["🏋️ How do I start working out?","😴 Why am I always tired?","🚶 How many steps do I actually need?","💪 How long until I see results at the gym?","🧠 How do I stop procrastinating?","🥦 What should I eat to feel better?","💧 How much water do I really need?","🛌 How do I fix my sleep schedule?","🧘 Does meditation actually work?","🏃 Can I train for a 5K in a month?","🦷 Am I brushing my teeth wrong?","🤕 Why does my back hurt?","📵 How do I use my phone less?","🧴 Is my skincare routine pointless?","🍷 What does alcohol do to your body?","🚭 How do people quit smoking for good?","😰 How do I calm down when I'm anxious?","⏰ Are morning people actually happier?","🩺 What checkups do I need at my age?","🧬 How much of health is just genetics?"],
+["🎸 How do I learn guitar?","🗣️ What's the easiest language to learn?","💻 How do I learn to code?","📚 What should I read next?","✍️ How do I get better at writing?","🎨 Can anyone learn to draw?","🧠 How do I remember things better?","⏱️ Can you really learn something in 20 hours?","🎹 Is it too late to learn piano?","♟️ Teach me chess","📷 How do I take better photos?","🎤 How do I get better at public speaking?","🧑‍🍳 Skills everyone should know by 30","🏊 How do adults learn to swim?","🚲 Things that are easier to learn than you'd think","🗒️ How do I take better notes?","🎧 Best way to learn during a commute","🧩 How do I get better at problem solving?","🕺 How do I learn to dance?","🎓 Is a degree still worth it?"],
+["🚗 How fast can electric cars actually go?","🌌 How big is the universe?","🕳️ What happens inside a black hole?","🌊 Why is the ocean salty?","🌩️ How does lightning work?","🧠 How much of my brain do I actually use?","🐙 How smart are octopuses?","🦖 What really killed the dinosaurs?","☀️ What happens when the sun dies?","🌙 Why does the moon look bigger some nights?","🧲 How do magnets actually work?","📶 How does WiFi work?","🛫 How do planes stay in the air?","🔋 Why do phone batteries get worse?","🧪 Everyday chemistry that looks like magic","🐝 What happens if bees disappear?","🌡️ What's actually happening with the climate?","⏳ How close are we to slowing aging?","👽 Is there life on other planets?","🌀 Is time travel possible?"],
+["🧹 How do I actually deep clean my place?","🪴 What plants are impossible to kill?","🔧 Home repairs I can do myself","🧺 Am I doing laundry wrong?","🛋️ How do I make a small space feel bigger?","💡 How do I lower my electric bill?","🐜 How do I get rid of bugs in my house?","🎨 What color should I paint my room?","🧯 What belongs in an emergency kit?","📦 How do I move without losing my mind?","🚿 Why is my water pressure so bad?","🗑️ What can I actually recycle?","🐕 Should I get a dog?","🧼 Cleaning tricks that actually work","🛠️ Tools everyone should own","🔑 What do I do if I'm locked out?","🌡️ What should I set my thermostat to?","📺 How do I set up a home theater?","🧊 Why is my fridge making that noise?","🏡 What to check before signing a lease"],
+["🎬 What should I watch tonight?","🎵 Help me find new music","🎮 What game should I play next?","📺 Great shows nobody talks about","🍿 Movies everyone should see once","🎙️ What podcast should I listen to?","🏆 Who's the greatest athlete of all time?","⚽ Explain the offside rule to me","🎭 Why do people love musicals?","🖼️ Why is modern art worth so much?","📖 Books that changed people's lives","🎤 Why do songs get stuck in your head?","🃏 Card games for two people","🎲 Best board games for game night","🕹️ Why were old video games so hard?","📸 What makes something go viral?","🎻 Why does sad music feel good?","🌟 Explain this meme to me","🏈 Explain a sport I know nothing about","🎃 Costume ideas that are actually good"],
+["💬 How do I make friends as an adult?","🎁 What do I get someone who has everything?","💌 Help me write a birthday message","🗨️ How do I start a conversation with anyone?","💔 How do I get over a breakup?","👨‍👩‍👧 How do I deal with difficult family?","🥂 What do I say in a wedding toast?","🙅 How do I say no without feeling guilty?","💐 Date ideas that aren't dinner and a movie","😬 How do I recover from an awkward moment?","📱 Should I text them back?","🧑‍🤝‍🧑 How do I keep long-distance friendships alive?","🗣️ How do I apologize properly?","🎉 How do I throw a party people enjoy?","👶 What do new parents actually need?","🙃 How do I handle a bad boss?","💍 How much should I spend on a gift?","🤐 How do I stop oversharing?","🫂 What do I say when someone's grieving?","🎊 Good questions to ask at a dinner party"],
+["🤔 Explain something complicated in simple terms","🎲 Tell me something I don't know","🧠 What are the most common logical fallacies?","🕰️ What was daily life like 200 years ago?","🗿 Historical mysteries nobody has solved","💭 Why do we dream?","😂 Why do we laugh?","🐈 Why do cats do that?","🔮 What will life look like in 50 years?","⚖️ Is free will real?","🌏 Why are there so many languages?","📜 The most important inventions ever made","🧿 Where do superstitions come from?","🎰 What are the real odds of winning the lottery?","🧑‍⚖️ Laws that make absolutely no sense","🐜 How many ants are there on Earth?","🤖 How does AI actually work?","🌎 What if everyone jumped at the same time?","🗺️ Why are borders shaped the way they are?","❓ Ask me a question that makes me think"]];
+
+function paintSuggest(){
+  const box=$("#suggest"); if(!box)return;
+  // one from each area, shuffled — never five dinner questions together
+  const pick=SUGG_SETS.map(s=>s[Math.floor(Math.random()*s.length)]);
+  for(let i=pick.length-1;i>0;i--){
+    const j=Math.floor(Math.random()*(i+1));
+    [pick[i],pick[j]]=[pick[j],pick[i]];
+  }
+  box.innerHTML=pick.map(q=>'<button class="sugg" type="button">'
+    +esc(q)+'</button>').join("");
+  box.hidden=false;
+  // HOW MANY FIT IS MEASURED, NOT GUESSED: lay them out, then drop
+  // anything that wrapped past the second row. Chip widths vary with
+  // the text, so a fixed count would either overflow or leave a gap.
+  requestAnimationFrame(()=>{
+    const kids=[...box.children];
+    if(!kids.length)return;
+    const rows=[...new Set(kids.map(k=>
+      Math.round(k.getBoundingClientRect().top)))].sort((a,b)=>a-b);
+    const keep=rows.slice(0,2);
+    kids.forEach(k=>{
+      if(keep.indexOf(Math.round(k.getBoundingClientRect().top))<0)k.remove();
+    });
+  });
+  box.querySelectorAll(".sugg").forEach(el=>{
+    el.addEventListener("click",()=>{
+      // the emoji is decoration for the chip, not part of the question
+      input.value=el.textContent.replace(/^[^\w"'(]+\s*/,"").trim();
+      input.dispatchEvent(new Event("input"));
+      syncSuggest();
+      send();
+    });
+  });
+}
+// visible only on the empty hero — once a chat is under way the space
+// belongs to the conversation
+function syncSuggest(){
+  const box=$("#suggest"); if(!box)return;
+  if($("#hero")&&!generating){ if(box.hidden)paintSuggest(); }
+  else box.hidden=true;
+}
+
 function resetHero(){
   inner.innerHTML='<div id="hero"><p class="greet">'+esc(greeting())+'</p></div>';
+  paintSuggest();
 }
 function saveChats(){
   // write through to disk, coalesced so a burst of messages is one write
@@ -12574,7 +13013,7 @@ $("#about-forget").addEventListener("click",async ev=>{
   await fetch("/api/memory/clear",{method:"POST"});
   b.dataset.sure="";b.textContent="Memory cleared";
   openAbout();
-  setTimeout(()=>{b.textContent="Forget me";},2500);
+  setTimeout(()=>{b.textContent="Forget Me";},2500);
 });
 
 /* --------------------------------------------------------- self-update */
@@ -12617,6 +13056,11 @@ upGo.addEventListener("click",async()=>{
       $("#up-detail").textContent="Update failed: "+(st.note||"unknown error");
     }
   },700);
+});
+syncSuggest();                      // starter prompts, if the hero is up
+addEventListener("resize",()=>{     // a narrower window fits fewer chips
+  const b=$("#suggest");
+  if(b&&!b.hidden){b.hidden=true;syncSuggest();}
 });
 checkUpdate();                      // ALWAYS on launch — a stale build
                                     // was the root of most "X doesn't

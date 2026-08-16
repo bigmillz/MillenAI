@@ -2597,3 +2597,220 @@ Five gaps that read as backyard-project, all closed:
 - Measured after: swaps 1.1-3.6s, single-resident invariant holds, and a
   three-model Thinking run finished in 31.2s with four real drafts.
 - Gauntlet 60/60.
+
+## 6 beta 240 (pending release) — the search QUERY was the problem
+- Side by side against Claude on "any bars or clubs open" in Bushwick,
+  Concorde said its search "pulled results for Clifton, NJ instead" and
+  cited oneminuteenglish.org, superpages, restaurantji and yellowpages.
+  It is not the backend. Measured on the same engine:
+      "i meant whats a good spot. any bars or clubs open"
+          -> Virginia Beach, San Diego, BODRUM, GTA5 mods, Yandex Translate
+      "bars bushwick brooklyn open late"
+          -> Yelp, The Infatuation's Bushwick bar guide, barsforkings
+  Garbage in, garbage out. Three faults built the garbage.
+- 1. THE LOCATION WAS TRUNCATED OFF. `_thread_terms` returned
+  `toks[:4]` — from "any good bars or clubs open late/now in bushwick
+  ny" that is "any good bars clubs", four generic words with the ONLY
+  part that mattered cut off the end. It now borrows what the new query
+  LACKS (`avoid=`), which leaves exactly "bushwick ny".
+- 2. CONVERSATIONAL PREAMBLE WENT TO THE INDEX. "i meant", "actually",
+  "sorry", "wait" are for the reader. `_PREAMBLE_RX` strips them.
+- 3. A PLACE QUESTION WITH NO LOCATION never threaded: "any bars or
+  clubs open" names venues, so `_entity_thin` said it has a subject —
+  but a place search with no location is worthless. Venue queries thread
+  too now.
+- Subjective words joined `_PLACE_FILLER` (any/good/best/spot/place/
+  recommend/…): the index has nouns, not opinions. Query went from
+  "bushwick ny whats a good spot any bars clubs" to "bushwick ny bars
+  clubs".
+- HOST RANKING. Even a clean query returned tagvenue (venue hire),
+  pinterest, tiktok and a YOGA STUDIO, while Yelp / Time Out / The
+  Infatuation sat lower in the SAME list. `_host_score` demotes
+  directory spam and promotes sources a person would actually open —
+  demote, never drop, because sometimes the junk is all there is.
+- AND `is_direct` WAS OUTRANKING IT. That gate asks "does this result
+  mention the thing asked about", which is right for "is ables open" and
+  useless for "bars in bushwick", where every directory mentions
+  Bushwick. A query naming a CATEGORY is a discovery question and is
+  ranked by host alone.
+- Tripadvisor is deliberately NOT promoted: it put a yoga studio at rank
+  0. Its guides are good, its per-venue pages are noise, and a hostname
+  cannot tell them apart.
+- Measured end state for that question: Time Out's Bushwick neighborhood
+  guide first, then a Bushwick bars-and-restaurants guide naming
+  Roberta's, then a nightclubs guide. Spam at the bottom.
+- STILL NOT PARITY, and ranking heuristics will not get there. Claude's
+  answer came from a PLACES API with structured hours, ratings and
+  coordinates; this reads search snippets. The real fix is Google Places
+  or Yelp Fusion behind `place_search` — a key, not a regex.
+- Gauntlet 60/60.
+
+## 6 beta 241 (pending release) — answer type, closer to Claude Code
+- The rule that actually governs answer prose is `.msg.ai .body`, not the
+  `.msg .body` above it — `--helv` never applied at all. Measured before
+  touching anything: 14.75px / 25.08px leading / 15px between paragraphs,
+  in a 661px column.
+- Now 16px / 1.72 (27.5px) with a 1.2em block gap (19px), tracking a
+  hair tighter at -.009em because a larger size needs less of it. The
+  heading scale moved with it (23 / 19.5 / 17) — an 18px h2 over 16px
+  prose barely read as a heading. List items breathe at .5em.
+- Same 661px column: at 16px that is still roughly 70 characters, which
+  is where prose wants to sit, so the measure did not need touching.
+- HONEST LIMIT: this matches the METRICS — size, leading, block rhythm,
+  measure. It cannot match the typeface. Claude's faces (Styrene,
+  Tiempos) are commercial licences that can't be embedded in a shipped
+  binary, so the stack stays system-native: SF Pro on macOS, Segoe on
+  Windows. That is the same family of grotesque and the rhythm is what
+  the eye actually reads, but it is a near-match, not a replica.
+- Gauntlet 60/60.
+
+## 6 beta 241 — settings hierarchy
+- "Include Beta Releases" was 13px at full text colour, the same weight
+  as "Check for updates" directly above it, so a niche preference read
+  as a headline. Now 11.5px italic in --faint (measured 11.5 vs the
+  button's 12.5), lifting to --dim on hover.
+- "Forget me" was a bordered danger BUTTON competing with Close. Now
+  "Forget Me": borderless, transparent, 11.5px, centred, underlined with
+  a 3px offset, full row width — a quiet way out rather than a control.
+  Its confirm-state reset string was updated to match the new casing,
+  which is the kind of thing that silently reverts a label.
+
+## Research note — hours and ratings WITHOUT an API key
+- Scraping Google Maps was raised. Against it: it breaks Google's terms,
+  the results are JS-rendered behind obfuscated endpoints that change
+  without notice, and — the part that actually decides it — Concorde is
+  a DISTRIBUTED DESKTOP APP, so the traffic comes from every user's own
+  IP. The failure mode isn't our scraper breaking, it's users getting
+  CAPTCHA'd on their personal Google accounts.
+- MEASURED ALTERNATIVE, OpenStreetMap Overpass, free and keyless, same
+  project as the Nominatim geocoder already in use:
+      Bushwick bbox -> 40 bar/pub/nightclub venues in 1.1s
+      33 of 40 (82%) carry structured opening_hours
+      e.g. Mood Ring "Mo-Tu 17:00-02:00; We-Fr 17:00-04:00"
+           Keybar    "Mo-Th 18:00-02:00; Fr-Sa 18:00-04:00; Su 18:00-24:00"
+      real venues, machine-readable, no key, no billing account
+      ratings: ZERO — OSM carries none
+- So HOURS, the perishable half of "open late tonight", are available
+  free and legally. RATINGS are the part that needs a commercial
+  provider (Foursquare's free tier has them; Yelp has them).
+- Gauntlet 60/60.
+
+## 6 beta 241 — the wordmark becomes a delta wing
+- Per Patrick's sketch: the dock icon's diagonal gradient sweeps INTO
+  the C rather than sitting beside it as a separate glyph. Right idea
+  for something called Concorde — the mark is a wing whose trailing
+  edge is the letter.
+- Same construction as make_icon.py (parallel bars, each shorter toward
+  the corner so the group reads as a triangle) and the same greyscale
+  ramp, but REVERSED: steel at the far tip, brightest where it meets
+  the C, so the eye carries the sweep into the type instead of stopping
+  at it.
+- The sweep is shallower than the icon's 45 degrees — measured against
+  the sketch, whose hypotenuse is noticeably wider than tall, so it
+  reads as a wing rather than a corner. viewBox widened to 23, four
+  bars at ~39 degrees, 2.4 stroke.
+- The 2px gap is gone (margin-right:-.5px): a gap read as
+  icon-then-word, and the whole point is one lockup.
+- The type was NOT touched — "the rest is fine". Notably the `b` was
+  left as a plain inline run: making it inline-block to reach
+  ::first-letter would have re-opened the b217 baseline divergence
+  between Blink and WKWebView, which is documented right above this
+  rule. The blend is carried by the gradient landing on the wordmark's
+  own colour instead.
+- Gauntlet 60/60, wordmark tests included.
+
+## 6 beta 242 (pending release) — real venue hours, from OpenStreetMap
+- `osm_places(terms, locality)`: Nominatim geocodes the locality, then
+  Overpass returns named venues within 1400m of it. Free, keyless, and
+  the same project the pin geocoder already uses. Cached 30 min per
+  (category, locality) — venue hours barely change and the endpoint is
+  a volunteer service.
+- Fed into the answer as a LABELLED AUTHORITY placed ABOVE the web
+  snippets, because a blog post's stale hours must never outrank a
+  structured tag. Purely additive: no venues found changes nothing.
+- Pins now come straight from the structured rows, preferring the venues
+  the answer actually named. That replaces the old local-model
+  extraction pass for these questions — OSM already knows the names and
+  the coordinates, so running a model to re-read them was pure cost.
+- `_oh_open_now()` parses a PRAGMATIC SUBSET of the opening_hours
+  grammar: day ranges and lists, clock ranges, past-midnight spans,
+  24/7. Anything with holidays, weeks or months returns False rather
+  than guessing — a missed venue is a small loss, a venue wrongly called
+  open is the whole failure.
+- BUG CAUGHT BY TESTING AT 01:58 ON A SUNDAY: a past-midnight span
+  belongs to YESTERDAY's rule. A bar posting "Mo-Sa 18:00-04:00" is open
+  at 2am Sunday — it is still inside Saturday's span — but matching only
+  today's weekday called it shut. Since "open late" is the entire point
+  of the feature, that bug would have broken it precisely when it
+  mattered. Now 7/7 on hand-built cases including that one.
+- MEASURED, the same question that started this:
+    before  "My search didn't turn up real bar or club listings for
+             Bushwick tonight — it pulled results for Clifton, NJ"
+    after   Bossa Nova Civic Club (open until 4am), Boobie Trap,
+            Bonus Room — named, with hours, plus a caveat that Keybar
+            and Christophers Palace close early on a Sunday, and four
+            pins with coordinates.
+  Bossa Nova is the same venue Claude named in the side-by-side.
+- STILL NO RATINGS. OSM carries none; that half needs a commercial
+  provider and is garnish next to knowing the door is open.
+- Gauntlet 60/60.
+
+## 6 beta 242 — the wing goes BEHIND the C, and a CSS bug that hid it
+- A 72%-transparent letter occludes nothing, so the bars showed straight
+  through the C's stroke — that was the "funky" overlap. The TYPE is
+  opaque now and the 72% moved to the group: children composite first
+  (the C hides the bars it crosses), then the lockup dims as one.
+  `.vsub` compensates at .53 so the version row still renders at the
+  .38 it always did.
+- Overlap cut from 2.6px to 1.3px of an 11.7px mark — a tuck under the
+  left stroke rather than a collision in the bowl.
+- CAUGHT ONLY BY MEASURING: the mark was rendering 179x214px instead of
+  11.7x9.8. The previous edit had appended a comment continuation AFTER
+  an already-closed block comment, leaving a stray `*/` that killed the
+  `#vmark` rule and everything after it in the stylesheet. A screenshot
+  would have shown "a big logo"; getBoundingClientRect showed 179 and
+  named the cause. Balance-audited every CSS comment afterwards: 165
+  opens / 167 closes, and BOTH extra closers were false positives —
+  `*/` inside JS regex literals like /\*\*(...)\*\*/g. One real bug.
+
+## 6 beta 242 — starter prompts
+- A row of clickable chips in the gap between the greeting and the
+  composer. Placed INSIDE #composer-wrap, so it is the composer's width
+  by construction rather than by a number that would drift — measured
+  661 = 661.
+- HOW MANY IS MEASURED, NOT GUESSED: ten candidates are laid out, then
+  any that wrapped past the second row is removed. Chip widths vary with
+  their text, so a fixed count would either overflow or leave a gap.
+  `flex:1 1 auto` then grows the survivors to fill each row — measured
+  99% span on both rows; centred chips had left ragged gutters against a
+  full-width composer.
+- 200 prompts in ten themed sets, one drawn from each and shuffled, so a
+  refresh never shows five dinner questions in a row. The emoji is
+  decoration: it is stripped before the question is sent.
+- Emoji fonts are named explicitly in the stack — Space Grotesk has no
+  glyphs for them and the ZWJ sequences fell through to tofu.
+- Visible only on the empty hero, and re-fitted on window resize.
+- Gauntlet 60/60.
+
+## 6 beta 242 — the wing was genuinely short, and the same CSS trap twice
+- Patrick: "still doesn't match the top and bottom of the C — looks
+  smaller." He was right, and the box measurement said otherwise: the
+  ELEMENT was 9.8px against a 9.77 cap. The ink was not filling it.
+  The bars' right ends stopped at staggered heights, so at the junction
+  — the one place the eye compares wing to letter — the painted span
+  was 84% of the box with an empty bottom-right corner.
+- A fifth short bar carries the trailing edge down to ~94%, and the
+  element is now sized so the INKED span, not the box, equals the cap:
+  painted 10.38 against cap 9.77, a ~6% optical overshoot that a
+  tapering triangle needs against a solid stroke.
+- LESSON: `getBoundingClientRect()` on the element measures the BOX.
+  For a shape that does not fill its own viewBox, that number is a
+  reassuring lie. Measure the painted geometry (the <g>, plus half the
+  stroke width, which getBoundingClientRect excludes).
+- AND THE SAME CSS TRAP FIRED TWICE: appending explanation to a comment
+  that was already closed leaves a stray `*/`, which kills the rule
+  after it AND everything below it in the sheet. First time it rendered
+  the mark at 179x214. RULE: after editing any CSS comment, balance-audit
+  the <style> blocks specifically — a whole-file scan reports false
+  positives from `*/` inside JS regex literals like /\*\*(...)\*\*/g.
+  Style blocks now 118 opens / 118 closes.
