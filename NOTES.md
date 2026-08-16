@@ -2194,3 +2194,28 @@ Five gaps that read as backyard-project, all closed:
 - MEASURED, not assumed: identical question ("how does espresso
   differ from drip coffee?") returned 616 chars at level 1 and 2623
   at level 5 — a 4.3x spread from one dial.
+
+## 6 beta 228 — Funnels
+- A THIRD TAB (Chat | Code | Funnels; glide back to thirds). The
+  sidebar form asks Patrick's five questions — decision,
+  requirements, prompt type (text/images), options per prompt (2-6),
+  stages (1-20) — and "Start funnel" runs it in the main panel.
+- HOW IT WORKS: /api/funnel is stateless; the CLIENT owns the path.
+  Each call sends {goal, reqs, opts, stages, images, picks[]} and
+  gets back one stage — a short question plus N option cards (label +
+  one-clause tradeoff), generated as strict JSON by the cloud when a
+  key is live, else the best local model. Picking appends to picks[]
+  and asks for the next stage, so each stage is CONDITIONED on the
+  whole path. Past the last stage the same endpoint returns a
+  recommendation instead of options.
+- IMAGE MODE IS HONEST: nothing is generated. Each option gets a real
+  photo harvested from the web via the existing og:image pipeline
+  (_page_text appends image URLs as plain strings — corrected my
+  first pass, which assumed dicts).
+- Funnels are chats in their own lane, so they group in history and
+  never mix with Chat or Code.
+- Verified end to end on a real decision: stage 1 offered Bushwick /
+  Sunset Park / East Flatbush with rent-and-subway tradeoffs; by
+  stage 3, conditioned on earlier picks, it offered three specific
+  Wyckoff Ave addresses with rents inside the stated $5k budget, and
+  the finish returned a single recommendation with a next step.
