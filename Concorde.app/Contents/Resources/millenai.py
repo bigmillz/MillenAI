@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 232               # integer compared against the GitHub release tag
+APP_BUILD = 233               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -408,8 +408,10 @@ OLLAMA_TAGS = {l: i["ollama"] for l, i in MODEL_INFO.items() if i["ollama"]}
 # FREE CLOUD GPU, opt-in: Groq, Cloudflare Workers AI, OpenRouter and
 # Together all speak the OpenAI chat-completions dialect and all have a
 # free tier. Drop a JSON file at ~/…/MillenAI/cloud.json:
-#   {"name":"Groq 70B","base":"https://api.groq.com/openai/v1",
-#    "key":"YOUR_KEY","model":"llama-3.3-70b-versatile"}
+#   {"name":"Groq 120B","base":"https://api.groq.com/openai/v1",
+#    "key":"YOUR_KEY","model":"openai/gpt-oss-120b"}
+# Keep the example on a CURRENT model — it used to name
+# llama-3.3-70b-versatile, which Groq decommissioned 2026-08-16.
 # Nothing is sent anywhere until the Turbo switch in Settings is on.
 CLOUD_FILE = os.path.join(app_dir(), "cloud.json")
 
@@ -497,6 +499,104 @@ def _cloud_save_state(which: str, entry: dict, make_active=False):
         pass
 
 
+# WHY A CLOUD CALL FAILED (6b233). cloud_text swallowed every exception
+# and returned "", so a revoked key and a retired model both looked like
+# "that model had nothing to say": Groq showed a green tick in Settings
+# while every single call came back 401, and the gemini-2.5-pro seat
+# 404'd on every question ("no longer available to new users") — both
+# found live while testing Cloud Only. Two failures, two consequences.
+#   401/403 — the KEY is bad, so the provider is marked failed. That is
+#             what makes "grey it out when no keys are active" TRUE
+#             rather than "no keys were active the last time one was
+#             typed in".
+#   400/404 — the MODEL is gone, so only that model is retired, and only
+#             for this session; the provider's other models carry on.
+_dead_models = set()
+_dead_lock = threading.Lock()
+
+
+def _provider_of(c: dict) -> str:
+    """Provider id for a conf, inferred from its base URL (same rule
+    _cloud_all uses when it wraps a legacy single-provider file)."""
+    b = c.get("base", "")
+    if "generativelanguage" in b:
+        return "gemini"
+    if "anthropic" in b:
+        return "claude"
+    if "groq" in b:
+        return "groq"
+    return ""
+
+
+_dead_loaded = [False]
+
+
+def _dead_seed():
+    """Retirements persist, or every launch re-donates a council seat to
+    a model the provider has already withdrawn. Cleared for a provider
+    whenever its key is re-saved — that re-runs model discovery, and is
+    exactly the gesture that means "try again"."""
+    if _dead_loaded[0]:
+        return
+    _dead_loaded[0] = True
+    try:
+        for v in (_cloud_all().get("providers") or {}).values():
+            for m in (v.get("dead") or []):
+                _dead_models.add(m)
+    except Exception:
+        pass
+
+
+def cloud_model_alive(model: str) -> bool:
+    _dead_seed()
+    with _dead_lock:
+        return model not in _dead_models
+
+
+def cloud_revive(models: list):
+    """Un-retire models — called when a key is re-saved."""
+    _dead_seed()
+    with _dead_lock:
+        for m in models or []:
+            _dead_models.discard(m)
+
+
+def cloud_note_failure(c: dict, exc: Exception):
+    """Record a cloud failure so the UI stops reporting a dead key as
+    healthy. Best-effort: never raises into the answer path."""
+    try:
+        code = getattr(exc, "code", 0)
+        model = c.get("model", "")
+        if code in (401, 403):
+            pid = _provider_of(c)
+            if not pid:
+                return
+            cur = dict((_cloud_all().get("providers") or {}).get(pid) or {})
+            if not cur or cur.get("status") == "fail":
+                return
+            # merge, never replace — the entry still holds the key so the
+            # user can see which provider to re-paste
+            cur["status"] = "fail"
+            cur["note"] = "key rejected (HTTP %d)" % code
+            _cloud_save_state(pid, cur)
+        elif code in (400, 404) and model:
+            with _dead_lock:
+                _dead_models.add(model)
+            pid = _provider_of(c)
+            if not pid:
+                return
+            cur = dict((_cloud_all().get("providers") or {}).get(pid) or {})
+            if not cur:
+                return
+            dead = list(cur.get("dead") or [])
+            if model not in dead:
+                dead.append(model)
+                cur["dead"] = dead[-12:]
+                _cloud_save_state(pid, cur)
+    except Exception:
+        pass
+
+
 def cloud_conf():
     """The ACTIVE working provider in the classic shape — everything
     downstream (cloud_stream, tiers) keeps its old contract."""
@@ -541,6 +641,10 @@ def _anthropic_stream(c: dict, messages: list, emit) -> bool:
                     if tok:
                         got = True
                         emit(tok)
+    except urllib.error.HTTPError as exc:
+        if not got:
+            cloud_note_failure(c, exc)
+        return got
     except Exception:
         return got
     return got
@@ -580,6 +684,9 @@ def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
             d = json.loads(r.read().decode("utf-8", "replace"))
         return (((d.get("choices") or [{}])[0].get("message") or {})
                 .get("content", "") or "")
+    except urllib.error.HTTPError as exc:
+        cloud_note_failure(c, exc)
+        return ""
     except Exception:
         return ""
 
@@ -601,6 +708,10 @@ def cloud_bench() -> list:
     Capped at two per provider — free tiers have rate limits."""
     bench = []
     for c in cloud_ok_providers():
+        # a model the provider has retired 404s on every question — it
+        # burned a whole seat per council until it was skipped (6b233)
+        if not cloud_model_alive(c.get("model", "")):
+            continue
         bench.append((c["name"], c))
         # alternates only on FREE tiers — Anthropic bills per token,
         # and the blind alternate once benched claude-opus-5 on every
@@ -608,10 +719,16 @@ def cloud_bench() -> list:
         # the compositor ladder is where Claude earns its keep.
         if "anthropic" in c.get("base", ""):
             continue
-        alts = [m for m in c.get("models", []) if m != c.get("model")]
+        alts = [m for m in c.get("models", []) if m != c.get("model")
+                and cloud_model_alive(m)]
+        # A STRONGER SIBLING OR NONE (6b233). The old fallback took
+        # alts[0] — any model at all — and once retired models started
+        # being skipped it walked the inventory into things like
+        # "gemini-3.7-flash-video-understanding-eap", seating a random
+        # unknown voice on the council. An alternate has to earn its
+        # seat by being a bigger sibling, or the provider fields one.
         alt = next((m for m in alts if "pro" in m.lower()
-                    or "120b" in m.lower() or "70b" in m.lower()),
-                   alts[0] if alts else "")
+                    or "120b" in m.lower() or "70b" in m.lower()), "")
         if alt:
             c2 = dict(c)
             c2["model"] = alt
@@ -635,16 +752,25 @@ def compositor_ladder() -> list:
         c = dict(c)
         if pid == "gemini":
             pro = next((m for m in c.get("models", [])
-                        if "pro" in m.lower()), "")
+                        if "pro" in m.lower() and cloud_model_alive(m)), "")
             if pro:
                 c["model"] = pro
+        # the upgrade above, or the stored pick, may have been retired —
+        # a dead rung wastes a full round trip on every composite
+        if not cloud_model_alive(c.get("model", "")):
+            continue
         out.append(c)
     return out
 
 
 def cloud_stream(messages: list, emit) -> bool:
     """Stream from the configured cloud endpoint. False = fall back local."""
-    c = cloud_conf()
+    return cloud_stream_conf(cloud_conf(), messages, emit)
+
+
+def cloud_stream_conf(c: dict, messages: list, emit) -> bool:
+    """Stream from ONE named provider conf. Cloud Only picks its own rung
+    off the ladder rather than whichever provider happens to be active."""
     if not c:
         return False
     if "anthropic.com" in c.get("base", ""):
@@ -679,6 +805,10 @@ def cloud_stream(messages: list, emit) -> bool:
                 if tok:
                     got = True
                     emit(tok)
+    except urllib.error.HTTPError as exc:
+        if not got:
+            cloud_note_failure(c, exc)
+        return got
     except Exception:
         return got
     return got
@@ -918,6 +1048,19 @@ TIERS = {
         # no quality filtering — if it can run, it takes part
         "all": True,
     },
+    # CLOUD ONLY (6b233, per Patrick): the frontier keys answer and this
+    # machine stays cold — no Ollama, no MLX engine load, no local merge,
+    # no local memory pass. Every working key drafts in parallel and the
+    # compositor ladder writes the final answer; with one key it just
+    # streams. Greyed out in both pickers until a key tests OK, because a
+    # tier that cannot answer is worse than no tier at all.
+    "Cloud Only": {
+        "icon": "☁️",
+        "desc": "your API keys only — nothing runs on this machine",
+        "picks": [],
+        "count": 0,
+        "cloud_only": True,
+    },
 }
 
 # ------------------------------------------------------------- agents
@@ -1115,6 +1258,8 @@ def resolve_tier(name: str) -> list:
     t = TIERS.get(name)
     if not t:
         return []
+    if t.get("cloud_only"):
+        return []       # by definition: no local model may take part
     pulled = ollama_pulled_tags() or set()
 
     def usable(l):
@@ -3585,13 +3730,50 @@ PEER_INSTRUCTION = (
     "Never mention the drafts or this process.\n\n")
 
 
+def run_cloud_only(messages: list, emit, status, step) -> None:
+    """CLOUD ONLY: answer entirely off the API keys. One key streams
+    straight through; several draft in parallel and the compositor
+    ladder writes the final answer. Nothing here loads a local engine."""
+    bench = cloud_bench()
+    if not bench:
+        emit("☁️ **Cloud Only** needs at least one working API key.\n\n"
+             "Add one under **Settings › Cloud power** — Gemini and Groq "
+             "both have free tiers — or pick another mode to answer on "
+             "this machine.")
+        return
+    if len(bench) == 1:
+        lbl, c = bench[0]
+        status("%s · cloud" % lbl)
+        step("draft", "Drafting the answer", "run", lbl)
+        try:
+            emit(NUL + "RUN:" + json.dumps({"r": [lbl]}) + NUL)
+        except Exception:
+            pass
+        if cloud_stream_conf(c, messages, emit):
+            step("draft", "Drafted the answer", "done", lbl)
+            return
+        # streaming failed — one non-streaming retry before giving up
+        text = strip_think(cloud_text(c, messages))
+        if text:
+            emit(text)
+            step("draft", "Drafted the answer", "done", lbl)
+            return
+        raise RuntimeError("the cloud provider didn't answer")
+    run_council([], messages, emit, status, cloud_only=True)
+
+
 def run_council(labels: list, messages: list, emit, status,
-                reflect: bool = False, peer: bool = False) -> None:
+                reflect: bool = False, peer: bool = False,
+                cloud_only: bool = False) -> None:
     """Ask each selected model in turn, then stream a merged answer.
 
     Sequential on purpose: only one MLX engine can be resident at a time
     (each pins its whole model in RAM), so parallel calls would thrash.
     """
+    # reflection and peer review both run LOCAL passes — off the table
+    # when the whole point of the tier is that nothing runs here
+    if cloud_only:
+        reflect = peer = False
     # skip models that can't actually answer: not downloaded (their weights
     # aren't on disk) or too big for current free RAM (OOM-killed mid-load)
     usable, skipped = [], []
@@ -3644,7 +3826,9 @@ def run_council(labels: list, messages: list, emit, status,
     # possible"): every working key drafts IN PARALLEL with the local
     # loop — frontier voices join the council at zero local cost.
     cloud_threads = []
-    if load_prefs(None).get("turbo"):
+    # Cloud Only forces the bench on: picking that tier IS the opt-in, so
+    # it must not also depend on the separate turbo preference
+    if cloud_only or load_prefs(None).get("turbo"):
         def _cloud_draft(lbl, conf):
             status(f"asking {lbl} \u00b7 cloud")
             run_mark(add=lbl)
@@ -3798,6 +3982,18 @@ def run_council(labels: list, messages: list, emit, status,
     # THE COMPOSITOR LADDER (6b220): try the strongest working cloud
     # first — Claude, then Gemini (pro when available), then Groq —
     # falling through on any failure. Local Gemma stays the floor.
+    if cloud_only:
+        # every rung here is a cloud one, and if they all fail the
+        # strongest draft ships as it stands — a local merge would break
+        # the one promise this tier makes
+        for _cc in compositor_ladder():
+            run_mark(compositor=_cc.get("model") or _cc.get("name", ""))
+            _t = strip_think(cloud_text(_cc, synth))
+            if _t and len(_t) > 120 and not _looks_degenerate(_t):
+                emit(_t)
+                return
+        emit(good[0][1])
+        return
     if load_prefs(None).get("turbo"):
         for _cc in compositor_ladder():
             run_mark(compositor=_cc.get("model") or _cc.get("name", ""))
@@ -4967,15 +5163,22 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self._send_json(dict(_update))
         elif self.path == "/api/tiers":
             pulled = ollama_pulled_tags() or set()
+            bench = [lbl for lbl, _c in cloud_bench()]
             out = {}
             for name, t in TIERS.items():
+                if t.get("cloud_only"):
+                    # its line-up is the key bench, and with no keys the
+                    # tier is unusable — the UI greys it out on this flag
+                    out[name] = {"desc": t["desc"], "models": bench,
+                                 "skipped": [], "available": bool(bench)}
+                    continue
                 chosen = resolve_tier(name)
                 # installed models this tier can't use right now
                 skipped = [l for l in MODEL_INFO
                            if model_cached(l, pulled) and l not in chosen
                            and not model_fits_memory(l)]
                 out[name] = {"desc": t["desc"], "models": chosen,
-                             "skipped": skipped}
+                             "skipped": skipped, "available": True}
             self._send_json(out)
         elif self.path == "/api/prefs":
             self._send_json(load_prefs(self._data_base()))
@@ -5346,6 +5549,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                         % str(exc)[:60]})
                 return
             try:
+                # the entry is written fresh, so the persisted retirement
+                # list goes with it — re-saving a key IS the retry, and
+                # the in-memory set has to forget too or the freshly
+                # discovered models stay benched
+                cloud_revive(found + [model])
                 _cloud_save_state(which, {"name": name, "base": base,
                                           "key": key, "model": model,
                                           "models": found,
@@ -5664,12 +5872,19 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             tier = "Fast"   # Best retired (5.3) — it was Fast in a crown
         if tier == "Power":
             tier = "Pro"    # Pro absorbed Power (5.3)
+        cloud_only = bool(TIERS.get(tier, {}).get("cloud_only"))
         if tier in TIERS:
             council = resolve_tier(tier)
         else:
             council = [m for m in req_json.get("models", [])
                        if m in MODEL_ROUTES]
-        if not council:
+        if cloud_only:
+            # the line-up IS the bench — and it may legitimately be empty
+            # (no keys), which run_cloud_only answers with instructions
+            # rather than by quietly falling back to local silicon
+            council = [lbl for lbl, _c in cloud_bench()]
+            model_name = council[0] if council else ""
+        elif not council:
             council = [model_name]
         # a tier request arrives with model="" — the router matches on
         # model_name, and an empty one fell through to the smallest-cached
@@ -6035,12 +6250,14 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             if label in model_name:
                 route, route_label = target, label
                 break
-        if route is None:
+        if route is None and not cloud_only:
             # smallest cached model, never a 40 GB bomb (see run_model)
             pulled = ollama_pulled_tags() or set()
             route_label = next((l for l in reversed(MERGE_RANK)
                                 if model_cached(l, pulled)), None)
             route = MODEL_ROUTES.get(route_label, (None, None))
+        if route is None:
+            route = (None, None)     # Cloud Only: there is no local route
 
         # MLX engines load on demand so only the model in use holds RAM
         if route[0] == "mlx" and route_label:
@@ -6054,7 +6271,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         self.send_header("X-Accel-Buffering", "no")
         self.send_header("X-Web-Search", "1" if query else "0")
         xm_names = list(council)
-        if len(council) > 1 and load_prefs(None).get("turbo"):
+        if (len(council) > 1 and load_prefs(None).get("turbo")
+                and not cloud_only):     # the bench IS the council here
             xm_names += [lbl for lbl, _c in cloud_bench()]
         xm = ", ".join(xm_names)[:300]
         self.send_header("X-Models", xm)
@@ -6186,7 +6404,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             hb_stop.set()
             return
         try:
-            if TIERS.get(tier, {}).get("research") or ag_research:
+            if cloud_only and images:
+                # the cloud path sends text only, so an image would be
+                # silently ignored — say so instead of answering blind
+                emit("☁️ **Cloud Only** doesn't read images yet — it "
+                     "sends text alone. Switch to Fast, Thinking or Pro "
+                     "and the local vision engine will look at it.")
+            elif cloud_only:
+                run_cloud_only(full_messages, emit, status, step)
+            elif TIERS.get(tier, {}).get("research") or ag_research:
                 run_research(council, full_messages, emit, status)
             elif len(council) > 1:
                 run_council(council, full_messages, emit, status,
@@ -6289,10 +6515,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 emit("\n" + offline_hint(kind, exc))
             except (BrokenPipeError, ConnectionResetError):
                 pass
-            if not sent[0]:
+            if not sent[0] and not cloud_only:
                 # every path stayed silent (engine died mid-answer, a
                 # provider returned nothing). Try the smallest brain on
-                # disk before admitting defeat.
+                # disk before admitting defeat. Cloud Only opts out: a
+                # local rescue is exactly what the user ruled out.
                 try:
                     pulled = ollama_pulled_tags() or set()
                     alt = next((l for l in reversed(MERGE_RANK)
@@ -6319,7 +6546,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                          "%d chars" % sent[0])
                     step("polish", "Sharpened", "done", "")
                 if (query and sent[0] > 120
-                        and (placey or bookish) and not images):
+                        and (placey or bookish) and not images
+                        and not cloud_only):   # pinning runs a local model
                     step("places", "Finding the places", "run", "")
                     ans = "".join(answer_buf)[-2400:]
                     # the model that JUST answered is already resident —
@@ -6374,7 +6602,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 pass
             plain = prompt[8:] if prompt.lower().startswith("/search") \
                 else prompt
-            if plain and len(plain) > 12:
+            # the memory pass is a local model reading the question, so
+            # Cloud Only skips it too — nothing runs here means nothing
+            if plain and len(plain) > 12 and not cloud_only:
                 threading.Thread(
                     target=_extract_memory,
                     args=(route_label or council[0], plain, user_base),
@@ -6748,6 +6978,10 @@ body.perf #tab-glide{transition:none}
   border-color:rgba(255,255,255,.26);
 }
 .tier .tname{font-weight:600}
+/* a mode with nothing behind it (Cloud Only with no key) stays visible
+   but plainly inert — it still opens its bubble, which says why */
+.tier.off,.engrow.off{opacity:.38}
+.tier.off:hover,.engrow.off:hover{background:none;color:var(--dim)}
 
 #chat-list{margin-bottom:2px;overflow-y:auto}
 #chat-list:empty::after{
@@ -8714,11 +8948,15 @@ setVoice(voiceChat);
 // Fast / Pro / Thinking replace hand-picking models. The backend resolves
 // each tier to whatever is downloaded and fits RAM, and Gemma blends.
 let agent="";           // declared early: setTier reads it (TDZ!)
+// modes with nothing behind them right now — Cloud Only with no working
+// key. Declared here for the same TDZ reason: setTier reads it at boot.
+let tierOff={};
 let tier=localStorage.getItem("millen.tier")||"Fast";
 if(tier==="Smart")tier="Fast";        // merged tiers (1.20)
 if(tier==="Best")tier="Fast";         // Best retired (5.3)
 if(tier==="Power")tier="Pro";         // Pro absorbed Power (5.3)
 function setTier(name){
+  if(tierOff[name])return;       // a mode that can't answer isn't pickable
   tier=name;localStorage.setItem("millen.tier",name);
   councilManual=false;
   if(agent){agent="";localStorage.setItem("millen.agent","");
@@ -8738,6 +8976,23 @@ async function showTierPop(el,name){
   }catch(e){}
   const list=(info.models||[]);
   const bench=(cloudOn&&list.length>1)?(ci.bench||[]):[];
+  // Cloud Only owns its bubble: its line-up IS the key bench, and with no
+  // key the bubble has to say what to do rather than list nothing
+  if(info.available===false||(info.available!==undefined&&!list.length
+     &&name==="Cloud Only")){
+    tierPop.innerHTML="<b>"+esc(name)+"</b>"
+      +'<div class="mline">no API key yet</div>'
+      +'<span class="note">add one under Settings › Cloud power — '
+      +'Gemini and Groq both have free tiers</span>';
+  }else if(name==="Cloud Only"){
+    tierPop.innerHTML="<b>"+esc(name)+"</b>"
+      +list.map(m=>'<div class="mline mcloud">'+esc(m)
+        +' <i>· cloud</i></div>').join("")
+      +'<span class="note">'+(list.length>1
+        ?"all of them answer, then the strongest composites"
+        :"streams straight from your key")
+      +' — nothing runs on this machine</span>';
+  }else
   tierPop.innerHTML="<b>"+esc(name)+"</b>"+
     (list.length
       ? list.map(m=>'<div class="mline">'+esc(m)+'</div>').join("")+
@@ -8771,7 +9026,8 @@ document.body.appendChild(engMenu);
 function openEngMenu(){
   engMenu.innerHTML=Object.keys(TIER_META).map(n=>{
     const m=TIER_META[n];
-    return '<div class="engrow'+(tier===n?" on":"")+'" data-t="'+n+'">'
+    return '<div class="engrow'+(tier===n?" on":"")
+      +(tierOff[n]?" off":"")+'" data-t="'+n+'">'
       +'<span class="eico">'+m.icon+'</span>'
       +'<span class="enm">'+esc(n)+'</span>'
       +'<span class="edsc">'+esc(m.desc)+'</span></div>';
@@ -8787,6 +9043,9 @@ function openEngMenu(){
     el.addEventListener("mouseleave",hideTierPop);
     el.addEventListener("click",ev=>{
       ev.stopPropagation();
+      // an unavailable mode keeps the menu open and leaves its bubble
+      // up — the bubble is where the fix is written
+      if(tierOff[el.dataset.t]){showTierPop(el,el.dataset.t);return;}
       setTier(el.dataset.t);hideTierPop();engMenu.hidden=true;
     });
   });
@@ -8800,6 +9059,12 @@ $$(".tier").forEach(el=>{
     if(tierRows.classList.contains("closed")){
       ev.stopPropagation();
       tierRows.classList.remove("closed");
+      return;
+    }
+    if(tierOff[el.dataset.tier]){   // inert: explain, don't fold away
+      ev.stopPropagation();
+      tierPop.dataset.for=el.dataset.tier;
+      showTierPop(el,el.dataset.tier);
       return;
     }
     setTier(el.dataset.tier);
@@ -8822,6 +9087,26 @@ document.addEventListener("click",e=>{
     em.hidden=true;
 });
 setTier(tier);
+
+// AVAILABILITY: a mode with nothing behind it is greyed in BOTH pickers —
+// the sidebar rows and the composer dropdown. /api/tiers is the authority
+// (it knows the key bench), so this re-runs whenever a key is saved and
+// whenever Settings repaints.
+async function paintTierAvail(){
+  let info={};
+  try{info=await(await fetch("/api/tiers")).json();}catch(e){return;}
+  tierOff={};
+  Object.keys(info).forEach(n=>{if(info[n].available===false)tierOff[n]=1;});
+  $$(".tier").forEach(el=>
+    el.classList.toggle("off",!!tierOff[el.dataset.tier]));
+  const em=document.getElementById("engmenu");
+  if(em)em.querySelectorAll(".engrow").forEach(el=>
+    el.classList.toggle("off",!!tierOff[el.dataset.t]));
+  // the saved mode may have lost its keys since the last launch — never
+  // leave the composer pointing at something that cannot answer
+  if(tierOff[tier])setTier("Fast");
+}
+paintTierAvail();
 
 // Chat | Code | Agents: the primary selector is tabbed — Chat shows the
 // tier dropdown, Code the two code specialists, Agents the rest. The
@@ -11382,6 +11667,7 @@ $("#ck-save").addEventListener("click",async()=>{
     else note.textContent=d.err||"that didn't work";
     try{const cs2=await(await fetch("/api/cloud")).json();
         ckBoard(cs2.providers,cs2.active);}catch(e){}
+    paintTierAvail();   // a new key may have just switched Cloud Only on
   }catch(e){note.textContent="network error — try again";}
 });
 if(!IS_LOCAL){const b=$("#cloudkey-box");if(b)b.hidden=true;}
@@ -11588,6 +11874,7 @@ async function openAbout(){
         $("#turbo-row").hidden=!cs.configured;
         if(typeof ckBoard==="function")
           ckBoard(cs.providers,cs.active);
+        paintTierAvail();
         if(cs.name)$("#turbo-hint").title=
           "Answers come from "+cs.name+" instead of this Mac \u2014 much "
           +"faster, but your prompts leave this computer while it is on.";
