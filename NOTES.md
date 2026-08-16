@@ -2884,3 +2884,87 @@ Five gaps that read as backyard-project, all closed:
   MEASUREMENT that has to carry the ancestor. Scope every settings query
   to `#set-brand`/`#about-veil`, never a bare id.
 - Gauntlet 60/60.
+
+## 6 beta 240 (pending release) — the starter chips were INERT
+- They looked right, hovered right, and did nothing. The handler was
+  never the problem: `#composer-wrap` is `pointer-events:none` so it
+  cannot block the backdrop behind it, and every child that wants clicks
+  re-enables them — `#composer` does, `#suggest` never did. The click
+  landed on <main> and the chips never saw it.
+- PROVED WITH A HIT TEST, not a screenshot:
+  `document.elementFromPoint()` at a chip's own centre returned MAIN, not
+  the chip. Nothing visual distinguishes an inert control from a live
+  one, so this is the only check that can find it — worth reaching for
+  any time a control "looks fine but does nothing".
+- One line: `#suggest{pointer-events:auto}`. After it, clicking
+  "How do I beat jet lag?" asked the question, stripped the emoji,
+  cleared the hero and streamed a real answer with 4 sources.
+- Gauntlet 60/60.
+
+## 6 beta 240 — the wing goes back beside the C, and maps come back
+- OVERLAP REVERTED, per Patrick. The wing sits BESIDE the C with a real
+  4px gap. Tucking it under the letterform read as a collision at every
+  size tried; two clean shapes next to each other beat one muddled one.
+  Measured: gap 4px, not overlapping, Michroma both sides.
+- MAPS AND PINS WERE GONE, and the cause was one line. The locality
+  handed to the geocoder was "the last two words of the place terms" —
+  fine for a long question, catastrophic for a short one:
+      "whats some good bbq in bushwick?"  ->  terms "bbq bushwick"
+      last two words = "bbq bushwick"     ->  _geocode() = None
+  No coordinates meant no OSM venues, no pins AND no map card, on a
+  question that names the neighbourhood outright. The earlier bars
+  query only worked by luck — it was long enough that its last two
+  words happened to be the location.
+- The locality is now WHAT REMAINS after removing the venue words and
+  the relative-time words, which is the actual place:
+      bbq bushwick               -> bushwick
+      bars clubs late bushwick ny -> bushwick ny
+      coffee williamsburg        -> williamsburg
+  The map card's own geocode was reading the same bad string and is
+  fixed with it.
+- Verified end to end on the reported query: geo step resolves to
+  Bushwick, MAP carries 40.694/-73.919, PLACES2 carries a pin.
+- HONEST LIMIT: OSM is queried by AMENITY, not cuisine, so "bbq" asks
+  for restaurants near Bushwick and the pins are not bbq-specific. The
+  prose still names the right places from the web sources; the pins are
+  neighbourhood context, not a filtered result.
+- THIRD TIME on the stray `*/`: appending explanation to a closed
+  comment killed the stylesheet again. The audit caught it before it ran
+  this time, which is the only reason it cost seconds instead of an
+  hour. Run it after EVERY css comment edit, no exceptions.
+- Gauntlet 60/60.
+
+## 6 beta 240 — thumbnails when the question asks for pictures
+- "do you have any photos?" returned sources from PEXELS and an answer
+  apologising that it cannot show images. The PHOTOS marker, the
+  photoRow renderer and the harvesting code all already existed —
+  photos were only ever collected on the PLACE path. `run_search` reads
+  snippets and never opens a page, so a non-place question had nothing
+  to harvest from.
+- Now gated on actually asking (`_WANTS_IMAGES`: photo/pic/picture/
+  image/screenshot/diagram/"show me"/"look like"), because opening pages
+  costs seconds and most questions do not want them. Verified it fires
+  on five asking phrasings and none of four ordinary ones.
+- AND THE MODEL IS TOLD. Without it, it apologised for being unable to
+  show what was already on screen beneath it.
+- THREE BUGS FOUND BY RUNNING IT, none of which any amount of reading
+  would have caught:
+   1. `step()` is defined AFTER the response opens; the search phase runs
+      before. Calling it there is an UnboundLocalError — a hard 500 on
+      every image question.
+   2. `_stash_sources` rewrites rows as {"t","u"}. The harvest read
+      "href", got None every time, and ran with an empty URL list. The
+      mechanism was never at fault; it was handed nothing.
+   3. og:image ALONE IS TOO THIN — two of three real sources never set
+      it. Falling back to <img> tags (plus data-src, since lazy loading
+      is the norm, and relative URLs resolved against the page) took
+      three sources from 1 image to 11.
+- FURNITURE FILTER, earned the hard way: the first working run returned
+  LANGUAGE FLAGS from a site nav — a photo by every technical measure
+  and of no use to anyone. icon/logo/sprite/flag/banner/arrow/social/
+  star and the usual chrome paths are skipped now.
+- HONEST LIMIT: picking the GOOD image is heuristic. Dimensions are
+  unknown without downloading, so a site with unusual markup can still
+  surface something dull. og:image is preferred first because it is the
+  one image a page has deliberately chosen to represent itself.
+- Gauntlet 60/60.

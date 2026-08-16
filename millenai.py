@@ -1789,6 +1789,11 @@ _VENUE_RX = re.compile(
     r"laundromats?|nightlife|nightclubs?|clubs?|breweries|brewery|"
     r"speakeas(y|ies)|dispensar(y|ies))\b", re.I)
 _ZIP_RX = re.compile(r"\b\d{5}\b")
+# "do you have any photos?" — an explicit ask for something to LOOK at
+_WANTS_IMAGES = re.compile(
+    r"\b(photos?|pics?|pictures?|images?|screenshots?|diagrams?|"
+    r"show\s+me|what\s+(does|do)\s+(it|they|that|this)\s+look\s+like|"
+    r"look\s+like)\b", re.I)
 _NEARBY_RX = re.compile(
     r"\b(near\s+(me|here|by)|nearby|around\s+here|walking\s+distance|"
     r"in\s+the\s+area|open\s+(now|late|today|tonight))\b", re.I)
@@ -3225,6 +3230,34 @@ def _page_text(url: str, cap: int = 2600, meta: list = None) -> str:
                           r'property=["\']og:image', raw)
             if m:
                 meta.append(m.group(1)[:400])
+            # og:image ALONE IS TOO THIN (6b244). Plenty of pages never
+            # set it, and plenty that do point it at a logo — a real ask
+            # for photos came back with none because the sources were a
+            # forum, a YouTube page and a stock site. Fall back to the
+            # page's own <img> tags, skipping the furniture: icons,
+            # logos, sprites, avatars, badges and anything without a
+            # real raster extension.
+            # the furniture list earns every entry the hard way: the
+            # first real run came back with LANGUAGE FLAGS from a site
+            # nav, which is a photo by every technical measure and of no
+            # use to anyone. Chrome lives in predictable paths.
+            _skip = re.compile(
+                r"(icon|logo|sprite|avatar|badge|button|spacer|pixel|"
+                r"blank|thumb_?\d{0,2}x|emoji|favicon|placeholder|flag|"
+                r"banner|arrow|chevron|social|share|cookie|rating|star|"
+                r"/dist/|/assets/ui|/static/ui|/theme/|/nav/)", re.I)
+            # data-src too: lazy loading is the norm now, and a plain
+            # src= scan found nothing on two of three real sources.
+            # Relative paths are resolved against the page itself.
+            for _m in re.finditer(
+                    r'<img[^>]+?(?:data-lazy-src|data-src|srcset|src)='
+                    r'["\']([^"\'\s]+?\.(?:jpe?g|png|webp))', raw, re.I):
+                if len(meta) >= 6:
+                    break
+                _u = urllib.parse.urljoin(url, _m.group(1))
+                if (_u.startswith("http") and not _skip.search(_u)
+                        and _u not in meta):
+                    meta.append(_u[:400])
         raw = re.sub(r"(?is)<(script|style|nav|header|footer|aside)[^>]*>"
                      r".*?</\1>", " ", raw)
         raw = re.sub(r"(?s)<[^>]+>", " ", raw)
@@ -6756,8 +6789,18 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     # authority, because a blog post's stale hours must
                     # not outrank a structured tag. Additive only — an
                     # empty result changes nothing.
+                    # THE LOCALITY IS WHAT'S LEFT AFTER THE CATEGORY
+                    # (6b244). This took the last two words, which for a
+                    # short question is the category itself: "whats some
+                    # good bbq in bushwick?" reduces to "bbq bushwick",
+                    # and geocoding THAT returns None — so no venues, no
+                    # pins and no map, on a question that names a
+                    # neighbourhood outright. Strip the venue words and
+                    # the relative-time words; the remainder is the place.
                     _terms = _place_terms(query)
-                    _loc = " ".join(_terms.split()[-2:])
+                    _loc = " ".join(w for w in _terms.split()
+                                    if not _VENUE_RX.search(w)
+                                    and w not in _REL_WORDS)[:60]
                     _osm = osm_places(_terms, _loc) if _loc else []
                     if _osm:
                         _tl_search.osm = _osm
@@ -6779,7 +6822,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                         # a pin only counts when the geocoder actually
                         # landed in the right neighborhood — "food
                         # bushwick" once pinned Edinburgh (seen live)
-                        g_ = _geocode(_place_terms(query))
+                        # geocode the LOCALITY, not the whole phrase —
+                        # "bbq bushwick" resolves to nothing, which is
+                        # why the map card vanished too (6b244)
+                        g_ = _geocode(_loc or _place_terms(query))
                         lt_ = _tl_search.locq.lower()
                         if g_ and (not lt_ or lt_ in
                                    (g_.get("name") or "").lower()):
@@ -6797,6 +6843,44 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     snippets = run_search_deep(srch, pages=3)
                 else:
                     snippets = run_search(query)
+                # ASKED FOR PICTURES, SO FETCH SOME (6b244, per Patrick).
+                # Photos were only ever harvested on the PLACE path —
+                # run_search reads snippets and never opens a page, so a
+                # question like "do you have any photos?" got sources
+                # from pexels and an answer apologising that it cannot
+                # show images. Gated on actually asking, because opening
+                # pages costs seconds and most questions don't want them.
+                # NB: no step() here — the search phase runs BEFORE the
+                # response opens (the X-Web-Search header depends on it),
+                # and step() is defined further down with the writer. It
+                # is an UnboundLocalError up here, and a hard 500 on
+                # every image question until it was caught.
+                if _WANTS_IMAGES.search(prompt) and not getattr(
+                        _tl_search, "photos", None):
+                    _ph = []
+                    # _stash_sources rewrites rows as {"t","u"} — reading
+                    # "href" here gave None every time, so the harvest
+                    # ran with an empty URL list and quietly found
+                    # nothing. The mechanism was never at fault.
+                    _urls = [(r.get("u") or "")
+                             for r in (getattr(_tl_search, "rows", []) or [])
+                             if (r.get("u") or "").startswith("http")][:3]
+                    try:
+                        _fetch_pages(_urls, meta=_ph)
+                    except Exception:
+                        pass
+                    _tl_search.photos = _ph
+                    if _ph:
+                        # and TELL the model, or it apologises for not
+                        # being able to show what is already on screen
+                        messages[-1] = dict(messages[-1])
+                        messages[-1]["content"] = (
+                            str(messages[-1].get("content", ""))
+                            + "\n\n[The interface is displaying %d relevant "
+                              "photo(s) from the sources directly beneath "
+                              "your answer. Do NOT say you cannot show "
+                              "images — describe what they show and carry "
+                              "on.]" % len(_ph))
                 if placey and matched:
                     # the closed-day check is MECHANICAL, not left to the
                     # model: whether "Closed on Tuesday" survives into a
@@ -7625,8 +7709,12 @@ body.resizing{cursor:col-resize;user-select:none}
    compares wing to letter — the ink covered only 84% of the box and
    the bottom-right corner was empty. A fifth short bar carries the
    trailing edge down to 94%, and the element is sized so that INKED
-   span, not the box, equals the C's 9.77 cap. */
-#vmark{width:12.4px;height:10.4px;margin-right:-1.3px;vertical-align:-.8px}
+   span, not the box, equals the C's 9.77 cap.
+   OVERLAP REVERTED (6b244, per Patrick: "this overlap thing isn't
+   working right"). The wing sits BESIDE the C now with a real gap —
+   tucking it under the letterform read as a collision at every size we
+   tried, and two clean shapes next to each other beat one muddled one. */
+#vmark{width:12.4px;height:10.4px;margin-right:4px;vertical-align:-.8px}
 /* INSIDE the wordmark's inline run (6b217): one text run = one
    baseline in every engine — flex centering diverged between Blink
    and WKWebView because the two faces carry different line metrics.
@@ -8712,6 +8800,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
      auto margins means the row sits exactly over the box at every
      window size, instead of only at the size it was designed on. */
   max-width:780px;margin:0 auto 12px;padding:0 2px;
+  /* #composer-wrap is pointer-events:none so it never blocks the
+     backdrop, and every child that wants clicks re-enables them.
+     #suggest didn't, so the chips were INERT — the handler was fine,
+     the click simply never reached it. elementFromPoint at a chip's
+     centre returned <main> (6b244). */
+  pointer-events:auto;
 }
 #suggest[hidden]{display:none}
 .sugg{
