@@ -2296,3 +2296,58 @@ Five gaps that read as backyard-project, all closed:
   focus hand-off and both Escape levels measured. Gauntlet 60/60.
 - NOT verified on WebKit — the browser pane is Blink. Worth one glance
   in the desktop build before this ships.
+
+## 6 beta 233 (pending release) — ☁️ Cloud Only, and honest key status
+- A fourth mode sits under Fast/Thinking/Pro in BOTH pickers (the sidebar
+  rows and the composer dropdown, which build from `TIERS` and
+  `TIER_META` respectively, so one dict entry populated both). It answers
+  entirely off the API keys: every working key drafts in parallel and the
+  compositor ladder writes the final answer; with a single key it streams
+  straight through.
+- NOTHING RUNS LOCALLY, and that took more than skipping the council.
+  `resolve_tier` returns [] early; the MLX engine load is skipped; the
+  smallest-cached-model route fallback is skipped; reflection and peer
+  review are forced off (both are local passes); the silent-answer rescue
+  that retries on the smallest local brain is skipped; the place-pinning
+  pass and the memory-extraction pass are skipped — both run a local
+  model. Any one of those left in would have quietly broken the promise.
+- Picking the tier IS the cloud opt-in, so the bench runs regardless of
+  the separate `turbo` preference.
+- Images say so instead of answering blind: the cloud path sends text
+  only, so an attached image in this mode gets a note pointing at the
+  other tiers rather than an answer about nothing.
+- No keys: the tier greys out in both lists, its bubble says to add one
+  under Settings › Cloud power, `setTier` refuses it, and a saved
+  "Cloud Only" that has lost its keys falls back to Fast at boot. Asking
+  anyway returns instructions, never a quiet local fallback.
+
+### The reason "active keys" wasn't true yet
+- `cloud_text` swallowed EVERY exception and returned "", so a revoked
+  key and a retired model both looked like "that model had nothing to
+  say". Found live while testing this: Groq showed a green ✓ in Settings
+  while every call came back **401 Invalid API Key**, and the
+  `gemini-2.5-pro` bench seat **404'd on every question** ("no longer
+  available to new users" — the same trap gemini-2.5-flash sprang once
+  before, now handled generically instead of per-model).
+  Two of four cloud seats were dead weight on every council, silently.
+- Now HTTPErrors are classified. 401/403 means the KEY is bad, so the
+  provider is marked `fail` with the code — which is what makes "grey it
+  out when no keys are active" mean *active*, not *last known good*.
+  400/404 means the MODEL is gone, so only that model is retired, and
+  the retirement persists in `cloud.json` (`dead: [...]`) so a launch
+  doesn't re-donate a seat to it. Re-saving that provider's key clears
+  the list and revives the in-memory set — re-saving IS the retry.
+- The alternate picker no longer falls back to `alts[0]`. Once dead
+  models were skipped it walked the inventory into
+  `gemini-3.7-flash-video-understanding-eap`, seating an unknown voice
+  on the council. An alternate must be a bigger sibling (pro/120b/70b)
+  or the provider fields one seat.
+- Measured: bench went 4 seats → 2 real ones; Settings reads
+  `✓Gemini  ✗Groq · key rejected (HTTP 401)  ✓Claude · in use`;
+  retirement survived a restart; Fast-tier turbo (the refactored
+  `cloud_stream`) still streams. Gauntlet 60/60.
+- STILL OPEN, not touched: the composite gate is `len(_t) > 120`, so a
+  legitimately terse composite ("Lisbon.") is rejected and the ladder
+  burns every rung before falling back to a raw draft. Pre-existing and
+  shared with Thinking/Pro — worth a look, but it's a tuned quality
+  heuristic and not this change's business.
