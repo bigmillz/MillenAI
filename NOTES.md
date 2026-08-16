@@ -2228,3 +2228,15 @@ Five gaps that read as backyard-project, all closed:
   `#funnel-wrap[hidden]{display:none}`. RULE: any wrap that sets
   `display` needs its own `[hidden]` rule. Verified across all four
   tab transitions — each lane shows only its own controls.
+
+## 6 beta 230 — the funnel row lines up
+- A <select> and an <input type=number> have DIFFERENT intrinsic
+  heights, and the number carries spin buttons on top — so the three
+  boxes could never match by accident. All of it is stated now:
+  height 32px, box-sizing border-box, appearance:none, zero margin,
+  matching padding/line-height, spin buttons suppressed, and one
+  shared inline-SVG chevron so both selects use the same arrow
+  instead of the two native ones. Grid gained align-items:end and a
+  slightly wider gap; focus lightens the border on all three.
+- Measured: all three boxes 32px tall with identical top and bottom
+  edges.
