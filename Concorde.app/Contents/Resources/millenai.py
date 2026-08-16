@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 227               # integer compared against the GitHub release tag
+APP_BUILD = 228               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -4272,6 +4272,83 @@ def sky_status(i: int, warm: bool = False) -> dict:
     return {"status": "downloading", "pct": 0}
 
 
+# ---------------------------------------------------------------- funnels
+# A FUNNEL (6b228) is a guided narrowing: the user names a decision and
+# its requirements, and the model proposes N options per stage. Each
+# pick becomes context for the next stage, so the choices converge
+# instead of restarting. Text mode is pure model; image mode attaches a
+# real photo per option harvested from the web (nothing is generated).
+FUNNEL_SYS = (
+    "You run a decision funnel. Each stage offers the user a small set "
+    "of CONCRETE, mutually distinct options that narrow the decision. "
+    "Never repeat an option already chosen, never offer near-duplicates, "
+    "and make every option a real, specific thing — a named choice, not "
+    "a category. Respect the user's stated requirements absolutely.")
+
+
+def funnel_stage(goal, reqs, opts, stage, total, picks, want_img=False):
+    """One stage: a question plus `opts` options, as structured data."""
+    chosen = ("\n".join("- stage %d: %s" % (i + 1, p)
+                         for i, p in enumerate(picks))
+              if picks else "(nothing chosen yet)")
+    ask = (
+        "DECISION: %s\nREQUIREMENTS: %s\nCHOICES SO FAR:\n%s\n\n"
+        "This is stage %d of %d. Write ONE short question (under 12 "
+        "words) that moves this decision forward, then exactly %d "
+        "options that follow from the choices so far.\n"
+        "Reply as STRICT JSON, nothing else:\n"
+        '{"q":"the question","options":[{"label":"short name",'
+        '"why":"one clause on the tradeoff"}]}'
+        % (goal, reqs or "none stated", chosen, stage, total, opts))
+    label = next((l for l in ("Gemma 4 26B", "Gemma 4 12B", "Qwen 3.6 35B MoE",
+                              "Llama 3.1 8B")
+                  if model_cached(l) and model_fits_memory(l)), "")
+    msgs = [{"role": "system", "content": FUNNEL_SYS},
+            {"role": "user", "content": ask}]
+    raw = ""
+    if load_prefs(None).get("turbo") and cloud_conf():
+        raw = cloud_text(cloud_conf(), msgs, timeout=45)
+    if not raw and label:
+        parts = []
+        try:
+            run_model(label, msgs, parts.append)
+            raw = strip_think("".join(parts))
+        except Exception:
+            raw = ""
+    m = re.search(r"\{[\s\S]*\}", raw or "")
+    data = {}
+    if m:
+        try:
+            data = json.loads(m.group(0))
+        except Exception:
+            data = {}
+    out = []
+    for o in (data.get("options") or [])[:opts]:
+        if isinstance(o, dict) and o.get("label"):
+            out.append({"label": str(o["label"])[:90],
+                        "why": str(o.get("why", ""))[:160]})
+    if want_img and out:
+        for o in out:
+            o["img"] = _funnel_image("%s %s" % (goal, o["label"]))
+    return {"q": str(data.get("q", ""))[:120] or "Which direction?",
+            "options": out}
+
+
+def _funnel_image(query: str) -> str:
+    """One representative photo for an option, harvested from the web."""
+    try:
+        hits = _ddg_text(query, 3)
+        urls = [h.get("href") or h.get("url") for h in hits if h]
+        meta = []          # _page_text appends og:image URLs as strings
+        _fetch_pages([u for u in urls if u][:3], cap=200, meta=meta)
+        for img in meta:
+            if isinstance(img, str) and img.startswith("http"):
+                return img
+    except Exception:
+        pass
+    return ""
+
+
 # ---------------------------------------------------------------- sign-in
 # Remote visitors (identified by the tunnel's Cf-Connecting-Ip /
 # X-Forwarded-For headers — local requests never carry them) must pick an
@@ -5428,6 +5505,56 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 threading.Thread(target=_do_update, daemon=True).start()
             self._send_json({"ok": True})
             return
+        if self.path == "/api/funnel":
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                d = json.loads(self.rfile.read(n)) if n else {}
+            except (ValueError, json.JSONDecodeError):
+                d = {}
+            goal = str(d.get("goal", "")).strip()[:300]
+            if not goal:
+                self._send_json({"err": "name the decision first"})
+                return
+            reqs = str(d.get("reqs", "")).strip()[:400]
+            picks = [str(x)[:90] for x in (d.get("picks") or [])][:20]
+            opts = max(2, min(6, int(d.get("opts", 3) or 3)))
+            total = max(1, min(20, int(d.get("stages", 5) or 5)))
+            want_img = bool(d.get("images"))
+            stage = len(picks) + 1
+            if stage > total:
+                # the funnel is spent — summarise the path taken
+                msgs = [{"role": "system", "content": FUNNEL_SYS},
+                        {"role": "user", "content":
+                         "DECISION: %s\nREQUIREMENTS: %s\nThe user chose, "
+                         "in order: %s\n\nIn under 120 words, state the "
+                         "single recommendation these choices point to and "
+                         "the one thing to do next. No preamble."
+                         % (goal, reqs or "none", "; ".join(picks))}]
+                out = ""
+                if load_prefs(None).get("turbo") and cloud_conf():
+                    out = cloud_text(cloud_conf(), msgs, timeout=45)
+                if not out:
+                    lbl = next((l for l in ("Gemma 4 26B", "Gemma 4 12B",
+                                            "Llama 3.1 8B")
+                                if model_cached(l)
+                                and model_fits_memory(l)), "")
+                    if lbl:
+                        parts = []
+                        try:
+                            run_model(lbl, msgs, parts.append)
+                            out = strip_think("".join(parts))
+                        except Exception:
+                            out = ""
+                self._send_json({"done": True, "stage": total,
+                                 "total": total,
+                                 "summary": out or "\n".join(picks)})
+                return
+            st = funnel_stage(goal, reqs, opts, stage, total, picks,
+                              want_img)
+            self._send_json({"done": False, "stage": stage,
+                             "total": total, "q": st["q"],
+                             "options": st["options"]})
+            return
         if self.path == "/api/prefs":
             n = int(self.headers.get("Content-Length", 0))
             try:
@@ -6520,12 +6647,13 @@ body:not(.perf) #dlstrip .dlfill{animation:skyshimmer 3.2s linear infinite}
    translateX(%) is relative to the pill's OWN width, so 100%/200% land
    exactly on the 2nd/3rd third — no container math needed. */
 #tab-glide{position:absolute;top:3px;bottom:3px;left:3px;
-  width:calc(50% - 3px);border-radius:9px;
+  width:calc(33.334% - 2px);border-radius:9px;
   background:rgba(240,242,248,.94);
   box-shadow:0 2px 10px -3px rgba(0,0,0,.5);
   transition:transform .34s cubic-bezier(.34,1.3,.44,1);
   pointer-events:none}
 #mode-tabs.code #tab-glide{transform:translateX(100%)}
+#mode-tabs.funnel #tab-glide{transform:translateX(200%)}
 body.perf #tab-glide{transition:none}
 #mode-tabs .ltab{
   position:relative;z-index:1;
@@ -6539,6 +6667,30 @@ body.perf #tab-glide{transition:none}
 #mode-tabs .ltab:hover{color:var(--dim)}
 #mode-tabs .ltab.on{color:#111;background:none;font-weight:700}
 #agents-wrap,#code-wrap{margin:6px 0 4px}
+#funnel-wrap{margin:8px 0 4px;display:flex;flex-direction:column;gap:7px}
+#funnel-wrap .fq{font-family:var(--mono);font-size:9px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint);display:flex;
+  align-items:center;justify-content:space-between;gap:6px}
+#funnel-wrap textarea,#funnel-wrap select,#funnel-wrap input{
+  background:rgba(255,255,255,.04);border:1px solid var(--line);
+  border-radius:8px;color:var(--text);font:12.5px var(--sans);
+  padding:7px 9px;outline:none;resize:vertical;width:100%}
+#funnel-wrap .fgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
+#funnel-wrap .fgrid .fq{flex-direction:column;align-items:stretch;gap:4px}
+.fstage{margin:0 0 14px}
+.fstage .fsq{font-size:15px;color:#fff;font-weight:600;margin-bottom:10px}
+.fopts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
+  gap:9px}
+.fopt{background:rgba(20,22,28,.8);border:1px solid rgba(255,255,255,.12);
+  border-radius:12px;padding:11px 13px;cursor:pointer;text-align:left;
+  color:var(--text);transition:border-color .15s,background .15s}
+.fopt:hover{border-color:rgba(255,255,255,.34);background:rgba(30,33,40,.9)}
+.fopt b{display:block;font-size:13.5px;margin-bottom:3px}
+.fopt span{font-size:11.5px;color:var(--faint);line-height:1.45}
+.fopt img{width:100%;height:82px;object-fit:cover;border-radius:8px;
+  margin-bottom:8px;display:block}
+.fpath{font-family:var(--mono);font-size:10px;color:var(--faint);
+  letter-spacing:.06em;margin-bottom:8px}
 .agent{
   display:flex;align-items:center;gap:9px;padding:6px 10px;margin-bottom:2px;
   border-radius:9px;color:var(--dim);font-size:13.5px;cursor:pointer;
@@ -7891,8 +8043,31 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
       stroke="currentColor" stroke-width="2" stroke-linecap="round"
       stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/>
       <polyline points="8 6 2 12 8 18"/></svg>Code</span>
+    <span class="ltab" data-m="funnel"><svg viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="2" stroke-linecap="round"
+      stroke-linejoin="round"><path d="M3 4h18l-7 8v7l-4 2v-9z"/>
+      </svg>Funnels</span>
   </div>
   <div id="tier-rows">__TIER_ROWS__</div>
+  <div id="funnel-wrap" hidden>
+    <label class="fq">What do you need to decide on?</label>
+    <textarea id="fn-goal" rows="2"
+      placeholder="e.g. which neighbourhood to open the studio in"></textarea>
+    <label class="fq">Any requirements?</label>
+    <textarea id="fn-reqs" rows="2"
+      placeholder="e.g. under $4k/mo, near an L train stop"></textarea>
+    <div class="fgrid">
+      <label class="fq">Prompts<select id="fn-type">
+        <option value="text">Text</option>
+        <option value="images">Images</option></select></label>
+      <label class="fq">Options<select id="fn-opts">
+        <option>2</option><option>3</option><option selected>4</option>
+        <option>5</option><option>6</option></select></label>
+      <label class="fq">Stages<input id="fn-stages" type="number"
+        min="1" max="20" value="5"></label>
+    </div>
+    <button class="about-btn slim" id="fn-go">Start funnel</button>
+  </div>
   <div id="code-wrap" hidden>
 __CODE_ROWS__
     <div id="ws-bar" hidden>
@@ -8367,9 +8542,11 @@ function modeShow(which){
   uiMode=which;
   $("#tier-rows").hidden=which!=="ai";
   $("#code-wrap").hidden=which!=="code";
+  $("#funnel-wrap").hidden=which!=="funnel";
   $$("#mode-tabs .ltab").forEach(t=>
     t.classList.toggle("on",t.dataset.m===which));
   $("#mode-tabs").classList.toggle("code",which==="code");
+  $("#mode-tabs").classList.toggle("funnel",which==="funnel");
   // deferred a tick: setTier(tier) reaches here DURING boot, before the
   // chat state (let chats/curChat, PIN_SVG) below has initialized — a
   // synchronous renderChats() call here is a TDZ crash that kills the
@@ -9466,8 +9643,9 @@ function renderChats(){
   // code chats, Agents lists specialist chats, Chat lists the rest
   // agents tab pulled: its lane's chats show under Chat so nothing
   // a user made ever vanishes from every list
-  const laneOK=c=>uiMode==="code"?(c.lane||"ai")==="code"
-                                 :(c.lane||"ai")!=="code";
+  const laneOK=c=>(uiMode==="code"||uiMode==="funnel")
+    ?(c.lane||"ai")===uiMode
+    :((c.lane||"ai")!=="code"&&(c.lane||"ai")!=="funnel");
   const mine=chats.filter(laneOK);
   const pins=mine.filter(c=>c.pin);
   const rest=mine.filter(c=>!c.pin);
@@ -9489,7 +9667,8 @@ function renderChats(){
     html+=row(c);
   });
   if(!html)html='<div class="cempty">'
-    +(uiMode==="code"?"No code chats yet":"No chats yet")+'</div>';
+    +(uiMode==="code"?"No code chats yet"
+      :uiMode==="funnel"?"No funnels yet":"No chats yet")+'</div>';
   el.innerHTML=html;
   el.querySelectorAll(".chat-item").forEach(it=>{
     const id=it.dataset.id;
@@ -9596,6 +9775,68 @@ $("#ws-set").addEventListener("click",async()=>{
       ?st.files+" readable files indexed"
       :(st.err||"that didn't work");
   }catch(e){$("#ws-note").textContent="couldn't reach the app";}
+});
+
+/* ------------------------------------------------------- funnels */
+// The funnel runs in the main panel as its own conversation: each
+// stage renders as a question with option cards; a pick appends to the
+// path and asks the server for the next stage. Every funnel is a chat
+// in the "funnel" lane, so it lands in history like anything else.
+let fnState=null;
+async function fnStep(){
+  const box=document.createElement("div");
+  box.className="msg ai";
+  box.innerHTML='<div class="who">Funnel</div><div class="body">'
+    +'<span class="statusline"><i class="cspin"></i> building stage '
+    +(fnState.picks.length+1)+'…</span></div>';
+  inner.appendChild(box);autoScroll();
+  let d={};
+  try{
+    d=await(await fetch("/api/funnel",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(fnState)})).json();
+  }catch(e){d={err:"couldn\u2019t reach the engine"};}
+  const b=box.querySelector(".body");
+  if(d.err){b.innerHTML=esc(d.err);return;}
+  if(d.done){
+    box.querySelector(".who").textContent="Funnel \u00b7 done";
+    b.innerHTML='<div class="fpath">'+esc(fnState.picks.join(" \u2192 "))
+      +'</div>'+renderMD(d.summary||"");
+    fnState=null;persistCurrent();return;
+  }
+  b.innerHTML='<div class="fstage"><div class="fpath">stage '+d.stage
+    +' of '+d.total+(fnState.picks.length?' \u00b7 '
+      +esc(fnState.picks.join(" \u2192 ")):"")+'</div>'
+    +'<div class="fsq">'+esc(d.q)+'</div>'
+    +'<div class="fopts">'+(d.options||[]).map((o,i)=>
+      '<button class="fopt" data-i="'+i+'">'
+      +(o.img?'<img src="'+esc(o.img)+'" alt="" loading="lazy">':"")
+      +'<b>'+esc(o.label)+'</b>'
+      +(o.why?'<span>'+esc(o.why)+'</span>':"")
+      +'</button>').join("")+'</div></div>';
+  b.querySelectorAll(".fopt").forEach(el=>{
+    el.addEventListener("click",()=>{
+      const o=(d.options||[])[+el.dataset.i];if(!o||!fnState)return;
+      b.innerHTML='<div class="fpath">stage '+d.stage+' \u00b7 '
+        +esc(d.q)+'</div><b>'+esc(o.label)+'</b>';
+      fnState.picks.push(o.label);
+      messages.push({role:"assistant",content:d.q+" \u2192 "+o.label});
+      persistCurrent();fnStep();
+    });
+  });
+  autoScroll();
+}
+$("#fn-go").addEventListener("click",()=>{
+  const goal=$("#fn-goal").value.trim();
+  if(!goal){$("#fn-goal").focus();return;}
+  fnState={goal:goal,reqs:$("#fn-reqs").value.trim(),
+    opts:+$("#fn-opts").value,stages:+$("#fn-stages").value,
+    images:$("#fn-type").value==="images",picks:[]};
+  curChat=null;messages=[];inner.innerHTML="";
+  addMsg("user","Funnel: "+goal);
+  messages.push({role:"user",content:"Funnel: "+goal});
+  persistCurrent();
+  fnStep();
 });
 
 /* ------------------------------------------------- command palette */
