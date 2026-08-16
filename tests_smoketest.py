@@ -140,7 +140,12 @@ check("flow diagram renderer", "flowDiagram" in page and "wireFlow" in page
 check("code cards + mini highlighter", "codecard" in page
       and "hilite" in page and "hkw" in page)
 check("mobile drawer present", 'id="mburger"' in page)
-check("tier dropdown js present", "tierRows.classList" in page)
+# 6b243: ONE mode picker. The sidebar's copy of the tier list is gone —
+# the composer's engine pill is the only place modes are chosen, so guard
+# both halves: the picker is there, and the duplicate has not crept back.
+check("composer engine picker is the only mode selector",
+      "openEngMenu" in page and 'id="model-chip"' in page
+      and 'id="tier-rows"' not in page and 'class="tier"' not in page)
 check("arena removed", "arena" not in page.lower())
 check("blend progress bar css", ".blendprog" in page)
 check("serene entrance css", "heroIn 2.6s" in page and "shockOut" not in page)

@@ -101,16 +101,18 @@ def brand(html: str) -> str:
 
 
 def short_version(v: str = None) -> str:
-    """Display form: every trailing .0 falls away — '6.0.0'->'6',
-    '6.1.0'->'6.1', '6.1.1' stays (6.0b208, per Patrick).
+    """Display form: ONE trailing .0 falls away, never more (6b242, per
+    Patrick) — '6.0.0'->'6.0', '6.1.0'->'6.1', '6.1.1' and '6.0.1' stay
+    as they are. The old loop kept going and turned 6.0.0 into a bare
+    '6', which reads like a major line rather than a version.
 
     Display-ONLY — the beta suffix rides along here. Anything that
     compares or builds artifacts uses APP_VERSION raw."""
     v = v or APP_VERSION
-    while v.count(".") >= 1 and v.endswith(".0"):
+    if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 241               # integer compared against the GitHub release tag
+APP_BUILD = 242               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1570,18 +1572,6 @@ def chip_name() -> str:
     if m:                                    # long Intel string -> "CORE I7"
         return f"CORE {m.group(2)}".upper()
     return brand.split("@")[0].strip()[:18].upper()
-
-
-def build_tier_rows() -> str:
-    out = []
-    for name, t in TIERS.items():
-        out.append(
-            f'  <div class="tier" data-tier="{name}">'
-            f'<span class="ico">{t["icon"]}</span>'
-            f'<span class="tname">{t.get("name", name)}</span>'
-            f'<span class="infobtn" title="Which models does this use?">i</span>'
-            f'</div>')
-    return "\n".join(out)
 
 
 def build_model_rows() -> str:
@@ -5678,7 +5668,6 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                          for n, a in AGENTS.items()}))
                     .replace("__APP_BETA__",
                              'VERSION <b class="vnum">%s</b>' % short_version())
-                    .replace("__TIER_ROWS__", build_tier_rows())
                     .replace("__CHIP__", chip_name())
                     .replace("__WIN_WIPE__",
                              "1" if (HAS_WEBVIEW and IS_MAC) else "0")
@@ -7761,13 +7750,6 @@ body.resizing{cursor:col-resize;user-select:none}
 .group-label.chats{color:var(--dim);opacity:.75}
 .group-label.adv{cursor:pointer;color:var(--faint);user-select:none;padding-top:12px}
 .group-label.adv:hover{color:var(--dim)}
-#tier-rows{margin:6px 0 4px}
-.tier{
-  display:flex;align-items:center;gap:9px;padding:6px 10px;margin-bottom:2px;
-  border-radius:9px;cursor:pointer;color:var(--dim);font-size:13.5px;
-  border:1px solid transparent;transition:all .13s;user-select:none;
-}
-.tier:hover{color:var(--text);background:var(--panel2)}
 /* the library tabs + agent radio rows */
 /* background model download: a whisper of a progress strip in the
    header — visible only while a download runs, click opens details */
@@ -7873,12 +7855,6 @@ body.perf #tab-glide{transition:none}
 
 /* model-group dropdowns: carets on the hardware-class headers */
 
-/* dropdown behaviour: collapsed shows only the active tier + caret */
-#tier-rows.closed .tier:not(.active){display:none}
-#tier-rows.closed .tier.active::after{
-  content:"▾";margin-left:auto;color:var(--faint);font-size:12px;
-}
-#tier-rows:not(.closed) .tier{animation:tierDrop .16s ease both}
 /* the agent list folds the same way: closed shows only the choice */
 #agents-wrap.closed .agent:not(.on){display:none}
 #agents-wrap.closed .agent.on::after{
@@ -7887,15 +7863,10 @@ body.perf #tab-glide{transition:none}
 #agents-wrap:not(.closed) .agent{animation:tierDrop .16s ease both}
 @keyframes tierDrop{from{opacity:0;transform:translateY(-5px)}to{opacity:1;transform:none}}
 
-.tier.active{
-  color:var(--text);background:var(--accent-dim);
-  border-color:rgba(255,255,255,.26);
-}
-.tier .tname{font-weight:600}
 /* a mode with nothing behind it (Cloud Only with no key) stays visible
    but plainly inert — it still opens its bubble, which says why */
-.tier.off,.engrow.off{opacity:.38}
-.tier.off:hover,.engrow.off:hover{background:none;color:var(--dim)}
+.engrow.off{opacity:.38}
+.engrow.off:hover{background:none;color:var(--dim)}
 
 #chat-list{margin-bottom:2px;overflow-y:auto}
 #chat-list:empty::after{
@@ -7982,14 +7953,6 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
 #undobar button{background:none;border:none;color:#8fb8ff;cursor:pointer;
   font:600 13px var(--sans);padding:2px 4px}
 #undobar button:hover{text-decoration:underline}
-.infobtn{
-  margin-left:auto;width:17px;height:17px;border-radius:50%;flex-shrink:0;
-  margin-left:9px;background:var(--line);color:var(--dim);
-  font:italic 600 10px var(--helv);line-height:17px;text-align:center;
-  cursor:pointer;opacity:.5;transition:opacity .13s,background .13s,color .13s;
-}
-.tier:hover .infobtn,.infobtn:hover{opacity:1}
-.infobtn:hover{background:var(--accent);color:#1a1a1a}
 #tierpop{
   position:fixed;z-index:70;max-width:250px;
   background:var(--panel2);border:1px solid var(--line);border-radius:10px;
@@ -8263,6 +8226,11 @@ body.perf .msg{animation:none}
   text-transform:uppercase;margin-bottom:7px;color:var(--faint);
 }
 .msg.ai .who{color:var(--faint);letter-spacing:.17em}
+/* the ROLE is the bold half, the model that filled it is not (6b242) */
+.msg .who b{font-weight:700;color:var(--dim)}
+/* the folded card carries the source chips now: give them room to sit
+   under the step rows rather than hugging them */
+.wtlist .srcrow{margin:10px 0 2px}
 .msg .body{
   font-family:var(--helv);font-size:14.5px;line-height:1.65;
   letter-spacing:.002em;
@@ -9599,7 +9567,6 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
       stroke-linejoin="round"><path d="M3 4h18l-7 8v7l-4 2v-9z"/>
       </svg>Funnels</span>
   </div>
-  <div id="tier-rows">__TIER_ROWS__</div>
   <div id="funnel-wrap" hidden>
     <label class="fq">What do you need to decide on?</label>
     <textarea id="fn-goal" rows="2"
@@ -10000,7 +9967,6 @@ function paintModels(){
     el.classList.toggle("active",manual&&el.dataset.model===council[0]);
     const old=el.querySelector(".rank"); if(old)old.remove();
   });
-  $$(".tier").forEach(el=>el.classList.toggle("active",el.dataset.tier===tier));
   $("#chip-model").textContent=tier||model;
 }
 function selectModel(name){
@@ -10110,12 +10076,11 @@ async function showTierPop(el,name){
   tierPop.style.top=Math.round(r.top-4)+"px";
 }
 function hideTierPop(){tierPop.hidden=true;}
-// the tier list is a DROPDOWN: collapsed it shows only the active tier
-// with a caret; clicking it unfolds the rest, picking one folds it back
-const tierRows=$("#tier-rows");
-tierRows.classList.add("closed");
-// the composer's engine pill drops the picker RIGHT THERE (6.0b7):
-// emoji rows for each tier, hover shows the models bubble, click picks
+// THE ONLY MODE PICKER (6b242, per Patrick): the composer's engine pill
+// drops it RIGHT THERE — emoji rows for each tier, hover shows the models
+// bubble, click picks. The sidebar used to carry a second copy of this
+// list; two controls for one setting, a few hundred pixels apart, so the
+// sidebar one is gone and this is the single source of truth.
 const TIER_META=JSON.parse('__TIER_META__');
 const AGENT_META=JSON.parse('__AGENT_META__');
 const engMenu=document.createElement("div");
@@ -10152,34 +10117,8 @@ $("#model-chip").addEventListener("click",ev=>{
   ev.stopPropagation();hideTierPop();
   if(engMenu.hidden)openEngMenu();else engMenu.hidden=true;
 });
-$$(".tier").forEach(el=>{
-  el.addEventListener("click",ev=>{
-    if(tierRows.classList.contains("closed")){
-      ev.stopPropagation();
-      tierRows.classList.remove("closed");
-      return;
-    }
-    if(tierOff[el.dataset.tier]){   // inert: explain, don't fold away
-      ev.stopPropagation();
-      tierPop.dataset.for=el.dataset.tier;
-      showTierPop(el,el.dataset.tier);
-      return;
-    }
-    setTier(el.dataset.tier);
-    tierRows.classList.add("closed");
-  });
-  const ib=el.querySelector(".infobtn");
-  if(ib)ib.addEventListener("click",ev=>{
-    ev.stopPropagation();
-    if(!tierPop.hidden&&tierPop.dataset.for===el.dataset.tier){hideTierPop();return;}
-    tierPop.dataset.for=el.dataset.tier;showTierPop(el,el.dataset.tier);
-  });
-});
 document.addEventListener("click",e=>{
-  if(!e.target.classList.contains("infobtn"))hideTierPop();
-  // clicking anywhere outside the tier list folds it
-  if(!e.target.closest||!e.target.closest("#tier-rows"))
-    tierRows.classList.add("closed");
+  hideTierPop();
   const em=document.getElementById("engmenu");
   if(em&&!e.target.closest("#engmenu")&&!e.target.closest("#model-chip"))
     em.hidden=true;
@@ -10202,17 +10141,14 @@ setTier(tier);
   chip.hidden=false;
 })();
 
-// AVAILABILITY: a mode with nothing behind it is greyed in BOTH pickers —
-// the sidebar rows and the composer dropdown. /api/tiers is the authority
-// (it knows the key bench), so this re-runs whenever a key is saved and
-// whenever Settings repaints.
+// AVAILABILITY: a mode with nothing behind it is greyed in the composer
+// dropdown. /api/tiers is the authority (it knows the key bench), so this
+// re-runs whenever a key is saved and whenever Settings repaints.
 async function paintTierAvail(){
   let info={};
   try{info=await(await fetch("/api/tiers")).json();}catch(e){return;}
   tierOff={};
   Object.keys(info).forEach(n=>{if(info[n].available===false)tierOff[n]=1;});
-  $$(".tier").forEach(el=>
-    el.classList.toggle("off",!!tierOff[el.dataset.tier]));
   const em=document.getElementById("engmenu");
   if(em)em.querySelectorAll(".engrow").forEach(el=>
     el.classList.toggle("off",!!tierOff[el.dataset.t]));
@@ -10230,7 +10166,6 @@ paintTierAvail();
 // modeShow, which is a TDZ crash if the let lives down here.
 function modeShow(which){
   uiMode=which;
-  $("#tier-rows").hidden=which!=="ai";
   $("#code-wrap").hidden=which!=="code";
   $("#funnel-wrap").hidden=which!=="funnel";
   $$("#mode-tabs .ltab").forEach(t=>
@@ -10701,28 +10636,48 @@ function paintSteps(){
 setInterval(()=>{
   if(stepHost&&steps.length&&!streamDone&&!document.hidden)paintSteps();
 },600);
-function collapseSteps(){
+// srcs, when given, are TUCKED INSIDE the disclosure (6b242, per
+// Patrick): visible while the answer works, folded away with the steps
+// once it lands, so a finished answer is prose \u2014 not prose sitting under
+// a pile of chips.
+function collapseSteps(srcs){
   if(!stepHost)return;
   const box=stepHost.querySelector(".worktree");
   if(!box)return;
   if(!steps.length){box.remove();stepHost=null;return;}
   const n=steps.length;
+  const ns=(srcs&&srcs.length)||0;
   box.classList.add("folded");
   box.innerHTML='<button class="wtsum">'
     +'<span class="wtchev">\u203a</span>'+n+' step'+(n===1?"":"s")
-    +' \u00b7 done</button><div class="wtlist" hidden>'
+    +(ns?' \u00b7 '+ns+' source'+(ns===1?"":"s"):' \u00b7 done')
+    +'</button><div class="wtlist" hidden>'
     +steps.slice().sort((a,b)=>STEP_ORDER.indexOf(a.id)-STEP_ORDER.indexOf(b.id))
       .map(s=>'<div class="wtrow ok"><span class="wtdot"></span>'
       +'<span class="wtl">'+esc(s.l||"")+'</span>'
       +(s.d?'<span class="wtd">'+esc(s.d)+'</span>':"")+'</div>').join("")
+    +(ns?srcRow(srcs):"")
     +'</div>';
-  const btn=box.querySelector(".wtsum"),list=box.querySelector(".wtlist");
-  btn.addEventListener("click",()=>{
-    list.hidden=!list.hidden;
-    box.classList.toggle("open",!list.hidden);
-  });
+  // NO per-element listener here (6b242): send() re-inserts this card
+  // from its outerHTML STRING when the answer settles, which parses
+  // fresh nodes and drops every handler — the chevron has been dead on
+  // finished answers. One delegated listener on the chat survives any
+  // number of innerHTML swaps. See the wtsum handler near addMsg.
   stepHost=null;
 }
+// ONE delegated handler for every worktree chevron, now and forever:
+// the card is re-inserted from an HTML string when an answer settles,
+// which drops per-element listeners (6b242 — the chevron had been dead
+// on every finished answer).
+inner.addEventListener("click",e=>{
+  const btn=e.target.closest&&e.target.closest(".wtsum");
+  if(!btn)return;
+  const box=btn.closest(".worktree");
+  const list=box&&box.querySelector(".wtlist");
+  if(!list)return;
+  list.hidden=!list.hidden;
+  box.classList.toggle("open",!list.hidden);
+});
 const ICO={
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',
   redo:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 4v5h-5"/></svg>',
@@ -11088,11 +11043,14 @@ async function send(){
   }
 
   aiDiv.classList.remove("live");
-  collapseSteps();
+  collapseSteps(searched?sources:null);   // sources fold in with the steps
   // at rest the label credits the LINEUP, not the last runner: single
   // model keeps its name, councils settle to the tier (6b216)
+  // 6b242, per Patrick: name the ROLE, then who filled it — "Compositor"
+  // in bold, the model that actually wrote the final answer after it
   {const w=aiDiv.querySelector(".who");
-   if(w)w.textContent=whoLabel(lastModels)||tier||"";}
+   const nm=whoLabel(lastModels)||tier||"";
+   if(w)w.innerHTML=nm?'<b>Compositor</b> '+esc(nm):"";}
   paintDrafts(aiDiv,drafts,false);   // merge done: collapse (or clear bar)
   // the stream died but good drafts exist — the best one IS the answer;
   // never show "engine returned nothing" over a usable draft
@@ -11121,7 +11079,9 @@ async function send(){
     if(uniq.length)places=uniq;
   }
   const treeKeep=(body.querySelector(".worktree")||{}).outerHTML||"";
-  body.innerHTML=treeKeep+(searched&&full?srcRow(sources):"")
+  // no loose srcRow here any more — collapseSteps() folded the chips
+  // inside the disclosure, so a settled answer is prose (6b242)
+  body.innerHTML=treeKeep
     +renderMD(full||(wasAborted?"*(stopped)*":
     "That answer didn\u2019t come through \u2014 the model was still "
     +"warming up. Try again and it usually lands."))
@@ -11601,11 +11561,10 @@ function palActions(){
     {k:"set",t:"Toggle performance mode",
      run:()=>$("#perf-toggle").click()},
   ];
-  // tier names come from the rendered rows — one source of truth
-  $$("#tier-rows .tier").forEach(el=>{
-    const name=el.dataset.tier;
-    if(name)acts.push({k:"tier",t:"Switch to "+name,
-                       run:()=>setTier(name)});
+  // tier names come from TIER_META — the same object the composer's
+  // picker is built from, so ⌘K can never drift from the dropdown
+  Object.keys(TIER_META).forEach(name=>{
+    acts.push({k:"tier",t:"Switch to "+name,run:()=>setTier(name)});
   });
   return acts;
 }

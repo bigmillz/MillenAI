@@ -2981,3 +2981,66 @@ Five gaps that read as backyard-project, all closed:
   micro-labels (mono) and the wordmark (Michroma) differ, which is the
   point of having them.
 - Gauntlet 60/60.
+
+## 6 beta 242 (pending release) — Compositor label, and sources fold away
+- The `.who` line names the ROLE now, then who filled it:
+  "**Compositor** Gemma 4 26B", role bold, model not. Whatever the
+  ladder actually picked appears there, cloud or local.
+- SOURCES ARE TUCKED INTO THE DISCLOSURE once the answer lands, the way
+  Claude does it: visible while the work runs, folded away with the
+  steps when it settles, so a finished answer is prose rather than
+  prose under a pile of chips. The summary now says what is behind the
+  chevron — "3 steps · 4 sources" instead of "3 steps · done".
+- THE CHEVRON WAS ALREADY DEAD, and this feature could not exist until
+  it wasn't. send() re-inserts the worktree card from its outerHTML
+  STRING when an answer settles; that parses fresh nodes and drops every
+  handler, so the per-element click listener collapseSteps() attached
+  had been useless on every finished answer. Proved it before building:
+  rebuild the settled state, click the summary, list.hidden never
+  changed. Replaced with ONE delegated listener on the chat container,
+  which survives any number of innerHTML swaps.
+- Measured on a real searched answer: who = "<b>Compositor</b> Gemma 4
+  26B", summary "3 steps · 4 sources", 4 chips INSIDE the disclosure,
+  0 loose in the body, and the toggle opens and closes.
+- Gauntlet 60/60.
+
+## 6 beta 242 (cont.) — one mode picker, and the DMG goes black
+NB the in-code markers: this batch is 6b242. A run of `6b243` comments
+already exists in millenai.py from the beta-239 commit — previous-me
+labelled forward and the counter never caught up. They are wrong but
+they are history; left alone rather than rewritten.
+- THE SIDEBAR'S TIER LIST IS GONE. Two controls for one setting, a few
+  hundred pixels apart: the sidebar dropdown and the composer's engine
+  pill opened the same four modes and wrote the same `millen.tier`. The
+  composer one wins — it sits with the query, which is where you decide
+  how hard to think.
+- Removed with it: `build_tier_rows()` and the `__TIER_ROWS__` token,
+  `.tier` / `#tier-rows` / `.infobtn` CSS, the fold-open-fold-shut click
+  handlers, and the `$$(".tier")` sweeps in setTier and paintTierAvail.
+  `#tierpop` STAYS — the composer menu uses it for the hover bubble.
+- ⌘K used to enumerate modes by reading the rendered sidebar rows, which
+  would have silently emptied. It reads `TIER_META` now: the same object
+  the composer picker is built from, so the two cannot drift.
+- Verified live: 0 `.tier` in the DOM, picker opens with all four modes
+  and Fast marked on, ⌘K still offers all four.
+- THE DMG WINDOW IS BLACK with grey/white stars, and the lockup is the
+  SETTINGS lockup — not redrawn by eye. Every number in build_dmg.sh was
+  measured off `#set-brand` in the running app and written as a ratio of
+  the wing height: width 1.1951, gap 0.4268, cap 0.5368, wordmark ink
+  6.7982. The wing is SMALL against a long wide-tracked wordmark, and
+  that ratio is the whole character of the mark — eyeballing it drifts
+  every time.
+- The wing is the app's own SVG replayed in PIL: same five bars in
+  viewBox units, round caps drawn as end-circles, 4x supersampled, and
+  the real objectBoundingBox gradient (steel bottom-left -> silver
+  top-right) computed per pixel and masked, not five flat shades.
+- MICHROMA IS A WEBFONT — Google-hosted, no local file — so PIL cannot
+  set it. Helvetica stands in, sized to the same cap height and tracked
+  out to the same ink width, which keeps the proportions but not the
+  letterforms. Shipping the TTF in-repo is the only exact fix.
+- Dropped the blur/bloom pass: on navy it read as glow, on true black it
+  just lifts the whole field to charcoal. Arrow and step 3 went
+  greyscale too — nothing coloured is left in the window.
+- Gauntlet 60/60 (the "tier dropdown js present" check was asserting the
+  thing we deleted; it now guards that the composer picker exists AND
+  that the sidebar duplicate has not crept back).
