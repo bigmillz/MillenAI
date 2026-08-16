@@ -2254,3 +2254,45 @@ Five gaps that read as backyard-project, all closed:
   --faint — measured EQUAL to the PERSONALITY header's computed
   font, size, tracking and colour, with the value right-aligned in
   --dim.
+
+## 6 beta 232 (pending release) — the ZITO override
+- Hold Z, I, T and O together anywhere in the app and the chrome falls
+  away to a mission-control board. It is an easter egg, but not a fake
+  one: every panel is fed by the endpoints the real UI already uses.
+  Spokes are the models `/api/engines` reports UP (biggest nine by
+  memory) plus each cloud provider whose status is `ok`; the ticker
+  carries measured latency, real memory/GPU from `/api/stats`, the live
+  tier and key count; the left roster is real subsystem state (facts in
+  memory, clips in the pantry, fleet peers, workspace root, updater
+  version). The only invented figures are the ones that are obviously
+  jokes — `ui unbeatable`, `vibes`, and the three `wip` checkboxes.
+- The terminal runs a REAL query. It posts to `/api/chat` like send()
+  does and narrates the same wire markers: STATUS, STEP, RUN, DRAFT,
+  SOURCES, RESET. Token counts come from the draft payloads, timings
+  from the clock. Nothing is scripted.
+- WIRE PARSING: send() re-runs its regexes over the whole buffer every
+  chunk and relies on idempotent handlers. The terminal needs each
+  marker exactly ONCE, so it consumes frames instead — scan for
+  `\0`, find the closing `\0`, emit, slice; a trailing partial frame is
+  held back rather than printed. Half a marker never reaches the screen.
+- The combo types four letters into whatever had focus, so engaging
+  strips up to four trailing z/i/t/o characters back off the focused
+  field and re-fires its `input` event. Escape closes the terminal,
+  Escape again stands the board down — wired through `window.zitoEsc()`
+  so the existing Escape chain asks it first and is otherwise untouched.
+- Right rail: only the log panel flexes (`.pb.grow`); the code board and
+  mission control size to content, otherwise the bottom meter was
+  cropped off. The log is `justify-content:flex-end` so overflow spills
+  off the TOP and the newest line is always the visible one.
+- Debug lines written after the answer block exists are inserted ABOVE
+  it (`zAnchor`), so the transcript reads dispatch → answer → close
+  instead of interleaving draft/polish steps under the prose.
+- Everything is scoped under `#zito` with its own `--z*` palette and
+  carries no dependency on the app's tokens — deliberately single-theme,
+  that screen is always night.
+- Verified live: board built from 12 real spokes, Thinking-tier run
+  (7 models, web on, 4 sources, claude-sonnet-5 composite, 49s) and a
+  Fast-tier run (Claude, 3.6s) both narrated end to end; letter-strip,
+  focus hand-off and both Escape levels measured. Gauntlet 60/60.
+- NOT verified on WebKit — the browser pane is Blink. Worth one glance
+  in the desktop build before this ships.

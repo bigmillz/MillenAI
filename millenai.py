@@ -8046,6 +8046,190 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   #hero .greet{font-size:24px;margin-top:14px}
 }
 
+/* ----------------------------------------------------- ZITO override */
+/* Hold Z+I+T+O together and the app drops its clothes: the same pipeline,
+   drawn as a mission-control board. Every selector below is scoped under
+   #zito so none of this can leak into the real UI, and it carries its own
+   palette — the point of the egg is that it looks like a different
+   machine. Deliberately single-theme: this screen is always night. */
+#zito{
+  --zv:#04060c;--zp:#070b14;--zp2:#090e1a;--zr:#12203a;
+  --zb:#4da3ff;--zi:#8fd6ff;
+  --zt:#c9dcf5;--zd:#6e88ae;--zf:#3b5177;
+  --n1:#ff4fd8;--n2:#ffb020;--n3:#35e08a;--n4:#a47bff;
+  --n5:#ff5c5c;--n6:#00e5d0;--n7:#c6ff4f;--n8:#ff8a3d;
+  --zm:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  position:fixed;inset:0;z-index:200;display:none;flex-direction:column;
+  background:var(--zv);color:var(--zt);
+  font:12px/1.5 var(--zm);letter-spacing:0;
+  animation:zin .5s ease both;
+}
+#zito.on{display:flex}
+@keyframes zin{from{opacity:0;filter:blur(9px)}to{opacity:1;filter:none}}
+
+#zito .ztick{display:flex;border-bottom:1px solid var(--zr);
+  background:var(--zp);flex:0 0 auto;overflow:hidden}
+#zito .tk{padding:6px 12px;border-right:1px solid var(--zr);
+  font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;
+  color:var(--zd);white-space:nowrap}
+#zito .tk b{color:var(--tc,var(--zi));font-weight:400}
+#zito .tk.grow{flex:1;color:var(--zf);border-right:none;
+  overflow:hidden;text-overflow:ellipsis}
+
+#zito .zbody{flex:1;display:grid;grid-template-columns:190px 1fr 272px;
+  min-height:0}
+#zito .rail{background:var(--zp);overflow:hidden;display:flex;
+  flex-direction:column;min-height:0}
+#zito .rail.l{border-right:1px solid var(--zr)}
+#zito .rail.r{border-left:1px solid var(--zr)}
+#zito .ph{padding:6px 11px;border-bottom:1px solid var(--zr);
+  font-size:9px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--zf);display:flex;justify-content:space-between;
+  align-items:center;flex:0 0 auto;background:var(--zp2)}
+#zito .ph b{color:var(--zb);font-weight:400}
+#zito .pb{padding:8px 11px;overflow:hidden;flex:1;min-height:0}
+/* the right rail stacks three fixed-size instruments; only the log
+   stretches, so the meters at the bottom can never be cropped away */
+#zito .rail.r .pb{flex:0 0 auto}
+#zito .rail.r .pb.grow{flex:1;min-height:44px}
+
+#zito .ag{display:flex;align-items:center;gap:7px;padding:3.5px 0;
+  font-size:10px;color:var(--zd);white-space:nowrap}
+#zito .ag i{width:5px;height:5px;border-radius:50%;flex:0 0 auto;
+  background:var(--ac,var(--zb));box-shadow:0 0 7px var(--ac,var(--zb));
+  animation:zpip var(--pd,2s) steps(2) infinite}
+#zito .ag span{flex:1;overflow:hidden;text-overflow:ellipsis}
+#zito .ag em{font-style:normal;color:var(--zf);font-size:9px}
+@keyframes zpip{50%{opacity:.2}}
+
+#zito .stage{position:relative;overflow:hidden;background:
+  radial-gradient(760px 400px at 50% 47%,rgba(27,79,143,.22),transparent 72%),
+  var(--zv)}
+#zito .zgrid{position:absolute;inset:0;opacity:.42;
+  background-image:linear-gradient(var(--zr) 1px,transparent 1px),
+    linear-gradient(90deg,var(--zr) 1px,transparent 1px);
+  background-size:40px 40px;
+  -webkit-mask-image:radial-gradient(circle at 50% 47%,#000 18%,transparent 74%);
+  mask-image:radial-gradient(circle at 50% 47%,#000 18%,transparent 74%)}
+#zito .scan{position:absolute;inset:0;pointer-events:none;z-index:9;
+  background:repeating-linear-gradient(180deg,rgba(0,0,0,.28) 0 1px,
+    transparent 1px 3px);opacity:.5}
+#zito .vig{position:absolute;inset:0;pointer-events:none;z-index:8;
+  background:radial-gradient(ellipse at 50% 50%,transparent 52%,rgba(0,0,0,.72))}
+#zito .sweep{position:absolute;left:50%;top:47%;width:520px;height:520px;
+  transform:translate(-50%,-50%);border-radius:50%;pointer-events:none;
+  z-index:2;background:conic-gradient(from 0deg,rgba(77,163,255,.20),
+    transparent 28%);animation:zspin 5.5s linear infinite}
+@keyframes zspin{to{transform:translate(-50%,-50%) rotate(360deg)}}
+#zito svg.web{position:absolute;inset:0;width:100%;height:100%;z-index:2}
+#zito .hub{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);
+  width:132px;height:132px;border-radius:50%;border:1px solid var(--zb);
+  background:rgba(6,12,24,.94);display:grid;place-items:center;
+  text-align:center;z-index:6;box-shadow:0 0 0 1px rgba(77,163,255,.22),
+    0 0 44px rgba(77,163,255,.3) inset}
+#zito .hub span{font-size:12px;letter-spacing:.24em;color:#fff}
+#zito .hub small{display:block;font-size:8px;letter-spacing:.18em;
+  color:var(--zd);margin-top:4px}
+#zito .ring{position:absolute;left:50%;top:47%;
+  transform:translate(-50%,-50%);border-radius:50%;
+  border:1px solid rgba(77,163,255,.2);z-index:1;
+  animation:zpl 1.2s ease-in-out infinite}
+#zito .r1{width:190px;height:190px}
+#zito .r2{width:280px;height:280px;border-style:dashed;opacity:.55}
+#zito .r3{width:392px;height:392px;opacity:.3}
+@keyframes zpl{50%{border-color:rgba(143,214,255,.46)}}
+#zito .node{position:absolute;transform:translate(-50%,-50%);
+  border:1px solid var(--nc);border-radius:7px;background:rgba(5,10,20,.95);
+  padding:5px 9px;white-space:nowrap;font-size:9.5px;letter-spacing:.09em;
+  color:var(--zt);z-index:7;box-shadow:0 0 16px -6px var(--nc);
+  animation:zfk var(--d,1.4s) steps(3) infinite}
+#zito .node em{display:block;font-style:normal;font-size:8px;
+  letter-spacing:.14em;color:var(--zf);margin-top:1px}
+#zito .node i{position:absolute;left:-1px;top:-1px;bottom:-1px;width:2px;
+  background:var(--nc);border-radius:7px 0 0 7px}
+#zito .node.hot{animation:none;box-shadow:0 0 26px -4px var(--nc);
+  border-color:var(--nc)}
+#zito .node.hot em{color:var(--nc)}
+@keyframes zfk{0%,100%{opacity:1}45%{opacity:.5}70%{opacity:.92}}
+
+/* newest line pinned to the bottom: overflow spills off the TOP, so a
+   long run scrolls the way a console does instead of hiding the tail */
+#zito .lg{font-size:9.5px;line-height:1.72;color:var(--zd);margin:0;
+  height:100%;overflow:hidden;display:flex;flex-direction:column;
+  justify-content:flex-end}
+#zito .lg div{flex:0 0 auto}
+#zito .lg div{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#zito .lg .ok{color:var(--n3)} #zito .lg .wr{color:var(--n2)}
+#zito .lg .er{color:var(--n5)} #zito .lg .in{color:var(--zi)}
+#zito .lg .ts{color:var(--zf)}
+#zito .cb{display:flex;align-items:center;gap:7px;font-size:9.5px;
+  color:var(--zd);padding:2.5px 0}
+#zito .cb i{width:9px;height:9px;border:1px solid var(--cc,var(--zb));
+  border-radius:2px;flex:0 0 auto}
+#zito .cb i.f{background:var(--cc);box-shadow:0 0 8px -1px var(--cc)}
+#zito .cb span{flex:1;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+#zito .cb b{color:var(--zf);font-weight:400;font-size:8.5px}
+#zito .heat{display:grid;grid-template-columns:repeat(16,1fr);gap:2px}
+#zito .heat i{aspect-ratio:1;border-radius:1px;background:var(--hc);
+  opacity:var(--ho,.5);animation:zhb var(--hd,3s) steps(2) infinite}
+@keyframes zhb{50%{opacity:.15}}
+#zito .mt{display:flex;align-items:center;gap:7px;margin-bottom:5px;
+  font-size:9px;letter-spacing:.1em;color:var(--zd)}
+#zito .mt span{flex:0 0 74px;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+#zito .mt em{flex:1;height:3px;background:#0e1626;border-radius:2px;
+  overflow:hidden;display:block}
+#zito .mt em>i{display:block;height:100%;background:var(--mc);
+  border-radius:2px;width:0;transition:width .6s ease}
+#zito .mt b{flex:0 0 34px;text-align:right;color:var(--zf);font-weight:400;
+  font-variant-numeric:tabular-nums}
+
+#zito .ask{flex:0 0 auto;display:flex;gap:9px;align-items:center;
+  border-top:1px solid var(--zr);background:var(--zp);padding:9px 12px}
+#zito .ask .pr{color:var(--n3);font-size:12px}
+#zito .ask input{flex:1;background:none;border:none;outline:none;
+  color:var(--zt);font:12px var(--zm);letter-spacing:.03em}
+#zito .ask input::placeholder{color:var(--zf)}
+#zito .ask button{border:1px solid var(--zb);background:rgba(77,163,255,.12);
+  color:var(--zi);font:10px var(--zm);letter-spacing:.18em;
+  text-transform:uppercase;padding:7px 15px;border-radius:7px;cursor:pointer}
+#zito .ask button:hover{background:rgba(77,163,255,.26)}
+#zito .ask button:focus-visible,#zito .ask input:focus-visible{
+  outline:2px solid var(--zi);outline-offset:2px}
+
+#zito .ov{position:fixed;inset:0;z-index:210;display:none;
+  background:rgba(2,5,11,.62);
+  -webkit-backdrop-filter:blur(9px) saturate(1.3);
+  backdrop-filter:blur(9px) saturate(1.3)}
+#zito .ov.on{display:grid;place-items:center;animation:zfade .18s ease both}
+@keyframes zfade{from{opacity:0}to{opacity:1}}
+#zito .ov .pane{width:min(880px,92vw);max-height:82vh;display:flex;
+  flex-direction:column;border:1px solid rgba(77,163,255,.42);
+  border-radius:12px;background:rgba(4,8,16,.55);
+  box-shadow:0 0 0 1px rgba(0,0,0,.5),0 30px 90px -30px #000;overflow:hidden}
+#zito .ov .ph{background:rgba(9,16,30,.7)}
+#zito .out{padding:14px 16px;overflow-y:auto;font-size:11.5px;
+  line-height:1.8;color:var(--zt);flex:1;min-height:0;
+  white-space:pre-wrap;word-break:break-word}
+#zito .out .q{color:var(--n3)}
+#zito .out .dbg{color:var(--zf);font-size:10.5px}
+#zito .out .k{color:var(--zi)}
+#zito .out .w{color:var(--n2)}
+#zito .out .m{color:var(--n1)}
+#zito .out hr{border:none;border-top:1px dashed var(--zr);margin:9px 0}
+#zito .foot{padding:7px 14px;border-top:1px solid var(--zr);font-size:9px;
+  letter-spacing:.18em;text-transform:uppercase;color:var(--zf);
+  display:flex;justify-content:space-between;background:rgba(9,16,30,.55)}
+#zito .cur{display:inline-block;width:7px;height:12px;background:var(--zi);
+  vertical-align:-2px;animation:zbl .9s steps(2) infinite}
+@keyframes zbl{50%{opacity:.2}}
+@media (prefers-reduced-motion:reduce){#zito *{animation:none!important}}
+@media (max-width:820px){
+  #zito .zbody{grid-template-columns:1fr}
+  #zito .rail{display:none}
+}
+
 </style>
 </head>
 <body>
@@ -8379,6 +8563,67 @@ __CODE_ROWS__
     <div id="setup-foot">
       <button id="setup-later">Later</button>
       <button id="setup-go">Download</button>
+    </div>
+  </div>
+</div>
+
+<!-- ZITO override: hold Z+I+T+O. Empty on purpose — every panel below
+     is filled from live endpoints when the egg engages, so a build that
+     never triggers it costs one hidden div. -->
+<div id="zito">
+  <div class="ztick" id="z-tick"></div>
+  <div class="zbody">
+    <div class="rail l">
+      <div class="ph"><span>agent board</span><b id="z-agn">&mdash;</b></div>
+      <div class="pb" id="z-roster"></div>
+      <div class="ph"><span>bus</span><b id="z-busn">nominal</b></div>
+      <div class="pb" id="z-bus"></div>
+    </div>
+    <div class="stage" id="z-stage">
+      <div class="zgrid"></div>
+      <div class="sweep"></div>
+      <svg class="web" id="z-web" viewBox="0 0 1000 560"
+           preserveAspectRatio="none" aria-hidden="true"></svg>
+      <div class="ring r3"></div><div class="ring r2"></div>
+      <div class="ring r1"></div>
+      <div class="hub"><span>MIND MAP<small>hub &middot; live</small></span></div>
+      <div id="z-nodes"></div>
+      <div class="vig"></div><div class="scan"></div>
+    </div>
+    <div class="rail r">
+      <div class="ph"><span>primary log</span><b class="cur"></b></div>
+      <div class="pb grow"><div class="lg" id="z-log"></div></div>
+      <div class="ph"><span>code board</span><b id="z-cbn"></b></div>
+      <div class="pb" id="z-cbd"></div>
+      <div class="ph"><span>mission control</span><b>grid 16&times;5</b></div>
+      <div class="pb">
+        <div class="heat" id="z-heat"></div>
+        <div style="height:9px"></div>
+        <div class="mt" style="--mc:var(--n3)"><span>throughput</span>
+          <em><i id="z-m1"></i></em><b id="z-b1">0</b></div>
+        <div class="mt" style="--mc:var(--n4)"><span>memory</span>
+          <em><i id="z-m2"></i></em><b id="z-b2">0</b></div>
+        <div class="mt" style="--mc:var(--n6)"><span>gpu</span>
+          <em><i id="z-m3"></i></em><b id="z-b3">0</b></div>
+        <div class="mt" style="--mc:var(--n1)"><span>ui superiority</span>
+          <em><i style="width:99%"></i></em><b>99</b></div>
+      </div>
+    </div>
+  </div>
+  <div class="ask">
+    <span class="pr">&gt;</span>
+    <input id="z-q" placeholder="query the mind map&hellip;" aria-label="query"
+           autocomplete="off" spellcheck="false">
+    <button id="z-go">Transmit</button>
+  </div>
+  <div class="ov" id="z-ov" role="dialog" aria-label="response terminal">
+    <div class="pane">
+      <div class="ph"><span>response terminal &middot;
+        <b id="z-ovm">dispatching</b></span>
+        <span style="color:var(--zf)">esc to close</span></div>
+      <div class="out" id="z-out"></div>
+      <div class="foot"><span id="z-fl">idle</span>
+        <span>zito override</span></div>
     </div>
   </div>
 </div>
@@ -9993,6 +10238,8 @@ document.addEventListener("keydown",e=>{
     e.preventDefault();$("#newchat").click();return;
   }
   if(e.key==="Escape"){
+    // the ZITO board owns Escape while it is up: terminal first, then it
+    if(window.zitoEsc&&window.zitoEsc()){e.preventDefault();return;}
     if(!palette.hidden){palClose();return;}
     if(generating&&abortCtl){e.preventDefault();abortCtl.abort();return;}
     // close whatever modal is open, outermost last
@@ -11552,6 +11799,423 @@ checkUpdate();                      // ALWAYS on launch — a stale build
                                     // was the root of most "X doesn't
                                     // work" reports (seen live, often)
 setInterval(checkUpdate,3600000);   // and hourly while running
+
+/* ------------------------------------------------------ ZITO override */
+/* Hold Z, I, T and O together. The chrome falls away and the pipeline is
+   drawn as a mission-control board — and the board is honest: the spokes
+   are the models actually loaded, the ticker is the same telemetry the
+   meters read, the debug feed is the same STATUS/STEP/RUN/DRAFT markers
+   send() parses, and the answer comes from /api/chat like any other.
+   The only invented numbers are the ones that are obviously jokes.
+   Everything lives inside #zito and reads nothing the normal UI owns. */
+(function(){
+const Z=$("#zito"); if(!Z)return;
+const ZC=["--n3","--n4","--n2","--n6","--n7","--n8","--n1","--n5","--zb","--zi"];
+let zOn=false,zPts=[],zPk=[],zRaf=null,zPoll=null,zBusy=false,zNode={};
+
+const zDot=(s,n)=>{s=String(s);return s+" "+".".repeat(Math.max(2,n-s.length));};
+function zStamp(){
+  const d=new Date(),p=n=>String(n).padStart(2,"0");
+  return p(d.getHours())+":"+p(d.getMinutes())+":"+p(d.getSeconds());
+}
+function zSay(html){
+  const b=$("#z-log"); if(!b)return;
+  const d=document.createElement("div");
+  d.innerHTML='<span class="ts">'+zStamp()+'</span> '+html;
+  b.appendChild(d);
+  while(b.children.length>14)b.removeChild(b.firstChild);
+}
+
+/* ---- the board, built from live endpoints ---- */
+async function zBuild(){
+  const gj=async u=>{try{return await(await fetch(u)).json();}catch(e){return{};}};
+  const t0=performance.now();
+  const eng=await gj("/api/engines");
+  const lat=Math.round(performance.now()-t0);
+  const r=await Promise.all([gj("/api/cloud"),gj("/api/stats"),
+    gj("/api/memory"),gj("/api/sky/cached"),gj("/api/fleet/status"),
+    gj("/api/workspace")]);
+  const cl=r[0],st=r[1],mm=r[2],sky=r[3],fl=r[4],ws=r[5];
+
+  const names=Object.keys(eng||{});
+  const up=names.filter(k=>eng[k]&&eng[k].up);
+  // biggest first: the heavyweights are what the board is worth showing
+  up.sort((a,b)=>(eng[b].mem||0)-(eng[a].mem||0));
+  const spokes=up.slice(0,9).map(k=>({n:k,
+    t:/port \d/.test(eng[k].note||"")?"local \u00b7 loaded":"local"}));
+  const PROV={claude:"CLAUDE",gemini:"GEMINI",groq:"GROQ"};
+  const pv=(cl||{}).providers||{};
+  const keys=Object.keys(PROV).filter(id=>(pv[id]||{}).status==="ok");
+  keys.forEach(id=>spokes.push({n:PROV[id],t:"cloud"}));
+  if(!spokes.length)spokes.push({n:model,t:"selected"});
+
+  const ladder=keys.length?PROV[["claude","gemini","groq"]
+    .find(id=>keys.indexOf(id)>=0)]:"GEMMA \u00b7 local";
+  const facts=((mm||{}).facts||[]).length;
+  const clips=((sky||{}).cached||[]).length;
+  const peers=((fl||{}).workers||[]).length;
+  const root=((ws||{}).root||"").split("/").filter(Boolean).pop()||"none";
+
+  /* ticker — every cell but the last one is measured */
+  const TICK=[["link",navigator.onLine?"stable":"offline",
+      navigator.onLine?"--n3":"--n5"],
+    ["spokes",spokes.length+"/"+(names.length+keys.length),"--zi"],
+    ["latency",lat+"ms","--n6"],["tier",(tier||model).toLowerCase(),"--n4"],
+    ["cloud",keys.length+" key"+(keys.length===1?"":"s"),
+      keys.length?"--n2":"--zf"],
+    ["memory",(st.mem_pct!=null?Math.round(st.mem_pct)+"%":"n/a"),"--zb"],
+    ["gpu",(st.gpu_pct!=null?Math.round(st.gpu_pct)+"%":"idle"),"--n7"],
+    ["ui","unbeatable","--n1"]];
+  const ver=((document.querySelector(".vsub")||{}).textContent||"").trim();
+  $("#z-tick").innerHTML=TICK.map(t=>'<div class="tk" style="--tc:var('
+    +t[2]+')">'+esc(t[0])+' <b>'+esc(t[1])+'</b></div>').join("")
+    +'<div class="tk grow">zito override engaged \u00b7 esc to stand down'
+    +(ver?' \u00b7 '+esc(ver):"")+'</div>';
+
+  /* left rail — real subsystem state, one line each */
+  const ROSTER=[["orchestrator",(tier||"manual").toLowerCase(),"--zb"],
+    ["spokes",spokes.length+" live","--n3"],["retriever","web \u00b7 on","--n6"],
+    ["compositor",ladder.toLowerCase(),"--n5"],
+    ["memory",facts+" fact"+(facts===1?"":"s"),"--n7"],
+    ["workspace",root,"--n8"],
+    ["fleet",peers+" peer"+(peers===1?"":"s"),"--n1"],
+    ["pantry",clips+" clip"+(clips===1?"":"s"),"--zb"],
+    ["telemetry",perf?"paused":"live","--n3"],
+    ["guardrail","armed","--n5"],
+    ["updater",ver||"current","--n4"],
+    ["vibes","unbeatable","--n1"]];
+  $("#z-agn").textContent=ROSTER.length;
+  $("#z-roster").innerHTML=ROSTER.map((a,i)=>'<div class="ag" style="--ac:var('
+    +a[2]+');--pd:'+(1.4+i*0.17).toFixed(2)+'s"><i></i><span>'+esc(a[0])
+    +'</span><em>'+esc(a[1])+'</em></div>').join("");
+  $("#z-bus").innerHTML=["models "+names.length+" catalogued",
+    "loaded "+up.length,"cloud "+keys.length,"chats "+messages.length+" in ctx",
+    "profiles "+(st.users_total||1),"sync locked"]
+    .map(b=>'<div class="ag"><i style="--ac:var(--zf)"></i><span>'+esc(b)
+      +'</span></div>').join("");
+  $("#z-busn").textContent=up.length?"nominal":"cold";
+
+  /* code board — real flags, then the three that are the joke */
+  const CODE=[["engines up",up.length>0,"--n3"],["cloud keys",keys.length>0,"--n2"],
+    ["web retrieval",true,"--n6"],["workspace bound",root!=="none","--n8"],
+    ["resident memory",facts>0,"--n7"],["gpu sharing",peers>0,"--n4"],
+    ["vibe normaliser",false,"--n1"],["rival ui audit",false,"--n5"],
+    ["humility module",false,"--n8"]];
+  $("#z-cbn").textContent=CODE.filter(c=>c[1]).length+"/"+CODE.length;
+  $("#z-cbd").innerHTML=CODE.map(c=>'<div class="cb" style="--cc:var('+c[2]
+    +')"><i class="'+(c[1]?"f":"")+'"></i><span>'+esc(c[0])+'</span><b>'
+    +(c[1]?"ok":"wip")+'</b></div>').join("");
+
+  let hh="";
+  for(let i=0;i<80;i++)hh+='<i style="--hc:var('
+    +ZC[Math.floor(Math.random()*ZC.length)]+');--ho:'
+    +(0.15+Math.random()*0.75).toFixed(2)+';--hd:'
+    +(1.6+Math.random()*3).toFixed(2)+'s"></i>';
+  $("#z-heat").innerHTML=hh;
+
+  zLayout(spokes);
+  zSay('boot <span class="in">zito</span> \u00b7 radial topology acquired');
+  zSay('hub <span class="in">MIND MAP</span> latched \u00b7 '+spokes.length
+    +' spoke'+(spokes.length===1?"":"s"));
+  spokes.slice(0,4).forEach(s=>zSay('handshake '+esc(s.n.toLowerCase())
+    +' <span class="ok">ok</span>'));
+  if(keys.length)zSay('cloud bench <span class="in">'+keys.length
+    +' provider'+(keys.length===1?"":"s")+'</span> \u00b7 ladder '
+    +esc(ladder.toLowerCase()));
+  else zSay('cloud bench <span class="wr">no keys</span> \u00b7 local only');
+  zMeters(st);
+}
+
+/* ---- meters, on the same poll the real telemetry uses ---- */
+function zMeters(st){
+  const set=(bar,lab,pct,txt)=>{
+    const b=$(bar),l=$(lab);
+    if(b)b.style.width=Math.max(0,Math.min(100,pct))+"%";
+    if(l)l.textContent=txt;
+  };
+  const rate=Math.min(100,(window.__zRate||0)*1.6);
+  set("#z-m1","#z-b1",rate,Math.round(window.__zRate||0));
+  set("#z-m2","#z-b2",st.mem_pct||0,
+    st.mem_pct!=null?Math.round(st.mem_pct):"\u2013");
+  set("#z-m3","#z-b3",st.gpu_pct||0,
+    st.gpu_pct!=null?Math.round(st.gpu_pct):"\u2013");
+}
+
+/* ---- graph ---- */
+function zLayout(spokes){
+  const stage=$("#z-stage"),web=$("#z-web"),box=$("#z-nodes");
+  if(!stage||!box)return;
+  if(spokes)zLayout.spokes=spokes;
+  spokes=zLayout.spokes||[];
+  const w=stage.clientWidth,h=stage.clientHeight;
+  if(!w||!h||!spokes.length)return;
+  const cx=w/2,cy=h*0.47,rx=Math.min(w*0.38,400),ry=Math.min(h*0.37,205);
+  box.innerHTML="";web.innerHTML="";zPts=[];zNode={};
+  const NS="http://www.w3.org/2000/svg";
+  spokes.forEach((m,i)=>{
+    const a=(i/spokes.length)*Math.PI*2-Math.PI/2;
+    const x=cx+Math.cos(a)*rx,y=cy+Math.sin(a)*ry,c=ZC[i%ZC.length];
+    zPts.push({x:x,y:y,c:c});
+    const ln=document.createElementNS(NS,"line");
+    ln.setAttribute("x1",cx/w*1000);ln.setAttribute("y1",cy/h*560);
+    ln.setAttribute("x2",x/w*1000);ln.setAttribute("y2",y/h*560);
+    ln.setAttribute("stroke","var("+c+")");ln.setAttribute("stroke-width","1");
+    ln.setAttribute("opacity",".4");web.appendChild(ln);
+    const d=document.createElement("div");d.className="node";
+    d.style.setProperty("--nc","var("+c+")");
+    d.style.left=x+"px";d.style.top=y+"px";
+    d.style.setProperty("--d",(1.1+Math.random()*1.5).toFixed(2)+"s");
+    d.innerHTML='<i></i>'+esc(m.n)+'<em>'+esc(m.t)+'</em>';
+    box.appendChild(d);
+    zNode[m.n.toLowerCase()]=d;
+  });
+  for(let k=0;k<zPts.length;k++){
+    const j=(k+3)%zPts.length;
+    const l2=document.createElementNS(NS,"line");
+    l2.setAttribute("x1",zPts[k].x/w*1000);l2.setAttribute("y1",zPts[k].y/h*560);
+    l2.setAttribute("x2",zPts[j].x/w*1000);l2.setAttribute("y2",zPts[j].y/h*560);
+    l2.setAttribute("stroke","var("+zPts[k].c+")");
+    l2.setAttribute("stroke-width",".5");
+    l2.setAttribute("opacity",".12");web.appendChild(l2);
+  }
+}
+function zHot(name,on){
+  const key=String(name||"").toLowerCase();
+  const hit=Object.keys(zNode).find(k=>k===key||k.indexOf(key)>=0
+    ||key.indexOf(k)>=0);
+  if(hit)zNode[hit].classList.toggle("hot",on!==false);
+}
+function zCool(){Object.keys(zNode).forEach(k=>zNode[k].classList.remove("hot"));}
+
+/* ---- packets ---- */
+function zTick(){
+  const stage=$("#z-stage"),web=$("#z-web");
+  if(!stage||!web){zRaf=null;return;}
+  const w=stage.clientWidth,h=stage.clientHeight,cx=w/2,cy=h*0.47;
+  const old=web.querySelectorAll("circle");
+  for(let i=0;i<old.length;i++)old[i].remove();
+  const NS="http://www.w3.org/2000/svg";
+  zPk.forEach(k=>{
+    k.t+=0.013; if(k.t>1)k.t=0;
+    const x=cx+(k.p.x-cx)*k.t,y=cy+(k.p.y-cy)*k.t;
+    const c=document.createElementNS(NS,"circle");
+    c.setAttribute("cx",x/w*1000);c.setAttribute("cy",y/h*560);
+    c.setAttribute("r","2.3");c.setAttribute("fill","var("+k.c+")");
+    web.appendChild(c);
+  });
+  if(zPts.length&&Math.random()<0.32)zSpawn(1);
+  zRaf=requestAnimationFrame(zTick);
+}
+function zSpawn(n){
+  for(let i=0;i<n;i++){
+    if(!zPts.length)return;
+    const p=zPts[Math.floor(Math.random()*zPts.length)];
+    zPk.push({p:p,t:Math.random()*0.3,c:p.c});
+    if(zPk.length>34)zPk.shift();
+  }
+}
+
+/* ---- the terminal: a real query, narrated by its real markers ---- */
+const zOut=()=>$("#z-out");
+// once the answer block exists, later debug lines belong ABOVE it — the
+// transcript reads dispatch, then answer, then close, never interleaved
+let zAnchor=null;
+function zLine(cls,html,pin){
+  const o=zOut();if(!o)return null;
+  const d=document.createElement("div");
+  if(cls)d.className=cls;
+  d.innerHTML=html;
+  if(pin&&zAnchor&&zAnchor.parentNode===o)o.insertBefore(d,zAnchor);
+  else o.appendChild(d);
+  o.scrollTop=o.scrollHeight;
+  return d;
+}
+function zDbg(t){return zLine("dbg",esc(t),true);}
+// terminals don't do markdown; bold is the one mark worth honouring
+const zMd=t=>esc(t).replace(/\*\*([^*\n]+)\*\*/g,'<b class="k">$1</b>')
+  .replace(/^#{1,6}\s+/gm,"");
+
+async function zTransmit(){
+  const box=$("#z-q"),ov=$("#z-ov"),o=zOut();
+  if(!box||zBusy)return;
+  const q=box.value.trim();
+  if(!q)return;
+  if(generating){
+    ov.classList.add("on");o.innerHTML="";
+    zLine("w","the main window is mid-answer \u2014 one at a time.");
+    return;
+  }
+  zBusy=true;box.value="";
+  ov.classList.add("on");o.innerHTML="";zAnchor=null;
+  $("#z-fl").textContent="dispatching";
+  $("#z-ovm").textContent="dispatching";
+  zLine("q","&gt; "+esc(q));
+  zSay('query dispatched \u00b7 <span class="in">'+zPts.length
+    +' spoke'+(zPts.length===1?"":"s")+'</span>');
+  zSpawn(30);zCool();
+
+  const t0=performance.now(),el=()=>((performance.now()-t0)/1000).toFixed(2)+"s";
+  let ansDiv=null,ans="",comp="",last="",seen={},pend="",ctl=new AbortController();
+  zTransmit.ctl=ctl;
+  const paint=()=>{
+    if(!ansDiv){zAnchor=zLine("","<hr>");ansDiv=zLine("","");}
+    ansDiv.innerHTML=zMd(ans);
+    const oo=zOut();if(oo)oo.scrollTop=oo.scrollHeight;
+  };
+  const onMark=m=>{
+    const c=m.indexOf(":"),tag=c<0?m:m.slice(0,c),val=c<0?"":m.slice(c+1);
+    let d=null;try{d=JSON.parse(val);}catch(e){}
+    if(tag==="STATUS"){
+      if(seen["s|"+val])return;seen["s|"+val]=1;
+      zDbg("[status] "+val+"   "+el());
+    }else if(tag==="STEP"&&d){
+      const k="p|"+d.id+"|"+d.s+"|"+d.d;
+      if(seen[k])return;seen[k]=1;
+      zDbg("[step]  "+zDot(d.id,12)+" "+d.s+(d.d?"  "+d.d:"")+"   "+el());
+    }else if(tag==="RUN"&&d){
+      if(d.c!==undefined){
+        zCool();zHot(d.c);comp=d.c;
+        $("#z-ovm").textContent="compositor \u00b7 "+d.c;
+        zDbg("[ladder] compositor "+d.c+"   "+el());
+      }else if(d.r){
+        zCool();d.r.forEach(n=>zHot(n));
+        if(d.r.length)last=d.r[d.r.length-1];
+        $("#z-ovm").textContent=d.r.length?d.r.join(" + "):"running";
+        if(d.r.length&&!seen["r|"+d.r.join(",")]){
+          seen["r|"+d.r.join(",")]=1;
+          zDbg("[run]    "+d.r.join(", ")+"   "+el());
+        }
+      }
+    }else if(tag==="DRAFT"&&d){
+      if(seen["d|"+d.m])return;seen["d|"+d.m]=1;
+      zDbg("[spoke]  "+zDot(d.m,22)+" ~"+Math.round((d.t||"").length/4)
+        +" tok  "+el());
+      zSay('draft <span class="in">'+esc(d.m)+'</span> returned');
+    }else if(tag==="SOURCES"&&d){
+      zDbg("[read]   "+d.length+" source"+(d.length===1?"":"s")+"   "+el());
+    }else if(tag==="RESET"){
+      ans="";if(ansDiv)ansDiv.textContent="";
+      zDbg("[merge]  replacing streamed draft   "+el());
+    }
+  };
+  const onText=t=>{if(!t)return;ans+=t;paint();};
+
+  try{
+    const resp=await fetch("/api/chat",{method:"POST",signal:ctl.signal,
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({model:model,models:council,tier:tier,
+        messages:[{role:"user",content:q}],auto_web:true,
+        images:[],docs:[],agent:""})});
+    const line=resp.headers.get("X-Models")||"";
+    zDbg("[dispatch] "+(line?line.split(",").length:1)+" model"
+      +(line&&line.split(",").length!==1?"s":"")+" \u00b7 "
+      +(resp.headers.get("X-Web-Search")==="1"?"web on":"no web")
+      +" \u00b7 "+(tier||model));
+    if(line)zDbg("[lineup] "+line);
+    $("#z-fl").textContent="streaming";
+    const rd=resp.body.getReader(),dec=new TextDecoder();
+    while(true){
+      const r=await rd.read();
+      if(r.done)break;
+      pend+=dec.decode(r.value,{stream:true});
+      // split marker frames off the wire: \0TAG:payload\0 — hold back a
+      // trailing partial rather than letting half a marker hit the screen
+      while(true){
+        const i=pend.indexOf("\u0000");
+        if(i<0){onText(pend);pend="";break;}
+        if(i>0){onText(pend.slice(0,i));pend=pend.slice(i);}
+        const j=pend.indexOf("\u0000",1);
+        if(j<0)break;
+        onMark(pend.slice(1,j));pend=pend.slice(j+1);
+      }
+    }
+    window.__zRate=ans.length/4/Math.max(0.3,(performance.now()-t0)/1000);
+    // closing block goes BELOW the answer: stop pinning above the rule
+    zAnchor=null;
+    zLine("","<hr>");
+    zDbg("[done]   ~"+Math.round(ans.length/4)+" tok \u00b7 "
+      +Math.round(window.__zRate)+" tok/s end-to-end \u00b7 "+el()+" wall");
+    const nd=Object.keys(seen).filter(k=>k.slice(0,2)==="d|").length;
+    const who=esc(comp||last||(tier||model));
+    zLine("m","VERDICT \u00b7 "+(nd?nd+" drafts \u00b7 composite "+who
+      :"single spoke \u00b7 "+who)+" \u00b7 "+el());
+    zDbg("[audit]  rival ui: pending. this build: "+zPts.length
+      +" spokes, 1 honest progress bar");
+    $("#z-fl").textContent="complete";
+    zSay('composite ready \u00b7 <span class="ok">'+el()+'</span>');
+  }catch(err){
+    if(err.name==="AbortError"){zLine("w","[abort] stood down.");
+      $("#z-fl").textContent="aborted";}
+    else{zLine("w","[error] "+esc(err.message));
+      $("#z-fl").textContent="error";
+      zSay('transmit <span class="er">failed</span>');}
+  }
+  $("#z-ovm").textContent="idle";
+  zBusy=false;zTransmit.ctl=null;
+}
+
+/* ---- engage / stand down ---- */
+function zEngage(){
+  if(zOn)return;zOn=true;
+  // the combo types four letters into whatever had focus — take them back
+  const a=document.activeElement;
+  if(a&&/^(INPUT|TEXTAREA)$/.test(a.tagName||"")&&typeof a.value==="string"){
+    let v=a.value,n=0;
+    while(n<4&&v.length&&"zito".indexOf(v.slice(-1).toLowerCase())>=0){
+      v=v.slice(0,-1);n++;
+    }
+    if(n){a.value=v;a.dispatchEvent(new Event("input"));}
+  }
+  Z.classList.add("on");
+  $("#z-log").innerHTML="";
+  zBuild().catch(()=>zSay('board <span class="er">degraded</span>'));
+  if(!zRaf)zRaf=requestAnimationFrame(zTick);
+  zPoll=setInterval(async()=>{
+    try{zMeters(await(await fetch("/api/stats")).json());}catch(e){}
+  },3000);
+  setTimeout(()=>{const b=$("#z-q");if(b)b.focus();},120);
+}
+function zExit(){
+  if(!zOn)return;zOn=false;
+  if(zTransmit.ctl)try{zTransmit.ctl.abort();}catch(e){}
+  Z.classList.remove("on");
+  $("#z-ov").classList.remove("on");
+  if(zRaf){cancelAnimationFrame(zRaf);zRaf=null;}
+  if(zPoll){clearInterval(zPoll);zPoll=null;}
+  zPk=[];zBusy=false;
+  input.focus();
+}
+// the global Escape chain asks us first: terminal, then the board itself
+window.zitoEsc=function(){
+  if(!zOn)return false;
+  const ov=$("#z-ov");
+  if(ov.classList.contains("on")){
+    if(zTransmit.ctl)try{zTransmit.ctl.abort();}catch(e){}
+    ov.classList.remove("on");return true;
+  }
+  zExit();return true;
+};
+
+const NEED=["z","i","t","o"],zHeld={};
+addEventListener("keydown",e=>{
+  if(e.metaKey||e.ctrlKey||e.altKey)return;
+  const k=(e.key||"").toLowerCase();
+  if(NEED.indexOf(k)<0)return;
+  zHeld[k]=true;
+  if(NEED.every(n=>zHeld[n]))zEngage();
+});
+addEventListener("keyup",e=>{
+  const k=(e.key||"").toLowerCase();
+  if(NEED.indexOf(k)>=0)delete zHeld[k];
+});
+addEventListener("blur",()=>{NEED.forEach(k=>delete zHeld[k]);});
+$("#z-go").addEventListener("click",zTransmit);
+$("#z-q").addEventListener("keydown",e=>{if(e.key==="Enter")zTransmit();});
+$("#z-ov").addEventListener("click",e=>{
+  if(e.target===$("#z-ov"))window.zitoEsc();
+});
+addEventListener("resize",()=>{if(zOn)zLayout();});
+})();
 
 input.focus();
 </script>
