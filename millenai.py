@@ -8592,40 +8592,14 @@ const inner=$("#chat-inner"), scroller=$("#chat-scroll");
 function paintDrafts(div,drafts,live,statusText){
   if(!div)return;
   let d=div.querySelector(".contrib"),p=div.querySelector(".blendprog");
+  // ONE BAR (6b224, per Patrick): the council's own progress bar is
+  // retired — the worktree card carries the single bar with the step
+  // rows beneath it, Claude-style. Council progress now arrives there
+  // as a "Consulting models · i of n" row.
+  if(p){if(p._tick)clearInterval(p._tick);p.remove();p=null;}
   if(live){
     if(d)d.remove();
-    if(!drafts.length&&!statusText)return;
-    if(!p){
-      p=document.createElement("div");p.className="blendprog";
-      p.innerHTML='<div class="track"><div class="fill"></div></div>';
-      div.insertBefore(p,div.querySelector(".body"));
-    }
-    const mm=/(\d+)\s*of\s*(\d+)/.exec(statusText||"");
-    const total=mm?+mm[2]:Math.max(drafts.length+1,2);
-    const done=Math.min(drafts.length,total);
-    const now=performance.now();
-    if(!p.dataset.start)p.dataset.start=now;
-    if(p.dataset.done!==String(done)){
-      if(done>0)p.dataset.per=(now-(+p.dataset.start))/done;
-      p.dataset.done=done;p.dataset.t0=now;
-    }
-    p.dataset.total=total;
-    // a 150ms ticker owns the motion: MONOTONIC glide toward the pace
-    // estimate, alive even through silent engine loads
-    if(!p._tick){
-      p._tick=setInterval(()=>{
-        const t2=+p.dataset.total||2,d2=+p.dataset.done||0;
-        const per2=+p.dataset.per||28000;
-        const fr=Math.min(.96,(performance.now()-(+p.dataset.t0||performance.now()))/per2);
-        const want=Math.min(97,((d2+fr)/t2*100));
-        const cur=+p.dataset.w||0;
-        const w=Math.max(cur,cur+(want-cur)*.06);
-        p.dataset.w=w;
-        const f=p.querySelector(".fill");
-        if(f)f.style.width=w.toFixed(2)+"%";
-      },150);
-    }
-    return p;
+    return;
   }
   if(p){if(p._tick)clearInterval(p._tick);p.remove();}
   if(!drafts||!drafts.length)return;
@@ -8752,7 +8726,7 @@ function mapCard(m){
 // THE WORKING TREE: what it's actually doing, live — a step list with
 // a progress bar, instead of one vague spinner line.
 let steps=[],stepHost=null;
-const STEP_ORDER=["search","read","geo","draft","polish","places"];
+const STEP_ORDER=["search","read","geo","council","draft","polish","places"];
 function resetSteps(host){steps=[];stepHost=host;}
 function addStep(s){
   if(!s||!s.id)return;
@@ -9041,7 +9015,7 @@ async function send(){
     // with every simultaneously active model, then "Compositor: name" —
     // driven by dedicated RUN markers, not status-sniffing
     const setWho=t=>{const w=aiDiv.querySelector(".who");if(w)w.textContent=t;};
-    if(searched)body.innerHTML=srcRow(sources)+'<i class="wtspin scaret">✱</i>';
+    if(searched)body.innerHTML='<i class="wtspin scaret">\u2726</i>';
     // THE DRIP (6b223, per Patrick: "unfold slowly… not chunks
     // magically appearing"): network chunks land in `full`; a paced
     // animator reveals it at a rate that eases toward the backlog, so
@@ -9049,13 +9023,15 @@ async function send(){
     // gone — the pinwheel rides the text's tail instead.
     let dripShown=0,dripOn=false,streamEnded=false;
     const paintStream=txt=>{
-      const hasBar=!!aiDiv.querySelector(".blendprog");
+      // the tree owns the narration; the bare status line is only for
+      // the moment before any step exists
+      const hasBar=!!body.querySelector(".worktree");
       const treeHTML=(body.querySelector(".worktree")||{}).outerHTML||"";
       body.innerHTML=treeHTML
         +(status&&!txt&&!hasBar
           ?'<span class="statusline"><i class="wtspin">✱</i> '
            +esc(status)+'…</span>':"")
-        +(searched?srcRow(sources):"")
+        +(searched&&sources&&sources.length?srcRow(sources):"")
         +renderMD(txt.replace(/\n?\[\[PLACES\]\][\s\S]*$/,""))
         +(streamEnded?"":'<i class="wtspin scaret">✱</i>');
       requestAnimationFrame(()=>wireFlow(body));
@@ -9126,6 +9102,10 @@ async function send(){
               .replace(/\u0000STEP:[^\u0000]*$/,"");
       if(drafts.length||(status&&/of \d+/.test(status)))
         paintDrafts(aiDiv,drafts,true,status);
+      // the council reports into the SAME tree the searches use
+      const mmc=/(\d+)\s*of\s*(\d+)/.exec(status||"");
+      if(mmc)addStep({id:"council",l:"Consulting models",
+        s:(+mmc[1]>=+mmc[2]?"done":"run"),d:mmc[1]+" of "+mmc[2]});
       // a merge that collapsed mid-stream sends RESET \u2014 discard
       // everything streamed before it, keep the replacement answer
       const cut=full.lastIndexOf("\u0000RESET\u0000");

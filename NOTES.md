@@ -2118,3 +2118,21 @@ Five gaps that read as backyard-project, all closed:
 - Battery-tested 17 prompts (8 should / 9 shouldn't): all correct.
   End-to-end on Fast, the exact failing question now reports
   X-Web-Search: 1 and "Searched the web · 4 sources".
+
+## 6 beta 224 — one bar, one tree
+- TWO BARS WAS ONE TOO MANY (per Patrick): the council's .blendprog
+  bar (with its own 150ms ticker) sat above the worktree card, which
+  already had a bar. blendprog is retired — paintDrafts' live branch
+  now just clears it; the finished-state "N of M models contributed"
+  chip is untouched.
+- COUNCIL PROGRESS MOVED INTO THE TREE: the "asking X · i of n"
+  status becomes a step row, "Consulting models · 2 of 3", in
+  STEP_ORDER between geo and draft. One bar on top, every stage
+  listed beneath it — the Claude shape.
+- DEDUPED: the "searched the web" chip row only renders once real
+  source chips exist (it used to echo the tree's search row while
+  empty), and the bare status line yields whenever a worktree is
+  present.
+- Verified live: a search+council run showed bars=1 and steps
+  [Searched the web · 5 sources / Read the pages · 1 image /
+  Located it on the map / Consulting models · 2 of 3].
