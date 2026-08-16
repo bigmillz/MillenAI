@@ -2432,3 +2432,39 @@ Five gaps that read as backyard-project, all closed:
   chosen because "gemini-3-flash" heads the discovery preference order.
   Preview models carry the tightest free-tier quotas, which is why this
   keeps happening; `gemini-flash-latest` is in the same inventory.
+
+## 6 beta 236 (pending release) — one cloud model failing never ends a query
+- The rule, per Patrick: a cloud model that hits a limit OR fails in any
+  other way is DROPPED (hourglass) and the query carries on with whatever
+  still works. Five gaps stood between b235 and that rule.
+- ONLY QUOTA RESTED ANYTHING. A 500, a timeout, a dropped connection or
+  an empty completion recorded nothing at all, so the same broken
+  provider was asked again on the very next question. Now every one of
+  those rests it for GLITCH_COOLDOWN (2 min, vs 10 for a quota — a
+  glitch is usually a glitch and the provider is wanted back). Only a
+  rejected KEY still marks `fail`, because only that needs a human.
+- THE COUNCIL'S CLOUD THREAD WAS UNGUARDED. `status()` writes to the
+  client socket, so a reader closing the tab raised inside the thread —
+  killing it before `run_mark(rm=)` and `took_part()` ran, which pinned
+  that model in the "Running…" label forever and lost it from the
+  ledger. Whole body is now try/except with the un-marking in a
+  `finally`. A cloud voice can fail in every way there is without taking
+  anything else with it.
+- THE JOIN WAS 75s PER THREAD, sequentially — four hung providers could
+  have held the answer for five minutes. They start together, so they
+  share ONE deadline now; whatever hasn't landed is simply absent.
+- TWO PLACES COULD ABORT THE QUERY OUTRIGHT: the single-provider Cloud
+  Only path raised "the cloud provider didn't answer", and a council
+  where every cloud voice failed raised "none of the selected models
+  answered" straight at the reader. Both are caught now.
+- `_cloud_all_down()` writes the honest version: which providers are
+  resting AND ROUGHLY WHEN THEY RETURN, which need a new key, and that
+  Fast/Thinking/Pro will answer it on this machine right now. "Try again
+  later" is useless without the later.
+- Measured with every provider rested by hand: bench empty, Cloud Only
+  greyed (`available:false`), the query answered with the explanation
+  above instead of an error, and Fast tier fell straight through to
+  Gemma 4 26B and answered normally. Unreachable-endpoint checks confirm
+  `cloud_text` and `cloud_stream_conf` return ""/False rather than
+  raising, and that an unrecognised base writes nothing to config.
+- Gauntlet 60/60.

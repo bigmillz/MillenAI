@@ -572,6 +572,12 @@ _QUOTA_RX = re.compile(
 # how long a throttled provider sits out. Long enough to stop hammering a
 # spent per-minute bucket, short enough to come back inside one sitting.
 QUOTA_COOLDOWN = 600.0
+# ANY other way of not working — a 500, a timeout, a dropped connection,
+# an empty completion — rests it too, just briefly. The rule Patrick
+# asked for (6b236) is simply: a cloud model that isn't working gets
+# dropped and the query carries on with whatever is. Short, because a
+# glitch is usually a glitch, and the provider is wanted back.
+GLITCH_COOLDOWN = 120.0
 
 
 def _http_body(exc) -> str:
@@ -607,17 +613,30 @@ def cloud_failure_kind(code: int, body: str) -> str:
     return "other"
 
 
-def cloud_cool(pid: str, note: str):
-    """Bench a throttled provider WITHOUT marking it failed: status stays
-    ok, so it returns on its own when the window passes."""
+def cloud_cool(pid: str, note: str, secs: float = QUOTA_COOLDOWN):
+    """Bench a provider WITHOUT marking it failed: status stays ok, so it
+    returns on its own when the window passes."""
     try:
         cur = dict((_cloud_all().get("providers") or {}).get(pid) or {})
         if not cur:
             return
         cur["status"] = "ok"
-        cur["cool"] = time.time() + QUOTA_COOLDOWN
+        cur["cool"] = time.time() + secs
         cur["note"] = note[:120]
         _cloud_save_state(pid, cur)
+    except Exception:
+        pass
+
+
+def cloud_glitch(c: dict, why: str):
+    """A cloud model that didn't work, for any reason short of a bad key:
+    drop it for a couple of minutes so the NEXT question doesn't spend a
+    council seat on it, and let it come back by itself. Never raises —
+    this runs on the answer path."""
+    try:
+        pid = _provider_of(c)
+        if pid:
+            cloud_cool(pid, why, GLITCH_COOLDOWN)
     except Exception:
         pass
 
@@ -662,6 +681,13 @@ def cloud_note_failure(c: dict, exc: Exception):
             cur["note"] = "key rejected (HTTP %d)" % code
             cur.pop("cool", None)
             _cloud_save_state(pid, cur)
+        elif kind == "other" and code not in (400, 404):
+            # a 5xx or anything else unexpected: not the key's fault and
+            # not the model's, so rest the provider briefly
+            pid = _provider_of(c)
+            if pid:
+                cloud_cool(pid, "not answering (HTTP %d)" % code,
+                           GLITCH_COOLDOWN)
         elif code in (400, 404) and model:
             with _dead_lock:
                 _dead_models.add(model)
@@ -738,7 +764,11 @@ def _anthropic_stream(c: dict, messages: list, emit) -> bool:
             cloud_note_failure(c, exc)
         return got
     except Exception:
+        if not got:
+            cloud_glitch(c, "not responding")
         return got
+    if not got:
+        cloud_glitch(c, "returned nothing")
     return got
 
 
@@ -762,8 +792,11 @@ def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
                          "User-Agent": "MillenAI/%s" % APP_VERSION})
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 d = json.loads(r.read().decode("utf-8", "replace"))
-            return "".join(b.get("text", "")
-                           for b in d.get("content", []))
+            out = "".join(b.get("text", "")
+                          for b in d.get("content", []))
+            if not out.strip():
+                cloud_glitch(c, "returned nothing")
+            return out
         payload = json.dumps({"model": c["model"], "messages": messages,
                               "max_tokens": 4096,
                               "temperature": 0.75}).encode()
@@ -774,12 +807,20 @@ def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
                      "Authorization": "Bearer " + c["key"]})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             d = json.loads(r.read().decode("utf-8", "replace"))
-        return (((d.get("choices") or [{}])[0].get("message") or {})
-                .get("content", "") or "")
+        out = (((d.get("choices") or [{}])[0].get("message") or {})
+               .get("content", "") or "")
+        if not out.strip():
+            # answered, said nothing: still "not working" as far as the
+            # council is concerned, so rest it rather than ask again
+            cloud_glitch(c, "returned nothing")
+        return out
     except urllib.error.HTTPError as exc:
         cloud_note_failure(c, exc)
         return ""
     except Exception:
+        # timeout, dropped connection, malformed JSON — all the same to
+        # the reader waiting for an answer
+        cloud_glitch(c, "not responding")
         return ""
 
 
@@ -3872,11 +3913,11 @@ def run_cloud_only(messages: list, emit, status, step) -> None:
     ladder writes the final answer. Nothing here loads a local engine."""
     bench = cloud_bench()
     if not bench:
-        emit("☁️ **Cloud Only** needs at least one working API key.\n\n"
-             "Add one under **Settings › Cloud power** — Gemini and Groq "
-             "both have free tiers — or pick another mode to answer on "
-             "this machine.")
+        emit(_cloud_all_down())
         return
+    # A DEAD PROVIDER MUST NOT END THE QUERY (6b236, per Patrick): work
+    # DOWN the bench, dropping each one that fails and moving to the
+    # next, and only report a problem once every single one is gone.
     if len(bench) == 1:
         lbl, c = bench[0]
         status("%s · cloud" % lbl)
@@ -3894,8 +3935,49 @@ def run_cloud_only(messages: list, emit, status, step) -> None:
             emit(text)
             step("draft", "Drafted the answer", "done", lbl)
             return
-        raise RuntimeError("the cloud provider didn't answer")
-    run_council([], messages, emit, status, cloud_only=True)
+        step("draft", "That provider dropped out", "done", lbl)
+        emit(_cloud_all_down())
+        return
+    try:
+        run_council([], messages, emit, status, cloud_only=True)
+    except Exception:
+        # every cloud voice failed at once. Say what happened and when
+        # they come back, rather than surfacing a raw engine error.
+        emit(_cloud_all_down())
+
+
+def _cloud_all_down() -> str:
+    """What to say when Cloud Only has nothing left to ask. Names which
+    providers are resting and for how long, because 'try again later' is
+    useless without the later."""
+    resting, broken = [], []
+    for pid, v in (_cloud_all().get("providers") or {}).items():
+        if not v.get("key"):
+            continue
+        if v.get("status") == "fail":
+            broken.append("**%s** — %s" % (pid.title(),
+                                           v.get("note") or "not working"))
+            continue
+        try:
+            left = int(float(v.get("cool") or 0) - time.time())
+        except (TypeError, ValueError):
+            left = 0
+        if left > 0:
+            resting.append("**%s** — back in about %d minute%s"
+                           % (pid.title(), max(1, left // 60),
+                              "" if 60 <= left < 120 else "s"))
+    out = ["☁️ **Cloud Only** has no working model right now."]
+    if resting:
+        out.append("Resting:\n\n" + "\n".join("- " + r for r in resting))
+    if broken:
+        out.append("Needs a new key:\n\n"
+                   + "\n".join("- " + b for b in broken))
+    if not resting and not broken:
+        out.append("Add a key under **Settings › Cloud power** — Gemini "
+                   "and Groq both have free tiers.")
+    out.append("Switch to **Fast**, **Thinking** or **Pro** and this "
+               "machine will answer it now.")
+    return "\n\n".join(out)
 
 
 def run_council(labels: list, messages: list, emit, status,
@@ -3966,14 +4048,42 @@ def run_council(labels: list, messages: list, emit, status,
     # it must not also depend on the separate turbo preference
     if cloud_only or load_prefs(None).get("turbo"):
         def _cloud_draft(lbl, conf):
-            status(f"asking {lbl} \u00b7 cloud")
-            run_mark(add=lbl)
-            t = strip_think(cloud_text(conf, messages))
-            run_mark(rm=lbl)
-            if t and not _looks_degenerate(t):
-                took_part(lbl, t)
-            else:
-                took_part(lbl, "(no answer \u2014 cloud)")
+            # WHOLE BODY GUARDED (6b236). status() writes to the client
+            # socket, so a reader who closes the tab raises in here \u2014 and
+            # an unguarded raise killed the thread before run_mark(rm=)
+            # and took_part() ran, leaving the model pinned in the
+            # "Running\u2026" label forever and missing from the ledger. A
+            # cloud voice must be able to fail in every way there is
+            # without taking anything else down with it.
+            try:
+                try:
+                    status(f"asking {lbl} \u00b7 cloud")
+                except Exception:
+                    pass
+                run_mark(add=lbl)
+                try:
+                    t = strip_think(cloud_text(conf, messages))
+                except Exception:
+                    t = ""
+                    cloud_glitch(conf, "not responding")
+                if t and not _looks_degenerate(t):
+                    took_part(lbl, t)
+                else:
+                    # collapsed output is "not working" too; an empty one
+                    # was already rested inside cloud_text
+                    if t:
+                        cloud_glitch(conf, "output collapsed")
+                    took_part(lbl, "(no answer \u2014 cloud)")
+            except Exception:
+                try:
+                    took_part(lbl, "(no answer \u2014 cloud)")
+                except Exception:
+                    pass
+            finally:
+                try:
+                    run_mark(rm=lbl)
+                except Exception:
+                    pass
         for _lbl, _c in cloud_bench():
             _th = threading.Thread(target=_cloud_draft,
                                    args=(_lbl, _c), daemon=True)
@@ -4006,8 +4116,14 @@ def run_council(labels: list, messages: list, emit, status,
             # recorded — the contributor count must never lie
             took_part(label, "(no answer — empty)")
 
+    # ONE shared deadline, not 75s EACH: joining N threads with a 75s
+    # timeout apiece could hold the answer for 75*N seconds if several
+    # providers hung at once. They all started together, so they get one
+    # window together — whatever hasn't landed by then is simply absent,
+    # and its thread is a daemon that dies with the process.
+    _deadline = time.time() + 75
     for _th in cloud_threads:
-        _th.join(timeout=75)
+        _th.join(timeout=max(0.1, _deadline - time.time()))
 
     good = [d for d in drafts if not d[1].startswith("(no answer")]
     if not good:
