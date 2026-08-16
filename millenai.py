@@ -1772,6 +1772,27 @@ _SELF_CONTAINED = re.compile(
     r"this\s+(code|text|file|function|error|snippet|draft)|"
     r"my\s+(code|essay|draft|resume|cv|email))\b", re.I)
 
+# A PLACE QUESTION IS ALWAYS A LIVE QUESTION (6b237). "late night
+# restaurants in 11221" opens with no question word and ends in no '?',
+# so the grammar test below said don't search — and the answer came back
+# as a polite apology for having no data, on the one class of question
+# where a model's memory is guaranteed to be useless. Hours, openings,
+# closures and new arrivals are exactly what training data cannot hold,
+# so a venue word, a US zip, or an explicit "near/open now" searches on
+# its own regardless of how the sentence is shaped.
+_VENUE_RX = re.compile(
+    r"\b(restaurants?|bars?|pubs?|cafes?|cafés?|coffee|diners?|eater(y|ies)|"
+    r"eats|takeout|takeaway|brunch|bakery|bakeries|delis?|bodegas?|"
+    r"pizza|sushi|ramen|tacos?|burgers?|noodles?|barbecue|bbq|"
+    r"grocery|groceries|hotels?|motels?|hostels?|gyms?|barbers?|salons?|"
+    r"pharmac(y|ies)|hospitals?|clinics?|dentists?|bookstores?|"
+    r"laundromats?|nightlife|nightclubs?|clubs?|breweries|brewery|"
+    r"speakeas(y|ies)|dispensar(y|ies))\b", re.I)
+_ZIP_RX = re.compile(r"\b\d{5}\b")
+_NEARBY_RX = re.compile(
+    r"\b(near\s+(me|here|by)|nearby|around\s+here|walking\s+distance|"
+    r"in\s+the\s+area|open\s+(now|late|today|tonight))\b", re.I)
+
 # ASKS ABOUT THE WORLD: a question word, or an explicit request for
 # facts about something. Deliberately broad — a grounded answer beats a
 # remembered one, and the app shows its sources.
@@ -1827,6 +1848,12 @@ def needs_search(prompt: str) -> bool:
     # get sources instead of an apology (seen live).
     if _SELF_CONTAINED.search(low):
         return False
+    # a place question searches whatever grammar it arrives in — see
+    # _VENUE_RX above. This runs AFTER the self-contained check so
+    # "translate my restaurant menu" still stays local.
+    if (_VENUE_RX.search(low) or _ZIP_RX.search(low)
+            or _NEARBY_RX.search(low)):
+        return True
     return bool(_WORLDLY_RX.search(p) or p.rstrip().endswith("?"))
 
 # words that mean "same subject, different day" — they carry no entity
@@ -1842,11 +1869,31 @@ _FOLLOWUP_RX = re.compile(
     r"tomorrow|tonight|today|this weekend)\b", re.I)
 
 
+# POINTS BACK AT THE CONVERSATION (6b238). "where can i find THIS in
+# 11221?" is meaningless on its own, but _place_terms left "find 11221"
+# behind — a verb and a zip code — so _entity_thin called it a query
+# that names a thing and the follow-up never inherited its subject. It
+# searched a bare zip and came back with apartment listings and crime
+# stats for Bushwick (seen live, right after a funnel that had just
+# settled on a sushi combo). A demonstrative with no noun of its own IS
+# the signal that the subject is upstream.
+_REFERS_BACK_RX = re.compile(
+    r"\b(this|that|these|those|it|them|they|the same|that one|"
+    r"the above|there)\b", re.I)
+
+
 def _entity_thin(q: str) -> bool:
     """True when a query names no actual thing — "is it open tomorrow"
-    boils down to relative-time words only."""
+    boils down to relative-time words only, and "where can i find this"
+    points at something said earlier."""
+    if _REFERS_BACK_RX.search(q or ""):
+        return True
     toks = [w for w in _place_terms(q).split() if w not in _REL_WORDS]
     return not toks
+
+
+# a funnel pick, as the client records it: "Which format? → Sushi combo"
+_FUNNEL_PICK_RX = re.compile(r"\s→\s(.+)$")
 
 
 def _thread_terms(messages) -> str:
@@ -1854,7 +1901,29 @@ def _thread_terms(messages) -> str:
     follow-up ("what about tomorrow?") inherits the place it's about
     instead of searching for the word 'tomorrow'."""
     try:
-        for m in reversed(list(messages)[:-1]):
+        msgs = list(messages)[:-1]
+        # A FINISHED FUNNEL IS THE SUBJECT (6b238). Its picks are stored
+        # as ASSISTANT turns shaped "question → choice", so the user-turn
+        # scan below never saw them: after a funnel settled on a sushi
+        # combo, "where can i find this in 11221?" searched a bare zip
+        # and came back with apartment listings and crime stats (seen
+        # live). The picks are exactly what "this" means. Earliest first,
+        # because those are the category ("Sushi") while the last ones
+        # are trailing detail ("Water").
+        picks = []
+        for m in msgs[-14:]:
+            hit = _FUNNEL_PICK_RX.search(str(m.get("content", ""))[:300])
+            if hit:
+                picks.append(hit.group(1).strip())
+        if picks:
+            words = []
+            for p in picks[:3]:
+                for w in re.findall(r"[a-z0-9'&-]+", p.lower()):
+                    if w not in _PLACE_FILLER and w not in words:
+                        words.append(w)
+            if words:
+                return " ".join(words[:4])
+        for m in reversed(msgs):
             if m.get("role") != "user":
                 continue
             c = strip_greeting(str(m.get("content", ""))[:300])
@@ -2043,11 +2112,25 @@ def _stop_other_mlx(keep_label: str):
     for label, proc in list(_mlx_procs.items()):
         if label == keep_label or proc.poll() is not None:
             continue
+        # THE EVICTION HAS TO ACTUALLY FINISH (6b239). This used to
+        # terminate, wait 8s, and then drop the handle whatever happened
+        # — so a big engine that was slow to die had its 17 GB still
+        # wired when the next one spawned into it. The newcomer then
+        # crawled or died, ensure_mlx_engine polled its full 180s, and
+        # run_model's URLError retry did the whole thing again: Phi-4,
+        # which loads in about 4s, took 336 SECONDS and produced nothing
+        # (seen live). SIGTERM, then SIGKILL, and do not return until
+        # the process is genuinely gone.
         try:
             proc.terminate()
             proc.wait(timeout=8)
         except Exception:
-            pass
+            try:
+                print(f"  MLX engine for {label} ignored SIGTERM — killing")
+                proc.kill()
+                proc.wait(timeout=6)
+            except Exception:
+                pass
         _mlx_procs.pop(label, None)
         stopped = True
         print(f"  stopped idle MLX engine for {label}")
@@ -2055,8 +2138,21 @@ def _stop_other_mlx(keep_label: str):
         # Metal releases wired memory AFTER the process exits; spawning the
         # next engine immediately raced that teardown and died on startup
         # ("no MLX server answering" 6s after a swap, seen live). Give the
-        # GPU allocator a beat to actually hand the memory back.
-        time.sleep(2.5)
+        # GPU allocator a beat to actually hand the memory back — and
+        # rather than a flat guess, watch the memory come back, capped so
+        # a machine that is busy for other reasons can't stall the run.
+        time.sleep(1.0)
+        if HAS_PSUTIL:
+            _floor = psutil.virtual_memory().available
+            _until = time.time() + 6.0
+            while time.time() < _until:
+                _now = psutil.virtual_memory().available
+                if _now <= _floor:      # stopped climbing: teardown done
+                    break
+                _floor = _now
+                time.sleep(0.5)
+        else:
+            time.sleep(1.5)
 
 
 def ensure_mlx_engine(label: str, timeout: float = 180.0) -> bool:
@@ -2937,6 +3033,7 @@ def setup_status() -> dict:
                  else "Linux"),
         "disk_free_gb": round(
             shutil.disk_usage(os.path.expanduser("~")).free / 1e9),
+        "accel": accel_name(),
         "models": models,
     }
 
@@ -3023,6 +3120,24 @@ def _gpu_nvidia():
         return float(out[0].strip()) if out else None
     except Exception:
         return None
+
+
+_accel_cache = []
+
+
+def accel_name() -> str:
+    """What is actually accelerating local models on this machine (6b238):
+    MLX on Apple Silicon, CUDA on an NVIDIA box, CPU otherwise. Cached —
+    nvidia-smi is a subprocess and this is read on every boot."""
+    if _accel_cache:
+        return _accel_cache[0]
+    name = "CPU"
+    if IS_MAC and IS_ARM and _has_mlx():
+        name = "MLX"
+    elif _gpu_nvidia() is not None:
+        name = "CUDA"
+    _accel_cache.append(name)
+    return name
 
 
 def gpu_utilization():
@@ -3668,7 +3783,14 @@ def run_model(label: str, messages: list, emit, thinking: bool = False) -> None:
             if kind == "mlx":
                 with _engine_lock:
                     _mlx_procs.pop(label, None)
-                    ensure_mlx_engine(label)
+                    # A RETRY GETS A SHORT WINDOW (6b239). This called
+                    # ensure_mlx_engine with its full 180s default, and
+                    # with two retries allowed a bring-up that was never
+                    # going to succeed could burn nine minutes. The
+                    # first attempt already had the long window; if the
+                    # engine didn't come up then, more waiting is not
+                    # the missing ingredient.
+                    ensure_mlx_engine(label, timeout=45.0)
             time.sleep(1.5 * attempts)
 
 
@@ -4090,18 +4212,53 @@ def run_council(labels: list, messages: list, emit, status,
             _th.start()
             cloud_threads.append(_th)
 
+    # A SLOW LOCAL MODEL MUST NOT HOLD THE ANSWER HOSTAGE (6b237). These
+    # are MLX engines and MLX pins the whole model in RAM, so each one in
+    # turn is a full load from disk with the previous evicted — and under
+    # memory pressure that swap thrashes. Phi-4, which answers in about
+    # four seconds on its own, once took 336 SECONDS inside a council and
+    # then produced nothing, turning one question into a seven-minute
+    # wait (seen live). The cloud bench has had a shared deadline since
+    # b236; the local loop had none at all. Now both do: a per-model cap
+    # so one straggler can't eat the run, and a whole-loop deadline so
+    # several can't either. Whatever hasn't answered is simply absent —
+    # exactly how a failed cloud voice is treated.
+    LOCAL_CAP = 120.0            # any single model
+    LOCAL_BUDGET = 240.0         # the local loop end to end
+    _local_deadline = time.time() + LOCAL_BUDGET
+
     for i, label in enumerate(labels, 1):
         # free RAM drops as each engine loads — re-check before committing
         if i > 1 and not model_fits_memory(label):
             took_part(label, "(no answer — low memory)")
             continue
+        _left = _local_deadline - time.time()
+        if i > 1 and _left < 15:
+            took_part(label, "(no answer — out of time)")
+            continue
         status(f"asking {label} · {i} of {len(labels)}")
         parts = []
-        try:
-            run_model(label, messages, parts.append,
-                      thinking=(reflect and label.startswith("Qwen")))
-        except Exception as exc:
-            took_part(label, f"(no answer — {type(exc).__name__})")
+        _err = []
+
+        def _draft_local(_lbl=label):
+            try:
+                run_model(_lbl, messages, parts.append,
+                          thinking=(reflect and _lbl.startswith("Qwen")))
+            except Exception as exc:      # noqa: BLE001 — recorded below
+                _err.append(exc)
+        _lt = threading.Thread(target=_draft_local, daemon=True)
+        _lt.start()
+        _lt.join(timeout=min(LOCAL_CAP, max(15.0, _left)))
+        if _lt.is_alive():
+            # abandoned, not killed: it is a daemon, and the NEXT model's
+            # engine swap stops the process it is stuck in. Keep whatever
+            # it managed to stream if that is already a usable answer.
+            _partial = strip_think("".join(parts))
+            took_part(label, _partial if len(_partial) > 200
+                      else "(no answer — too slow)")
+            continue
+        if _err:
+            took_part(label, f"(no answer — {type(_err[0]).__name__})")
             continue
         # the merger gets answers, never the reasoning that produced them
         text = strip_think("".join(parts))
@@ -6321,9 +6478,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     ),
                 }
             else:
+                # the venue words count too (6b237): asking for "late
+                # night restaurants in 11221" wants the map and the pins
+                # just as much as asking whether one is "open" does —
+                # gating only on hours/open/address sent exactly the
+                # queries the places module exists for down the plain
+                # web-search path instead
                 placey = bool(re.search(
                     r"\bhours\b|\bopen\b|\bclosed?\b|\bphone\b|"
-                    r"\baddress\b|\bmenu\b|\breservation", query, re.I))
+                    r"\baddress\b|\bmenu\b|\breservation", query, re.I)
+                    or _VENUE_RX.search(query))
                 matched = True
                 bookish = bool(_BOOKING_RX.search(query.lower())
                                or _ASKY_RX.search(query))
@@ -8177,6 +8341,28 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #model-chip:hover{border-color:rgba(255,255,255,.3);color:var(--dim)}
 #model-chip b{color:var(--dim);font-weight:500}
 
+/* WHAT IS DOING THE WORK (6b238, per Patrick): the silicon path local
+   models actually run on — MLX on Apple Silicon, CUDA on an NVIDIA box.
+   A wordmark lockup rather than either vendor's artwork: it sits in the
+   app's own greyscale type instead of importing a green eye, and it
+   stays legible at 9px where a logo would not. The dot carries the
+   vendor colour so the two read apart at a glance. */
+#accel-chip{
+  /* 10px, not 9: at 9 the pill came out 22px against the engine chip's
+     23 and the two sat a hair out of true (measured) */
+  font-family:var(--mono);font-size:10px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint);
+  padding:4px 10px;display:flex;gap:6px;align-items:center;
+  border:1px solid var(--line);border-radius:999px;user-select:none;
+  white-space:nowrap}
+#accel-chip[hidden]{display:none}
+#accel-chip i{width:5px;height:5px;border-radius:50%;flex:0 0 auto;
+  background:var(--ac,#9aa0aa);box-shadow:0 0 7px -1px var(--ac,#9aa0aa)}
+#accel-chip b{color:var(--dim);font-weight:600;letter-spacing:.2em}
+#accel-chip.cuda{--ac:#76b900}          /* NVIDIA green */
+#accel-chip.mlx{--ac:#c9ccd2}           /* Apple silver */
+#accel-chip.cpu{--ac:#6b6f77}
+
 /* -------------------------------------------------------------- about */
 #dlhelp-veil{position:fixed;inset:0;z-index:61;display:flex;
   align-items:center;justify-content:center;background:rgba(6,7,10,.72);
@@ -8934,6 +9120,7 @@ __CODE_ROWS__
       <textarea id="input" rows="1" placeholder="How can I help you today?"></textarea>
       <div id="crow">
       <div id="model-chip" title="Change engine — opens the picker">engine <b id="chip-model">Llama 3.2 3B</b></div>
+      <div id="accel-chip" hidden><i></i><b></b></div>
       <div id="cbtns">
       <button class="cbtn" id="attach" title="Attach a file">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
@@ -9410,6 +9597,21 @@ document.addEventListener("click",e=>{
     em.hidden=true;
 });
 setTier(tier);
+
+// the acceleration lockup next to the engine chip. One fetch at boot —
+// the silicon doesn't change while the app is open.
+(async function paintAccel(){
+  const chip=$("#accel-chip");if(!chip)return;
+  let a="";
+  try{a=((await(await fetch("/api/setup")).json()).accel)||"";}catch(e){return;}
+  if(!a||a==="CPU")return;      // nothing to boast about, so say nothing
+  chip.className=a.toLowerCase();
+  chip.querySelector("b").textContent=a;
+  chip.title=a==="MLX"
+    ?"Local models run on Apple Silicon through MLX"
+    :"Local models run on your NVIDIA GPU through CUDA";
+  chip.hidden=false;
+})();
 
 // AVAILABILITY: a mode with nothing behind it is greyed in BOTH pickers —
 // the sidebar rows and the composer dropdown. /api/tiers is the authority
@@ -12675,7 +12877,16 @@ async function zTransmit(){
     +' spoke'+(zPts.length===1?"":"s")+'</span>');
   zSpawn(30);zCool();
 
-  const t0=performance.now(),el=()=>((performance.now()-t0)/1000).toFixed(2)+"s";
+  // TWO clocks, because one was read as the other (found live): el() is
+  // the wall clock since transmit — "@44.91s" means it happened THEN —
+  // and lap() is how long the thing that just finished actually took.
+  // The old column showed only el() with no marker, so "Phi-4 44.91s"
+  // read as "Phi-4 took 45 seconds" when it meant "Phi-4 started here".
+  const t0=performance.now();
+  const el=()=>"@"+((performance.now()-t0)/1000).toFixed(1)+"s";
+  let mark=t0;
+  const lap=()=>{const d=(performance.now()-mark)/1000;mark=performance.now();
+    return "+"+d.toFixed(1)+"s";};
   let ansDiv=null,ans="",comp="",last="",seen={},pend="",ctl=new AbortController();
   zTransmit.ctl=ctl;
   const paint=()=>{
@@ -12709,8 +12920,10 @@ async function zTransmit(){
       }
     }else if(tag==="DRAFT"&&d){
       if(seen["d|"+d.m])return;seen["d|"+d.m]=1;
+      // a draft is the one place a DURATION is the useful number: how
+      // long that spoke took, not merely when it landed
       zDbg("[spoke]  "+zDot(d.m,22)+" ~"+Math.round((d.t||"").length/4)
-        +" tok  "+el());
+        +" tok  "+lap()+"  "+el());
       zSay('draft <span class="in">'+esc(d.m)+'</span> returned');
     }else if(tag==="SOURCES"&&d){
       zDbg("[read]   "+d.length+" source"+(d.length===1?"":"s")+"   "+el());

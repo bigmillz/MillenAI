@@ -2468,3 +2468,132 @@ Five gaps that read as backyard-project, all closed:
   `cloud_text` and `cloud_stream_conf` return ""/False rather than
   raising, and that an unrecognised base writes nothing to config.
 - Gauntlet 60/60.
+
+## 6 beta 237 (pending release) — place questions search; nothing waits forever
+### The 1/5 answer: the search gate was a GRAMMAR test
+- "late night restaurants in 11221" got an apology for having no data.
+  It never searched. `needs_search()` fires on a leading question word,
+  a "?", or a freshness word — and that phrasing has none, so the one
+  class of question where a model's memory is guaranteed useless went
+  straight to memory. Measured, all previously FALSE:
+      late night restaurants in 11221 · restaurants open late in 11221
+      late night eats bushwick · coffee near 11221 · sushi in brooklyn
+  Adding "best", or a "?", or leading with "where" flipped every one of
+  them to True. The gate never asked the only question that mattered:
+  is this about a PLACE?
+- `_place_terms()` is no help as a detector — it is a filler-stripper
+  and returns non-empty for "explain recursion in python" too. So:
+  `_VENUE_RX` (venue and cuisine categories), `_ZIP_RX` (a US zip), and
+  `_NEARBY_RX` ("near me", "open now"). Any hit searches, whatever the
+  grammar. Placed AFTER the `_SELF_CONTAINED` check so "translate my
+  restaurant menu into spanish" still stays local — verified.
+- SECOND HALF, same bug: `placey` (the map + pins path) was gated on
+  hours/open/closed/phone/address/menu/reservation, which "late night
+  restaurants in 11221" also fails — so even a searched place query took
+  the plain web path. `_VENUE_RX` counts there too now.
+- Before: an apology. After: 5 sources incl. the Yelp page for 11221,
+  named venues with addresses and Sunday hours, 3 pinned.
+
+### The seven-minute answer: no deadline on the local loop
+- Phi-4 14B benchmarks at 4.3s standalone. Inside that council it ran
+  336 SECONDS and produced nothing. Not the model: every council model
+  here is MLX, MLX pins the whole model in RAM, so each one in turn is a
+  full disk load with the previous evicted — and with 18.9 GB free
+  against Gemma 4 26B's 17.0 GB it thrashed. Qwen 3.6 35B MoE wants
+  20.0 GB and was correctly skipped ("(no answer — low memory)", the
+  ~6 tok in the log).
+- The cloud bench got a shared deadline in b236. The local loop had NONE
+  — one straggler could hold the answer indefinitely. Now each model
+  runs on a thread with a 120s cap under a 240s whole-loop budget;
+  whatever hasn't answered is simply absent, the same treatment a failed
+  cloud voice gets. Partial output over 200 chars is kept rather than
+  thrown away. Abandoned threads are daemons and the next model's engine
+  swap stops the process they are stuck in.
+- Measured on the same question: 414s -> 251s, and Phi-4 delivered a
+  real 1068-char draft instead of nothing.
+- HONEST LIMIT: 251s is still slow, and the deadline only caps the worst
+  case. Three large MLX models in one tier means three sequential engine
+  loads on this machine; making Thinking genuinely fast needs resident
+  engines or a smaller roster, not a timeout.
+
+### The number that started it
+- The ZITO terminal printed one clock with no marker, so "Phi-4 44.91s"
+  read as a duration when it was a timestamp — it meant Phi-4 STARTED
+  there. Now `@44.9s` is the wall clock and `+336.5s` is how long the
+  spoke took, and a draft line shows both.
+- Gauntlet 60/60.
+
+## 6 beta 238 (pending release) — a follow-up after a funnel knows its subject
+- "where can i find this in 11221?" straight after a funnel that had
+  settled on a sushi combo searched a BARE ZIP and came back with
+  zillow, hotelplanner, crimegrade and housecashin — apartment listings
+  and crime stats. The model then said, correctly, that it had no idea
+  what "this" referred to.
+- TWO faults, and the second one nearly shipped unnoticed.
+  1. `_entity_thin("where can i find this in 11221?")` was FALSE.
+     `_place_terms` leaves "find 11221" — a verb and a zip — so the code
+     decided the query names a thing and never tried to inherit a
+     subject. A demonstrative with no noun of its own IS the signal that
+     the subject is upstream, so `_REFERS_BACK_RX` (this/that/these/it/
+     them/there/the same) now makes a query thin on its own.
+  2. FUNNEL PICKS ARE ASSISTANT TURNS. The client records each one as
+     `{role:"assistant", content:"question → choice"}`, and
+     `_thread_terms` only ever scanned USER turns — so the only user
+     turn was the goal line and it returned "". `_thread_terms` now
+     harvests the "→ choice" lines from the last 14 messages, earliest
+     first (the early picks are the category, "Sushi"; the late ones are
+     trailing detail, "Water").
+- PROCESS NOTE, worth keeping: fix 1 was "verified" against a transcript
+  written by hand with the picks as USER turns — it passed, and it was
+  meaningless. Re-running it against the shape the client actually emits
+  returned "" and exposed fault 2. Reconstructed fixtures must be copied
+  from the producing code, not from memory of it.
+- Measured on the real shape:
+    before: "where can i find this in 11221?"
+    after : "sushi combo platter deluxe where can i find this in 11221?"
+  Ordinary follow-ups unchanged ("how tall is it?" -> "brooklyn bridge"),
+  and with no history nothing is prepended.
+
+## 6 beta 238 — the acceleration lockup
+- A chip beside the engine chip naming the silicon path local models
+  actually run on: MLX on Apple Silicon, CUDA on an NVIDIA box, and
+  nothing at all on plain CPU (there is nothing to boast about). Served
+  as `accel` on /api/setup from `accel_name()`, cached because
+  nvidia-smi is a subprocess.
+- A WORDMARK, not either vendor's artwork: it stays in the app's own
+  greyscale type instead of importing a green eye, reads at 10px where a
+  logo would not, and avoids reproducing a trademark. The dot carries
+  the vendor colour (#76b900 NVIDIA green, #c9ccd2 Apple silver) so the
+  two read apart instantly.
+- 9px made the pill 22px against the engine chip's 23 and the pair sat a
+  hair out of true. At 10px both measure 23px with identical top and
+  bottom — checked, not eyeballed.
+- Gauntlet 60/60.
+
+## 6 beta 239 (pending release) — the MLX swap actually completes
+- Patrick asked whether the council could run models sequentially instead
+  of loading them at once. IT ALREADY DOES, and always did: the local
+  loop is a plain `for`, `run_model` calls `ensure_mlx_engine` under
+  `_engine_lock`, and that calls `_stop_other_mlx`, which terminates
+  every other MLX engine. One resident engine is an existing invariant —
+  nothing in b237 changed it. Concurrency was never the problem.
+- MEASURED: a healthy Gemma 4 26B -> Phi-4 14B swap is 1-4 SECONDS. So
+  the 336s had nothing to do with load cost.
+- WHAT IT ACTUALLY WAS: `_stop_other_mlx` sent SIGTERM, waited 8s, and
+  then dropped the handle NO MATTER WHAT. A big engine slow to die still
+  had its ~17 GB wired when the next one spawned into it; the newcomer
+  crawled or died; `ensure_mlx_engine` then polled its full 180s; and
+  `run_model`'s URLError path retried with the SAME 180s default, twice
+  over. 180+180 = 360, and the observed figure was 336.
+- Now: SIGTERM, then SIGKILL if it ignores that, and the handle is not
+  dropped until the process is genuinely gone. The flat 2.5s Metal beat
+  became a watch — poll available memory until it stops climbing, capped
+  at 6s — so teardown is observed rather than guessed.
+- And a retry gets a SHORT window (45s, not 180). The first attempt
+  already had the long one; if the engine didn't come up then, more
+  waiting is not the missing ingredient. Worst case went from ~540s
+  (three full attempts) to ~270s, and the b237 per-model cap of 120s
+  bounds it well below that inside a council anyway.
+- Measured after: swaps 1.1-3.6s, single-resident invariant holds, and a
+  three-model Thinking run finished in 31.2s with four real drafts.
+- Gauntlet 60/60.
