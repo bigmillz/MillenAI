@@ -128,8 +128,11 @@ check("engine dropdown js + meta", "openEngMenu" in page
 check("agents tab pulled, machinery dormant",
       'data-m="agents"' not in page and 'id="agents-wrap"' not in page
       and "showAgentPop" in page and '"Hermes"' in page)
-check("glide back to halves", "width:calc(50% - 3px)" in page
-      and "translateX(200%)" not in page)
+# b228: three tabs again (Chat | Code | Funnels) — thirds glide
+check("three-tab glide in thirds", "width:calc(33.334% - 2px)" in page
+      and "translateX(200%)" in page)
+check("funnels tab present", 'data-m="funnel"' in page
+      and 'id="fn-goal"' in page and 'id="fn-stages"' in page)
 check("sidebar defaults to 300px", "width:300px;min-width:300px" in page)
 # 6.0b206: rich answers — flow diagrams, code cards, highlighter
 check("flow diagram renderer", "flowDiagram" in page and "wireFlow" in page
