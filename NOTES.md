@@ -2174,3 +2174,23 @@ Five gaps that read as backyard-project, all closed:
     question, must not hold it short).
 - Measured end to end: search-done 10% -> council 1of3 aged 21% ->
   drafting@1500 chars 71% -> finished 100%, monotonic throughout.
+
+## 6 beta 227 — the length dial
+- A 1-5 RESPONSE LENGTH SLIDER under Personality's Save button
+  (Brief / Short / Balanced / Detailed / In depth), persisted as
+  prefs.length, appended to the dated system prompt as a LENGTH
+  clause. Level 3 writes NOTHING — the prompt's own calibration is
+  the neutral default, so the dial only speaks when the user moved
+  it.
+- EACH RUNG NAMES A SHAPE, NOT A MOOD: "two or three sentences",
+  "one or two tight paragraphs", "several developed paragraphs",
+  "up to several pages with headings" — concrete instructions hold
+  where adjectives drift. The long rungs carry an explicit
+  anti-padding clause ("every paragraph must carry new information…
+  if you have said everything worth saying, stop there") so depth
+  never becomes rambling. No token ceilings were touched: local
+  models run to their natural stop and 4096 already allows ~6 pages,
+  so trimming max_tokens would only truncate mid-sentence.
+- MEASURED, not assumed: identical question ("how does espresso
+  differ from drip coffee?") returned 616 chars at level 1 and 2623
+  at level 5 — a 4.3x spread from one dial.

@@ -5868,6 +5868,39 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "should respond, in their own words:\n\"" + persona + "\"\n"
                 "Follow them in every reply without restating them. If the "
                 "current message conflicts with them, the message wins.")
+        # RESPONSE LENGTH (6b227, per Patrick): a 1-5 dial the user
+        # owns. Each rung names a concrete SHAPE — sentences, not
+        # adjectives — because "be brief" drifts but "two or three
+        # sentences" doesn't. The top rungs authorise depth while
+        # explicitly forbidding padding, so nothing rambles to fill
+        # space.
+        _LEN = {
+            1: ("Answer in two or three sentences. Give the direct "
+                "answer and the single most useful detail, nothing "
+                "more. No headings, no lists, no preamble."),
+            2: ("Keep it short — one or two tight paragraphs. Lead "
+                "with the answer, add only what genuinely helps."),
+            3: "",                       # the prompt's own calibration
+            4: ("Go deep when the question earns it: several "
+                "developed paragraphs, with headings or a list where "
+                "they genuinely organise the material. Cover the "
+                "obvious follow-up. Never pad — every paragraph must "
+                "carry new information."),
+            5: ("Write a thorough, well-structured treatment — as "
+                "long as the material honestly supports, up to "
+                "several pages. Use headings and lists to organise "
+                "it, work through the angles and the edge cases, and "
+                "include concrete examples. Absolutely no padding, "
+                "no restating, no filler summaries: if you have said "
+                "everything worth saying, stop there."),
+        }
+        try:
+            _lv = int(load_prefs(user_base).get("length", 3))
+        except (TypeError, ValueError):
+            _lv = 3
+        _lv = max(1, min(5, _lv))
+        if _LEN.get(_lv):
+            dated_system["content"] += "\n\nLENGTH: " + _LEN[_lv]
         full_messages = [dated_system] + messages
 
         route, route_label = None, None
@@ -8034,6 +8067,10 @@ __CODE_ROWS__
       <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
         placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
       <button class="about-btn slim" id="persona-save">Save</button>
+      <div id="len-row">
+        <div id="len-head">Response length <b id="len-val">Balanced</b></div>
+        <input type="range" id="len-slider" min="1" max="5" step="1" value="3">
+      </div>
     </div>
     <div class="set-sec">
       <label id="turbo-row" hidden><input type="checkbox" id="turbo">
@@ -10979,6 +11016,8 @@ async function openAbout(){
   try{
     const pr=await(await fetch("/api/prefs")).json();
     $("#persona").value=pr.persona||"";
+    const lv=Math.max(1,Math.min(5,+(pr.length||3)));
+    lenSlider.value=lv;paintLen(lv);
   }catch(e){}
   try{
     const [m,st]=await Promise.all([
@@ -11118,6 +11157,15 @@ $("#persona-save").addEventListener("click",async ev=>{
     b.textContent="Saved \u2713";
   }catch(e){b.textContent="Couldn\u2019t save";}
   setTimeout(()=>{b.textContent="Save preferences";},1800);
+});
+const LEN_NAMES={1:"Brief",2:"Short",3:"Balanced",4:"Detailed",5:"In depth"};
+const lenSlider=$("#len-slider");
+function paintLen(v){$("#len-val").textContent=LEN_NAMES[v]||"Balanced";}
+lenSlider.addEventListener("input",()=>paintLen(+lenSlider.value));
+lenSlider.addEventListener("change",()=>{
+  fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({length:+lenSlider.value})});
 });
 $("#turbo").addEventListener("change",()=>{
   $("#cloudkey-box").hidden=!$("#turbo").checked;
