@@ -6,7 +6,7 @@
   <key>CFBundleName</key>            <string>Concorde</string>
   <key>CFBundleDisplayName</key>     <string>Concorde</string>
   <key>CFBundleIdentifier</key>      <string>com.millen.millenai</string>
-  <key>CFBundleVersion</key>         <string>225</string>
+  <key>CFBundleVersion</key>         <string>226</string>
   <key>CFBundleShortVersionString</key> <string>6.0.0</string>
   <key>CFBundleExecutable</key>      <string>MillenAI</string>
   <key>CFBundleIconFile</key>        <string>MillenAI</string>

@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 225               # integer compared against the GitHub release tag
+APP_BUILD = 226               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -6961,8 +6961,13 @@ body:not(.perf) .wtbar i{animation:skyshimmer 3s linear infinite}
 /* the living pinwheel (5.2): Claude has its flower — ours spins the
    identity gradient beside whatever is in motion */
 .wthead{display:flex;align-items:center;gap:9px;margin-bottom:10px}
-.wthead .wtspin{height:17px;display:flex;align-items:center}
-.wtspin.scaret{font-size:15px;vertical-align:-2px;margin-left:6px}
+.cspin{display:inline-block;flex:none;width:15px;height:15px;
+  border-radius:50%;border:2px solid rgba(255,255,255,.16);
+  border-top-color:rgba(255,255,255,.9);vertical-align:-3px;
+  animation:cspin .7s linear infinite}
+@keyframes cspin{to{transform:rotate(360deg)}}
+body.perf .cspin{animation:none}
+.statusline .cspin{width:12px;height:12px;margin-right:6px}
 .wthead .wtbar{flex:1;margin-bottom:0}
 .wtspin{display:inline-block;flex:none;font-style:normal;font-size:14px;
   line-height:1;
@@ -8722,11 +8727,18 @@ function mapCard(m){
 // THE WORKING TREE: what it's actually doing, live — a step list with
 // a progress bar, instead of one vague spinner line.
 let steps=[],stepHost=null;
+// what THIS run is expected to do (set at stream start) + live signals
+let stepPlan=[],answerChars=0,streamDone=false;
 const STEP_ORDER=["search","read","geo","council","draft","polish","places"];
-function resetSteps(host){steps=[];stepHost=host;}
+function resetSteps(host){steps=[];stepHost=host;
+  stepPlan=[];answerChars=0;streamDone=false;}
 function addStep(s){
   if(!s||!s.id)return;
   const at=steps.findIndex(x=>x.id===s.id);
+  // remember when this phase (or its sub-step) last advanced, so the
+  // bar can interpolate between milestones instead of freezing
+  const prev=at>=0?steps[at]:null;
+  s._t0=(prev&&prev.d===s.d&&prev.s===s.s)?prev._t0:performance.now();
   if(at>=0)steps[at]=s; else steps.push(s);
   paintSteps();
 }
@@ -8737,12 +8749,41 @@ function paintSteps(){
     box=document.createElement("div");box.className="worktree";
     stepHost.insertBefore(box,stepHost.firstChild);
   }
-  const done=steps.filter(s=>s.s==="done").length;
-  const pct=steps.length?Math.round(done/steps.length*100):0;
+  // HONEST PROGRESS (6b226, per Patrick: "not go right to 99% and
+  // sit there"): weight the phases this run will ACTUALLY have —
+  // known at stream start from the search header and the tier — and
+  // give the running phase its real sub-progress (council i-of-n,
+  // drafting from streamed characters). Never 100% before the end.
+  const W={search:10,read:10,geo:5,council:35,draft:30,polish:8,places:7};
+  const seen={};steps.forEach(s2=>{seen[s2.id]=s2;});
+  const plan={};
+  (stepPlan.length?stepPlan:Object.keys(seen)).forEach(id=>{plan[id]=1;});
+  Object.keys(seen).forEach(id=>{plan[id]=1;});   // surprises count too
+  let total=0,got=0;
+  Object.keys(plan).forEach(id=>{
+    const w=W[id]||8;total+=w;
+    const st=seen[id];if(!st)return;
+    if(st.s==="done"){got+=w;return;}
+    // a running phase creeps from its last milestone toward the next
+    // on a decaying curve — always moving, never overshooting
+    const age=(performance.now()-(st._t0||performance.now()))/1000;
+    const creep=1-Math.exp(-age/14);
+    let lo=0,hi=0.9;
+    const mm=/(\d+)\s*of\s*(\d+)/.exec(st.d||"");
+    if(mm&&+mm[2]){lo=(+mm[1]-1)/+mm[2];hi=+mm[1]/+mm[2];}
+    let f=lo+(hi-lo)*creep;
+    if(id==="draft"&&answerChars>0)
+      f=Math.max(f,1-Math.exp(-answerChars/900));  // real text wins
+    got+=w*Math.min(f,0.97);
+  });
+  // a planned phase that never materialised (geo on a non-place
+  // question) must not hold the bar short of full at the end
+  const pct=streamDone?100
+    :(total?Math.min(96,Math.round(got/total*100)):0);
   const ordered=steps.slice().sort((a,b)=>
     STEP_ORDER.indexOf(a.id)-STEP_ORDER.indexOf(b.id));
   box.innerHTML=
-    '<div class="wthead"><i class="wtspin">✱</i>'
+    '<div class="wthead"><i class="cspin"></i>'
     +'<div class="wtbar"><i style="width:'+pct+'%"></i></div></div>'
     +'<div class="wtlist">'+ordered.map(s=>
       '<div class="wtrow '+(s.s==="done"?"ok":"run")+'">'
@@ -8751,6 +8792,11 @@ function paintSteps(){
       +(s.d?'<span class="wtd">'+esc(s.d)+'</span>':"")
       +'</div>').join("")+'</div>';
 }
+// repaint on a slow clock so the creep is visible even when the
+// server is silent (a big model can load for 20s without a word)
+setInterval(()=>{
+  if(stepHost&&steps.length&&!streamDone&&!document.hidden)paintSteps();
+},600);
 function collapseSteps(){
   if(!stepHost)return;
   const box=stepHost.querySelector(".worktree");
@@ -9006,12 +9052,17 @@ async function send(){
     });
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
+    // the phase plan for THIS run — what the bar measures against
+    stepPlan=[];
+    if(searched)stepPlan.push("search","read","geo");
+    if((lastModels||"").split(",").length>1)stepPlan.push("council");
+    stepPlan.push("draft","polish");
     if(lastModels){const w=aiDiv.querySelector(".who");if(w)w.textContent=whoLabel(lastModels);}
     // the label speaks plainly (6b223, per Patrick): "Running… a, b"
     // with every simultaneously active model, then "Compositor: name" —
     // driven by dedicated RUN markers, not status-sniffing
     const setWho=t=>{const w=aiDiv.querySelector(".who");if(w)w.textContent=t;};
-    if(searched)body.innerHTML='<i class="wtspin scaret">\u2726</i>';
+    if(searched)body.innerHTML="";
     // THE DRIP (6b223, per Patrick: "unfold slowly… not chunks
     // magically appearing"): network chunks land in `full`; a paced
     // animator reveals it at a rate that eases toward the backlog, so
@@ -9025,11 +9076,11 @@ async function send(){
       const treeHTML=(body.querySelector(".worktree")||{}).outerHTML||"";
       body.innerHTML=treeHTML
         +(status&&!txt&&!hasBar
-          ?'<span class="statusline"><i class="wtspin">✱</i> '
+          ?'<span class="statusline"><i class="cspin"></i> '
            +esc(status)+'…</span>':"")
         +(searched&&sources&&sources.length?srcRow(sources):"")
         +renderMD(txt.replace(/\n?\[\[PLACES\]\][\s\S]*$/,""))
-        +(streamEnded?"":'<i class="wtspin scaret">✱</i>');
+        ;
       requestAnimationFrame(()=>wireFlow(body));
       if(curChat===myChat)autoScroll();
     };
@@ -9111,9 +9162,12 @@ async function send(){
       lastRate=secs>0.3?tokEst/secs:0;
       setToks(lastRate,"streaming");
       if(cut>=0)dripShown=0;    // a RESET replays the replacement
+      answerChars=full.length;  // drafting progress is real text
+      if(steps.length)paintSteps();
       kickDrip();
     }
-    streamEnded=true;
+    streamEnded=true;streamDone=true;
+    if(steps.length)paintSteps();
     // let the reveal catch up (capped — a hidden window throttles rAF)
     for(let w=0;w<60&&dripShown<full.length;w++)
       await new Promise(r=>setTimeout(r,30));
