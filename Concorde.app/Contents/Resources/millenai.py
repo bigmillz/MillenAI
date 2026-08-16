@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 228               # integer compared against the GitHub release tag
+APP_BUILD = 229               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -6667,7 +6667,11 @@ body.perf #tab-glide{transition:none}
 #mode-tabs .ltab:hover{color:var(--dim)}
 #mode-tabs .ltab.on{color:#111;background:none;font-weight:700}
 #agents-wrap,#code-wrap{margin:6px 0 4px}
+/* [hidden] is only display:none from the UA sheet — an author
+   display:flex outranks it, which leaked the funnel form into Chat
+   and Code (seen live). Restore the attribute's authority. */
 #funnel-wrap{margin:8px 0 4px;display:flex;flex-direction:column;gap:7px}
+#funnel-wrap[hidden]{display:none}
 #funnel-wrap .fq{font-family:var(--mono);font-size:9px;letter-spacing:.14em;
   text-transform:uppercase;color:var(--faint);display:flex;
   align-items:center;justify-content:space-between;gap:6px}
