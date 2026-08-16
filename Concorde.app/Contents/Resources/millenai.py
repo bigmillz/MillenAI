@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 234               # integer compared against the GitHub release tag
+APP_BUILD = 235               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -566,6 +566,62 @@ def _dead_seed():
         pass
 
 
+_QUOTA_RX = re.compile(
+    r"quota|rate.?limit|resource.?exhausted|too many requests|billing",
+    re.I)
+# how long a throttled provider sits out. Long enough to stop hammering a
+# spent per-minute bucket, short enough to come back inside one sitting.
+QUOTA_COOLDOWN = 600.0
+
+
+def _http_body(exc) -> str:
+    """The provider's own words out of an HTTPError, read at most once."""
+    body = getattr(exc, "cached_body", None)
+    if body is None:
+        try:
+            body = exc.read().decode("utf-8", "replace")
+        except Exception:
+            body = ""
+        try:
+            exc.cached_body = body
+        except Exception:
+            pass
+    return body or ""
+
+
+def cloud_failure_kind(code: int, body: str) -> str:
+    """'auth' — the key is bad. 'quota' — the key is FINE and merely
+    throttled. 'other' — anything else.
+
+    THE BODY GETS A VOTE, not just the status code. Google answers 429
+    RESOURCE_EXHAUSTED for a spent free tier and has been seen using 403
+    for the same condition, and treating that as a bad key is how a
+    perfectly good Gemini key ended up permanently red in Settings while
+    /models still returned 200 (found live, 6b235). A quota that resets
+    by itself must never down a provider.
+    """
+    if code == 429 or _QUOTA_RX.search(body or ""):
+        return "quota"
+    if code in (401, 403):
+        return "auth"
+    return "other"
+
+
+def cloud_cool(pid: str, note: str):
+    """Bench a throttled provider WITHOUT marking it failed: status stays
+    ok, so it returns on its own when the window passes."""
+    try:
+        cur = dict((_cloud_all().get("providers") or {}).get(pid) or {})
+        if not cur:
+            return
+        cur["status"] = "ok"
+        cur["cool"] = time.time() + QUOTA_COOLDOWN
+        cur["note"] = note[:120]
+        _cloud_save_state(pid, cur)
+    except Exception:
+        pass
+
+
 def cloud_model_alive(model: str) -> bool:
     _dead_seed()
     with _dead_lock:
@@ -586,7 +642,14 @@ def cloud_note_failure(c: dict, exc: Exception):
     try:
         code = getattr(exc, "code", 0)
         model = c.get("model", "")
-        if code in (401, 403):
+        kind = cloud_failure_kind(code, _http_body(exc))
+        if kind == "quota":
+            # the key WORKS — sit the provider out and let it come back
+            pid = _provider_of(c)
+            if pid:
+                cloud_cool(pid, "rate limited — resting")
+            return
+        if kind == "auth":
             pid = _provider_of(c)
             if not pid:
                 return
@@ -597,6 +660,7 @@ def cloud_note_failure(c: dict, exc: Exception):
             # user can see which provider to re-paste
             cur["status"] = "fail"
             cur["note"] = "key rejected (HTTP %d)" % code
+            cur.pop("cool", None)
             _cloud_save_state(pid, cur)
         elif code in (400, 404) and model:
             with _dead_lock:
@@ -619,12 +683,21 @@ def cloud_note_failure(c: dict, exc: Exception):
 def cloud_conf():
     """The ACTIVE working provider in the classic shape — everything
     downstream (cloud_stream, tiers) keeps its old contract."""
+    live = cloud_ok_providers()          # honours status AND the cooldown
+    if not live:
+        return None
     d = _cloud_all()
-    c = (d.get("providers") or {}).get(d.get("active") or "", None)
-    if c and c.get("base") and c.get("key") and c.get("model") \
-            and c.get("status", "ok") == "ok":
-        return c
-    return None
+    want = d.get("active") or ""
+    # match on the PROVIDER ID, not on dict equality — the two reads are
+    # separate loads of the file and only happen to compare equal
+    for pid, c in (d.get("providers") or {}).items():
+        if pid == want and any(v.get("key") == c.get("key")
+                               and v.get("model") == c.get("model")
+                               for v in live):
+            return c
+    # the active one is failed or resting: any other working provider
+    # beats dropping the whole turbo path back to local silicon
+    return live[0]
 
 
 def _anthropic_stream(c: dict, messages: list, emit) -> bool:
@@ -710,13 +783,57 @@ def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
         return ""
 
 
+_repaired = [False]
+
+
+def _cloud_repair():
+    """ONE-TIME, ONCE PER PROCESS: undo the damage b233/b234 could do.
+    Those builds marked a provider FAILED for any HTTP error, so a spent
+    free-tier quota — which resets by itself — left a perfectly good key
+    showing a red ✗ until it was re-pasted by hand. A stored note that
+    reads like a quota message is exactly that case: put it back to ok
+    and let the cooldown decide when it returns."""
+    if _repaired[0]:
+        return
+    _repaired[0] = True
+    try:
+        d = _cloud_all()
+        changed = False
+        for v in (d.get("providers") or {}).values():
+            if v.get("status") == "fail" and _QUOTA_RX.search(
+                    v.get("note") or ""):
+                v["status"] = "ok"
+                v["cool"] = time.time() + QUOTA_COOLDOWN
+                v["note"] = "rate limited — resting"
+                changed = True
+        if changed:
+            with open(CLOUD_FILE, "w") as f:
+                json.dump(d, f)
+            os.chmod(CLOUD_FILE, 0o600)
+    except Exception:
+        pass
+
+
 def cloud_ok_providers() -> list:
     """Every provider whose key currently reports ok — the council's
     cloud bench."""
+    _cloud_repair()
     d = _cloud_all()
-    return [v for v in (d.get("providers") or {}).values()
-            if v.get("status", "ok") == "ok" and v.get("key")
-            and v.get("base") and v.get("model")]
+    now = time.time()
+    out = []
+    for v in (d.get("providers") or {}).values():
+        if not (v.get("status", "ok") == "ok" and v.get("key")
+                and v.get("base") and v.get("model")):
+            continue
+        # a throttled provider is healthy but resting — leaving it on the
+        # bench just spends a council seat on a guaranteed 429
+        try:
+            if float(v.get("cool") or 0) > now:
+                continue
+        except (TypeError, ValueError):
+            pass
+        out.append(v)
+    return out
 
 
 def cloud_bench() -> list:
@@ -5158,8 +5275,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 return
             c = cloud_conf()
             d = _cloud_all()
+            _now = time.time()
+
+            def _cool_left(v):
+                try:
+                    return max(0, int(float(v.get("cool") or 0) - _now))
+                except (TypeError, ValueError):
+                    return 0
             provs = {k: {"status": v.get("status", ""),
-                         "note": v.get("note", "")[:80]}
+                         "note": (v.get("note") or "")[:80],
+                         "cool": _cool_left(v)}
                      for k, v in (d.get("providers") or {}).items()}
             self._send_json({"configured": bool(c),
                              "name": (c or {}).get("name", ""),
@@ -5549,15 +5674,40 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 # the provider's OWN words beat "HTTP Error 400": Google
                 # answers 400 "Please pass a valid API key" for a bad key
                 # (verified live) — surface that, plus the shape hint
+                raw = _http_body(exc)
                 detail = ""
                 try:
-                    body = json.loads(exc.read().decode("utf-8", "replace"))
+                    body = json.loads(raw)
                     if isinstance(body, list):
                         body = body[0] if body else {}
                     detail = ((body.get("error") or {}).get("message")
                               or "")[:160]
                 except Exception:
                     pass
+                # A THROTTLED KEY IS A GOOD KEY. The probe spends real
+                # quota, so on a free tier it is entirely normal for it to
+                # come back 429 — and refusing the save there marked a
+                # working Gemini key permanently failed while /models
+                # still answered 200 (found live, 6b235). Accept it, rest
+                # it, and say so.
+                if cloud_failure_kind(exc.code, raw or detail) == "quota":
+                    _cloud_save_state(which, {"name": name, "base": base,
+                                              "key": key, "model": model,
+                                              "models": found,
+                                              "status": "ok",
+                                              "cool": time.time()
+                                              + QUOTA_COOLDOWN,
+                                              "note": "rate limited — "
+                                                      "resting"},
+                                      make_active=True)
+                    p = load_prefs(None); p["turbo"] = True; store_prefs(p)
+                    self._send_json({
+                        "ok": True, "name": name, "model": model,
+                        "models": found,
+                        "warn": "key saved — %s is rate limited right now, "
+                                "so it sits out for a few minutes and comes "
+                                "back on its own." % which.title()})
+                    return
                 # the provider says "Invalid API Key" for a REVOKED key and
                 # for a MANGLED one alike, so say which this looks like.
                 # The prefix is the tell: right shape and right length is a
@@ -5583,8 +5733,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 _cloud_save_state(which, {"name": name, "base": base,
                                           "key": key, "model": model,
                                           "status": "fail",
-                                          "note": detail
-                                          or ("HTTP %s" % exc.code)})
+                                          "note": (detail
+                                                   or ("HTTP %s" % exc.code)
+                                                   )[:120]})
                 self._send_json({"ok": False,
                                  "err": "that key didn't work: %s%s"
                                         % (detail or ("HTTP %s"
@@ -7773,6 +7924,11 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .ckm.bad{color:var(--dim)}
 .ckm .ckx{color:#e26d5a;font-weight:700}
 .ckm.bad i{font-style:normal;color:var(--faint)}
+/* resting on a spent quota — amber, not red: nothing is broken and
+   nothing needs doing, it comes back on its own */
+.ckm.rest{color:var(--dim)}
+.ckm .ckz{color:#e3b341;font-weight:700}
+.ckm.rest i{font-style:normal;color:#a8935f}
 #ck-note{font-size:11px;color:var(--faint);margin-top:7px;
   line-height:1.5;min-height:14px}
 /* the places module: dark multi-pin map + card rail */
@@ -11695,11 +11851,19 @@ function ckBoard(provs,active){
   box.innerHTML=CK_PROVS.map(([id,label])=>{
     const st=(provs[id]||{}).status||"";
     const note=(provs[id]||{}).note||"";
-    const mark=st==="ok"?'<span class="ckt">✓</span>'
+    const cool=(provs[id]||{}).cool||0;
+    // a RESTING provider is healthy, not broken: a spent free-tier quota
+    // refills by itself, so it gets an hourglass and a countdown instead
+    // of the red ✗ that means "go and fix your key" (6b235)
+    const rest=st==="ok"&&cool>0;
+    const mark=rest?'<span class="ckz">⏳</span>'
+      :st==="ok"?'<span class="ckt">✓</span>'
       :st==="fail"?'<span class="ckx">✗</span>':"";
-    return '<div class="ckm'+(st==="ok"?" on":st==="fail"?" bad":"")
+    return '<div class="ckm'+(rest?" rest":st==="ok"?" on"
+        :st==="fail"?" bad":"")
       +'">'+mark+label
-      +(st==="ok"&&id===active?' <i>· in use</i>':"")
+      +(rest?' <i>· resting '+Math.ceil(cool/60)+'m · quota</i>'
+        :st==="ok"&&id===active?' <i>· in use</i>':"")
       +(st==="fail"&&note?' <i>· '+esc(note)+'</i>':"")+'</div>';
   }).join("");
 }
@@ -11712,8 +11876,11 @@ $("#ck-save").addEventListener("click",async()=>{
     const d=await(await fetch("/api/cloud/set",{method:"POST",
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify({provider:$("#ck-provider").value,key:key})})).json();
-    if(d.ok){note.textContent="✓ "+d.name+" is live — cloud answers "
-      +"are on.";$("#ck-key").value="";
+    // a rate-limited key still SAVES (it's a good key) — say what
+    // happened rather than claiming it's live when it's resting
+    if(d.ok){note.textContent=d.warn?"⏳ "+d.warn
+        :"✓ "+d.name+" is live — cloud answers are on.";
+      $("#ck-key").value="";
       $("#turbo-row").hidden=false;$("#turbo").checked=true;}
     else note.textContent=d.err||"that didn't work";
     try{const cs2=await(await fetch("/api/cloud")).json();
