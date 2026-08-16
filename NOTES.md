@@ -2219,3 +2219,12 @@ Five gaps that read as backyard-project, all closed:
   stage 3, conditioned on earlier picks, it offered three specific
   Wyckoff Ave addresses with rents inside the stated $5k budget, and
   the finish returned a single recommendation with a next step.
+- b228 FOLLOW-UP: the funnel form leaked into Chat and Code. Cause is
+  a CSS-vs-HTML precedence trap — `hidden` is only `display:none`
+  from the UA stylesheet, so the author rule `#funnel-wrap{display:
+  flex}` outranked it and the element stayed visible no matter what
+  modeShow set. #agents-wrap/#code-wrap never declared `display`,
+  which is why they were never affected. Added
+  `#funnel-wrap[hidden]{display:none}`. RULE: any wrap that sets
+  `display` needs its own `[hidden]` rule. Verified across all four
+  tab transitions — each lane shows only its own controls.
