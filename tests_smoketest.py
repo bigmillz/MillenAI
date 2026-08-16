@@ -139,13 +139,27 @@ check("flow diagram renderer", "flowDiagram" in page and "wireFlow" in page
       and "fwires" in page)
 check("code cards + mini highlighter", "codecard" in page
       and "hilite" in page and "hkw" in page)
-check("mobile drawer present", 'id="mburger"' in page)
-# 6b243: ONE mode picker. The sidebar's copy of the tier list is gone —
+# 6b243: the burger was DEAD on phones — a 760px block set the sidebar
+# display:none while the 700px drawer block only animated transform, so
+# the ☰ toggled a class on an element that was never rendered. ONE
+# breakpoint now; this guards the second one from creeping back.
+check("mobile drawer present and openable",
+      'id="mburger"' in page and "body.sbopen #sidebar" in page
+      and page.count("max-width:760px") == 1
+      and "max-width:700px" not in page
+      and "#sidebar{display:none}" not in page)
+# 6b242: ONE mode picker. The sidebar's copy of the tier list is gone —
 # the composer's engine pill is the only place modes are chosen, so guard
 # both halves: the picker is there, and the duplicate has not crept back.
 check("composer engine picker is the only mode selector",
       "openEngMenu" in page and 'id="model-chip"' in page
       and 'id="tier-rows"' not in page and 'class="tier"' not in page)
+# 6b242: voice chat parked. The button greys out, the click is inert, and
+# a machine that had it ON must not keep talking after the update — so the
+# stale localStorage flag has to be cleared at boot, not just ignored.
+check("voice chat parked, and stale flag cleared",
+      "VOICE_PARKED=true" in page and "parked" in page
+      and 'localStorage.setItem("millen.voice","0")' in page)
 check("arena removed", "arena" not in page.lower())
 check("blend progress bar css", ".blendprog" in page)
 check("serene entrance css", "heroIn 2.6s" in page and "shockOut" not in page)

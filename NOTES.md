@@ -3044,3 +3044,97 @@ they are history; left alone rather than rewritten.
 - Gauntlet 60/60 (the "tier dropdown js present" check was asserting the
   thing we deleted; it now guards that the composer picker exists AND
   that the sidebar duplicate has not crept back).
+
+## 6 beta 243 (pending release) — voice chat is parked
+- Greyed, not deleted: `#voicebtn` gets `.parked` (opacity .3, not-allowed),
+  the click returns early, and `setVoice` forces `on=false` behind a single
+  `VOICE_PARKED` flag. Flip that one constant to bring it back.
+- THE STALE FLAG WAS THE ONLY REAL TRAP. `voiceChat` initialises from
+  `localStorage["millen.voice"]`, so a machine that had voice chat ON
+  before the update would have carried a "1" across and kept talking after
+  every answer with no visible control to stop it. Boot now writes "0".
+- Verified by priming localStorage to "1", reloading, and reading back:
+  parked, opacity .3, cursor not-allowed, voiceChat false, stored "0",
+  and a click changes nothing. The MIC is untouched — dictation is a
+  different feature and still live (opacity 1, cursor pointer).
+- WHY, so nobody "fixes" the wrong layer: `_speak()` is not slow. `say`
+  is instant. The wait is that voice chat speaks the FINISHED answer, and
+  finishing means the whole tier ladder — council, search, compositor.
+  Speeding up TTS would do nothing.
+- The route back, if it's ever wanted: voice mode pins the Fast tier (one
+  model, no search, no compositor) AND speaks sentence-by-sentence off the
+  DRAFT stream instead of waiting for `full`. That is seconds, not minutes
+  — but it makes spoken answers deliberately dumber than typed ones, which
+  is a product decision, not a patch.
+- Gauntlet 61/61 (new check guards the parked state and the flag clear).
+
+## 6 beta 243 — the mobile burger was wired to a ghost
+- THE CLICK HANDLER WAS FINE. Two media queries fought over the sidebar:
+  an older `max-width:760px` block set it `display:none`, and the newer
+  `max-width:700px` drawer block only animated `transform`. On a phone
+  both applied, display:none won, and the ☰ toggled `body.sbopen` on an
+  element that was never rendered. A dead button that LOOKED wired.
+  Bonus: between 700 and 760px there was no sidebar AND no burger.
+- Merged into ONE 760px block. If a rule ever needs to differ by width,
+  it goes inside that block — never a second breakpoint for the sidebar.
+- The drawer gets a real ground now (rgba(10,12,17,.92)): the desktop
+  34% glass slid over white chat prose and read as text-on-text.
+- The open burger sat exactly on the wordmark ("ONCORDE"), and while
+  open it is redundant — the exposed strip of chat closes the drawer —
+  so `body.sbopen #mburger` fades out and drops pointer-events.
+- VERIFYING THIS IN THE PANE HAS A TRAP: the Browser pane is a hidden
+  document — document.hidden true, rAF never fires — so CSS TRANSITIONS
+  NEVER ADVANCE. The drawer sat at translateX(-105%) with sbopen set and
+  the transition "running" at currentTime 0 forever, which looks exactly
+  like the bug you just fixed. Inject `transition:none!important`, then
+  read positions; the endpoint state is the truth the phone will see.
+  (Second trap, again: the dev server bakes the page at boot — edits
+  after preview_start are NOT served until restart.)
+- Verified at 375px and at 730px (the formerly dead band): open x=0 and
+  the hit-test lands on the sidebar, tap-chat closes to -315, burger
+  reopens, wordmark unobscured, mic/composer untouched.
+- Gauntlet 61/61 (drawer check now guards one-breakpoint + sbopen rule
+  + no display:none, so the second block cannot creep back).
+
+## 6 beta 243 — the council loses its wasted minutes
+Reviewed run_council + the /api/chat orchestration end to end for speed.
+The bones were right (parallel cloud bench, correctly-sequential MLX
+loop, one shared join deadline, per-model caps, in-memory dead-model
+set). Four real inefficiencies found, all fixed:
+- ENGINE PRE-WARM NOW OVERLAPS THE SEARCH. It used to run serially
+  AFTER the search and BEFORE the headers: 5-20s of network, then up to
+  180s of disk, then the first byte — and the Cloudflare heartbeat only
+  starts after the headers, so the load sat in exactly the silent
+  window the heartbeat exists to cover. Routing is resolved before the
+  search now and the warm-up runs on a daemon thread; run_model's own
+  _engine_lock ensure makes the first draft wait if it's still coming
+  up. Prep time is max(search, load) instead of search + load.
+- THE MERGER DRAFTS LAST. The local loop leaves the LAST engine
+  resident, and the merge wants the biggest Gemma — which on this very
+  machine is also the roster LEADER, so every Thinking run loaded the
+  26B, evicted it for Phi-4 and Nemo, then RELOADED the largest model
+  on the machine for reflection + merge. The handler now seats the
+  projected merger last (merge_pref_label(), ONE definition shared with
+  run_council's pick). Guarded by `not model_name` so a manual pick
+  keeps the user's leader.
+- THE time.sleep(1.2) IS GONE. Skipped models were a status flash held
+  on screen by a literal sleep; they are ledger chips now (only when a
+  usable roster remains — with nothing usable the loop tries labels[0]
+  anyway, and a skip chip + a real draft for the same model would make
+  the contributor count lie).
+- THE CLOUD COMPOSITE STREAMS. cloud_only and turbo waited for
+  cloud_text to return the ENTIRE composite before showing a byte —
+  drafts all in, user staring at "compositing…" for the whole cloud
+  generation. It streams now with the _stream_guarded contract: a rung
+  that collapses is wiped with RESET and the next rung (or the best
+  draft) takes over. Single-provider paths already streamed raw via
+  cloud_stream_conf, so this is consistent, not novel.
+- NOT touched, deliberately: peer review's second pass per contributor
+  (Pro's stated contract), reflection (critique-then-revise beats
+  straight merge), the 75s cloud join (a backstop — cloud_text's own
+  60s timeout means threads are long dead by then).
+- Gauntlet 61/61 (live Fast-tier generation exercises the moved
+  routing + threaded pre-warm). Verified against the real roster:
+  Thinking resolves [Gemma 26B, Phi-4, Nemo] here, so the reorder
+  demonstrably saves reloading the 26B — the machine's biggest model —
+  once per council.

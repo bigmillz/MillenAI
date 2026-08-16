@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 242               # integer compared against the GitHub release tag
+APP_BUILD = 243               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1534,6 +1534,19 @@ def plan_labels(plan: str) -> list:
 # who merges in combine mode — strongest first
 MERGE_RANK = sorted((l for l in MODEL_ROUTES),
                     key=lambda l: -MODEL_INFO[l]["mem"])
+
+
+def merge_pref_label() -> str:
+    """The Gemma that will write the merge if it's on this machine (5.3,
+    per Patrick: the largest Gemma 4 the machine can hold). '' when none
+    is cached and fits. ONE definition on purpose (6b243): the handler
+    uses it to put the merger LAST in the council roster and run_council
+    uses it to pick the merger — if these two ever disagree, the roster
+    ordering optimisation warms the wrong engine."""
+    for pref in ("Gemma 4 26B", "Gemma 4 12B", "Gemma 2 9B IT"):
+        if model_cached(pref) and model_fits_memory(pref):
+            return pref
+    return ""
 
 
 def budget_label() -> str:
@@ -4380,14 +4393,11 @@ def run_council(labels: list, messages: list, emit, status,
     usable, skipped = [], []
     for l in labels:
         if not model_cached(l):
-            skipped.append(l + " (not downloaded)")
+            skipped.append((l, "not downloaded"))
         elif not model_fits_memory(l):
-            skipped.append(l + " (low memory)")
+            skipped.append((l, "low memory"))
         else:
             usable.append(l)
-    if skipped and usable:
-        status("skipping " + ", ".join(skipped))
-        time.sleep(1.2)  # let the notice be seen before it's replaced
     # sequential generation — cap the roster so a run stays minutes, not hours
     labels = (usable or labels[:1])[:12]
 
@@ -4422,6 +4432,17 @@ def run_council(labels: list, messages: list, emit, status,
                  json.dumps({"m": label, "t": text[:1200]}) + NUL)
         except Exception:
             pass          # never let the display break the answer
+
+    # skipped models go straight into the ledger (6b243) — this used to
+    # be a status flash held on screen by a time.sleep(1.2), which cost
+    # every affected council 1.2s to show a line most people never read.
+    # A draft chip persists for the whole run; nothing needs holding.
+    # Only when the roster survives, though: with NOTHING usable the loop
+    # tries labels[0] anyway, and a skip chip plus a real draft for the
+    # same model would make the contributor ledger lie.
+    if usable:
+        for _lbl, _why in skipped:
+            took_part(_lbl, "(no answer — %s)" % _why)
 
     # THE CLOUD BENCH (6b219, per Patrick: "offload as much as
     # possible"): every working key drafts IN PARALLEL with the local
@@ -4589,11 +4610,12 @@ def run_council(labels: list, messages: list, emit, status,
     merger = next((l for l in MERGE_RANK
                    if l in answered and model_fits_memory(l)), answered[0])
     # Gemma writes the merge — the LARGEST Gemma 4 this machine can hold
-    # (5.3, per Patrick), falling down the ladder only when it must
-    for pref in ("Gemma 4 26B", "Gemma 4 12B", "Gemma 2 9B IT"):
-        if model_cached(pref) and model_fits_memory(pref):
-            merger = pref
-            break
+    # (5.3, per Patrick). merge_pref_label is the ONE definition of that
+    # choice; the handler uses the same one to seat the merger LAST in
+    # the roster, so its engine is usually still resident right here.
+    _mp = merge_pref_label()
+    if _mp:
+        merger = _mp
 
     # feed the merger only the strongest few answers, each truncated:
     # an unbounded merge prompt overflows small models' context and sends
@@ -4652,24 +4674,46 @@ def run_council(labels: list, messages: list, emit, status,
     # THE COMPOSITOR LADDER (6b220): try the strongest working cloud
     # first — Claude, then Gemini (pro when available), then Groq —
     # falling through on any failure. Local Gemma stays the floor.
+    # STREAMED NOW (6b243): this used to call cloud_text and wait for
+    # the ENTIRE composite before showing a byte — the drafts were all
+    # in, and the user still stared at "compositing…" for the whole
+    # cloud generation. Stream it like the local merge does; a rung
+    # that collapses gets wiped with RESET and the next rung (or the
+    # best draft) takes over — the contract _stream_guarded already
+    # made with the reader.
+    def _stream_composite(_cc) -> bool:
+        got = []
+
+        def _tap(t):
+            got.append(t)
+            emit(t)
+        try:
+            ok = cloud_stream_conf(_cc, synth, _tap)
+        except Exception:
+            ok = False
+        text = strip_think("".join(got))
+        if ok and len(text) > 120 and not _looks_degenerate(text):
+            return True
+        if got:       # something was shown — wipe it before the next try
+            try:
+                emit(NUL + "RESET" + NUL)
+            except Exception:
+                pass
+        return False
     if cloud_only:
         # every rung here is a cloud one, and if they all fail the
         # strongest draft ships as it stands — a local merge would break
         # the one promise this tier makes
         for _cc in compositor_ladder():
             run_mark(compositor=_cc.get("model") or _cc.get("name", ""))
-            _t = strip_think(cloud_text(_cc, synth))
-            if _t and len(_t) > 120 and not _looks_degenerate(_t):
-                emit(_t)
+            if _stream_composite(_cc):
                 return
         emit(good[0][1])
         return
     if load_prefs(None).get("turbo"):
         for _cc in compositor_ladder():
             run_mark(compositor=_cc.get("model") or _cc.get("name", ""))
-            _t = strip_think(cloud_text(_cc, synth))
-            if _t and len(_t) > 120 and not _looks_degenerate(_t):
-                emit(_t)
+            if _stream_composite(_cc):
                 return
     run_mark(compositor=merger)
     try:
@@ -6629,6 +6673,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             model_name = council[0] if council else ""
         elif not council:
             council = [model_name]
+        # THE MERGER DRAFTS LAST (6b243). The council's local loop leaves
+        # the LAST engine resident, and the merge stage wants the biggest
+        # Gemma — when Gemma drafted mid-roster the next model's swap
+        # evicted it, and the merge RELOADED it from disk: a full engine
+        # swap spent purely on ordering. Same models, same merger, same
+        # answers — one fewer multi-GB load per council.
+        if len(council) > 1 and not model_name:
+            _mp = merge_pref_label()
+            if _mp in council:
+                council = [l for l in council if l != _mp] + [_mp]
         # a tier request arrives with model="" — the router matches on
         # model_name, and an empty one fell through to the smallest-cached
         # fallback: the header said Gemma while Llama 1B answered (seen
@@ -6692,6 +6746,40 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             council = ["LLaVA Vision 7B"]
             model_name = "LLaVA Vision 7B"
             prompt = vm["content"]
+
+        # the model routing is settled by here — resolve it NOW, before
+        # the search, so the engine can warm while the network works
+        route, route_label = None, None
+        for label, target in MODEL_ROUTES.items():
+            if label in model_name:
+                route, route_label = target, label
+                break
+        if route is None and not cloud_only:
+            # smallest cached model, never a 40 GB bomb (see run_model)
+            pulled = ollama_pulled_tags() or set()
+            route_label = next((l for l in reversed(MERGE_RANK)
+                                if model_cached(l, pulled)), None)
+            route = MODEL_ROUTES.get(route_label, (None, None))
+        if route is None:
+            route = (None, None)     # Cloud Only: there is no local route
+
+        # PRE-WARM IN PARALLEL WITH THE SEARCH (6b243). This used to run
+        # serially AFTER the search and BEFORE the headers: search 5-20s
+        # of network, then up to 180s of engine load, then the first
+        # byte. The two waits are on different resources — disk and
+        # network — so they now overlap, and the headers go out
+        # immediately, which matters twice over: the heartbeat that
+        # keeps Cloudflare from dropping a silent stream only starts
+        # AFTER the headers, so the old blocking load sat in exactly
+        # the silent window the heartbeat exists to cover. run_model
+        # takes _engine_lock before its own ensure, so if the warm-up
+        # is still in flight the first draft simply waits on the lock —
+        # the same wait as before, minus everything it used to shadow.
+        if route[0] == "mlx" and route_label:
+            def _prewarm(_lbl=route_label):
+                with _engine_lock:
+                    ensure_mlx_engine(_lbl)
+            threading.Thread(target=_prewarm, daemon=True).start()
 
         # "/search …" forces a lookup; otherwise auto-search decides.
         bookish = False
@@ -7080,26 +7168,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             dated_system["content"] += "\n\nLENGTH: " + _LEN[_lv]
         full_messages = [dated_system] + messages
 
-        route, route_label = None, None
-        for label, target in MODEL_ROUTES.items():
-            if label in model_name:
-                route, route_label = target, label
-                break
-        if route is None and not cloud_only:
-            # smallest cached model, never a 40 GB bomb (see run_model)
-            pulled = ollama_pulled_tags() or set()
-            route_label = next((l for l in reversed(MERGE_RANK)
-                                if model_cached(l, pulled)), None)
-            route = MODEL_ROUTES.get(route_label, (None, None))
-        if route is None:
-            route = (None, None)     # Cloud Only: there is no local route
-
-        # MLX engines load on demand so only the model in use holds RAM
-        if route[0] == "mlx" and route_label:
-            with _engine_lock:
-                ensure_mlx_engine(route_label)
-
         # stream plain text back; the browser reads it progressively
+        # (routing + engine pre-warm moved ABOVE the search, 6b243)
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Cache-Control", "no-cache")
@@ -8756,6 +8826,13 @@ body.perf #composer{box-shadow:none}
 #mic.rec{color:var(--red);background:rgba(226,109,90,.14)}
 #voicebtn svg{width:17px;height:17px}
 #voicebtn.on{color:var(--accent-hot);background:var(--accent-dim)}
+/* VOICE CHAT IS PARKED (6b242, per Patrick). It speaks the FINISHED
+   answer, and a finished answer here is a whole council deliberating —
+   minutes, against the beat and a half a spoken reply has to land in.
+   Greyed rather than deleted: the button is where the feature comes back
+   once the voice path has its own fast lane. */
+#voicebtn.parked{opacity:.3;cursor:not-allowed}
+#voicebtn.parked:hover{background:none;color:rgba(255,255,255,.78)}
 body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 /* the settings row INSIDE the box (6.0b3, Claude-style): engine pill
    left, actions right */
@@ -9301,23 +9378,31 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #setup-go:hover{background:var(--accent-hot);color:#000}
 #setup-go:disabled{opacity:.55;cursor:default}
 
-@media(max-width:760px){
-  #sidebar{display:none}
-  #chat-inner{padding:24px 14px 150px}
-}
 /* ------------------------------------------------------------- mobile */
 /* On a phone the 284px sidebar swallowed the screen — "doesn't work on
-   my iPhone" was a layout catastrophe, not a bug. Under 700px the
+   my iPhone" was a layout catastrophe, not a bug. Under 760px the
    sidebar becomes a slide-in drawer behind a ☰ button, main owns the
-   full width, and the hero scales to fit. */
+   full width, and the hero scales to fit.
+   ONE breakpoint, deliberately (6b243): this used to be TWO — a 760px
+   block that set the sidebar display:none and a 700px drawer block that
+   only animated transform. On a phone both applied, display:none won,
+   and the burger toggled a class on an element that was never rendered —
+   a dead button that LOOKED wired. And between 700 and 760px there was
+   no sidebar and no burger at all. If a rule ever needs to differ by
+   width again, it goes INSIDE this block, not into a second one. */
 #mburger{display:none}
-@media (max-width:700px){
+@media (max-width:760px){
   #sidebar{
     position:fixed;left:0;top:0;bottom:0;z-index:60;
     width:300px!important;min-width:300px!important;
     transform:translateX(-105%);transition:transform .28s ease;
     box-shadow:8px 0 40px rgba(0,0,0,.45);
+    /* the drawer needs a REAL ground: the desktop sidebar is 34% glass
+       over the backdrop art, but slid over white chat prose that read
+       as text-on-text soup */
+    background:rgba(10,12,17,.92);
   }
+  #chat-inner{padding:24px 14px 150px}
   body.sbopen #sidebar{transform:none}
   #mburger{
     display:flex;align-items:center;justify-content:center;
@@ -9325,7 +9410,12 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
     border-radius:12px;background:rgba(21,23,29,.55);color:var(--text);
     font-size:19px;cursor:pointer;
     -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
+    transition:opacity .2s ease;
   }
+  /* open drawer: the burger sat exactly on the wordmark ("ONCORDE").
+     It's redundant while open — tapping the exposed strip of chat
+     closes — so it steps aside instead of squatting on the brand */
+  body.sbopen #mburger{opacity:0;pointer-events:none}
   #hero h1{font-size:14vw}
   #hero .greet{font-size:28px}
   #skyload{left:50%;width:min(340px,78vw)}
@@ -9998,14 +10088,33 @@ setPerf(perf);
 
 
 /* ------------------------------------------------------- voice chat */
+// PARKED (6b242, per Patrick). Flip to false to bring it back — the whole
+// speak path underneath still works and is still tested. What does not
+// work is the WAIT: this reads the finished answer, and finishing means a
+// council of local models deliberating, so a spoken reply arrived minutes
+// after the question. Better absent than broken.
+const VOICE_PARKED=true;
 function setVoice(on){
+  if(VOICE_PARKED)on=false;
   voiceChat=on;$("#voicebtn").classList.toggle("on",on);
   localStorage.setItem("millen.voice",on?"1":"0");
   if(!on)fetch("/api/speak",{method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({stop:true})});
 }
-$("#voicebtn").addEventListener("click",()=>setVoice(!voiceChat));
+if(VOICE_PARKED){
+  const vb=$("#voicebtn");
+  vb.classList.add("parked");
+  vb.title="Voice chat is off for now — spoken replies waited on the whole "
+          +"council to finish, which is far too long to talk to";
+  // a machine that had it ON keeps a stale "1" in localStorage, and would
+  // otherwise start talking after the next answer
+  localStorage.setItem("millen.voice","0");
+}
+$("#voicebtn").addEventListener("click",()=>{
+  if(VOICE_PARKED)return;
+  setVoice(!voiceChat);
+});
 setVoice(voiceChat);
 
 /* --------------------------------------------------------------- tiers */
