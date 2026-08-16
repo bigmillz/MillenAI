@@ -415,6 +415,25 @@ OLLAMA_TAGS = {l: i["ollama"] for l, i in MODEL_INFO.items() if i["ollama"]}
 # Nothing is sent anywhere until the Turbo switch in Settings is on.
 CLOUD_FILE = os.path.join(app_dir(), "cloud.json")
 
+# WHAT EACH PROVIDER'S KEY LOOKS LIKE (6b234). A half-pasted key and a
+# revoked one both come back "Invalid API Key", and telling them apart by
+# eye is hopeless — the field is a password box.
+# Only GROQ publishes a fixed width (gsk_ + 52 = 56), so only Groq may be
+# judged on an exact length. The other two are FLOORS and nothing more:
+# measured against this machine's own working keys, Google's is 53 — not
+# the 39 that older AIza keys ran to — and Anthropic's is 108. Calling
+# either "the" length would have told a user with a perfectly good key
+# that their paste was truncated, which is the exact failure this block
+# exists to prevent. Prefix first, always: judge length only once the
+# prefix confirms the vendor, so a format change upstream can't block a
+# good key.
+#   (prefix, length, is that length exact?)
+KEY_SHAPE = {
+    "gemini": ("AIza", 39, False),
+    "groq": ("gsk_", 56, True),
+    "claude": ("sk-ant-", 40, False),
+}
+
 
 # ZERO-SIGNUP BOOST, per Patrick: a public inference service that
 # publishes an "anonymous" tier — no key, no account, no scraping of
@@ -5444,6 +5463,20 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"ok": False, "err": "paste a full key"})
                 return
             name, base, model = spec
+            # CAUGHT BEFORE THE NETWORK: a key whose prefix identifies the
+            # vendor but whose length is short is a truncated paste, full
+            # stop — no round trip needed, and the message says so instead
+            # of relaying the provider's ambiguous "Invalid API Key".
+            _pre, _want, _exact = KEY_SHAPE.get(which, ("", 0, False))
+            if _pre and _want and key.startswith(_pre) and len(key) < _want:
+                self._send_json({
+                    "ok": False,
+                    "err": "that paste looks cut off — %d characters, but "
+                           "a %s key is %s%d. Copy the whole thing and try "
+                           "again." % (len(key), which.title(),
+                                       "" if _exact else "at least ",
+                                       _want)})
+                return
             # DISCOVER models with the key first (6b213): one call
             # checks auth AND returns the real inventory, so a retired
             # default (gemini-2.5-flash, seen live) can never brick the
@@ -5525,10 +5558,28 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                               or "")[:160]
                 except Exception:
                     pass
+                # the provider says "Invalid API Key" for a REVOKED key and
+                # for a MANGLED one alike, so say which this looks like.
+                # The prefix is the tell: right shape and right length is a
+                # dead key (get a new one); anything else is the paste.
                 hint = ""
-                if which == "gemini" and len(key) < 35:
-                    hint = (" — this key is only %d characters; the "
-                            "paste may have been cut off" % len(key))
+                _pre, _want, _exact = KEY_SHAPE.get(which, ("", 0, False))
+                if _pre and not key.startswith(_pre):
+                    hint = (" — and this doesn't look like a %s key: they "
+                            "start with %s. Wrong provider selected, or the "
+                            "front of the paste was lost"
+                            % (which.title(), _pre))
+                elif _want and _exact and len(key) != _want:
+                    hint = (" — this key is %d characters and a %s key is "
+                            "%d, so the paste looks wrong"
+                            % (len(key), which.title(), _want))
+                elif _want:
+                    # right prefix, plausible length: the paste is fine, so
+                    # the key itself is the problem — say so plainly rather
+                    # than leaving "Invalid API Key" to be argued with
+                    hint = (" — the key is the right shape, so this isn't a "
+                            "bad paste: it has been revoked or regenerated. "
+                            "Issue a fresh one")
                 _cloud_save_state(which, {"name": name, "base": base,
                                           "key": key, "model": model,
                                           "status": "fail",

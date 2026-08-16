@@ -2351,3 +2351,40 @@ Five gaps that read as backyard-project, all closed:
   burns every rung before falling back to a raw draft. Pre-existing and
   shared with Thinking/Pro — worth a look, but it's a tuned quality
   heuristic and not this change's business.
+
+## 6 beta 234 (pending release) — telling a cut-off key from a dead one
+- "Invalid API Key" is what a provider says for a HALF-PASTED key and for
+  a REVOKED one alike, and the field is a password box, so there is no
+  way to tell by eye. The save handler now judges the key's shape and
+  names which failure it is.
+- PREFIX FIRST, then length. The prefix confirms the vendor; only then is
+  the length worth judging. That ordering means a format change upstream
+  can never block a good key — an unrecognised prefix only ever adds a
+  hint, never a rejection.
+- A right-prefix, short key is rejected BEFORE the network: no round trip
+  to be told something we already know.
+- ONLY GROQ HAS AN EXACT LENGTH (gsk_ + 52 = 56). This was almost a bug
+  that shipped: the first cut had Gemini at a fixed 39 (the old AIza
+  width), and measuring this machine's own working keys showed Google
+  now issues 53 and Anthropic 108. With `!=` on an exact length, both
+  real keys would have been reported as truncated pastes — the precise
+  failure the feature exists to prevent. Gemini and Claude are floors
+  now, and the message says "at least N" for them.
+- Three outcomes, verified against synthetic keys at real-world lengths:
+    prefix ok, short          -> "that paste looks cut off — 28 characters,
+                                  but a Groq key is 56"
+    prefix wrong              -> "...doesn't look like a Groq key: they
+                                  start with gsk_. Wrong provider
+                                  selected, or the front of the paste was
+                                  lost"
+    prefix ok, plausible len  -> "the key is the right shape, so this isn't
+                                  a bad paste: it has been revoked or
+                                  regenerated. Issue a fresh one"
+- FOUND BY THIS: the Groq key on this machine is a full, well-formed 56
+  characters — so it was never a paste problem. It is revoked. That is
+  now what the app says instead of leaving "Invalid API Key" to be
+  argued with.
+- TESTING NOTE: the failure branch WRITES the attempted key into
+  cloud.json (status fail). Any test of the save path must back the file
+  up and restore it — done here, verified byte-identical both times.
+- Gauntlet 60/60.
