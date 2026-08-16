@@ -2149,3 +2149,28 @@ Five gaps that read as backyard-project, all closed:
   own like the maintenance rows do.
 - Verified live: a Fast search run counts exactly ONE "searched the
   web" in the whole message, 5 source chips, 1 bar.
+
+## 6 beta 226 — a bar that means something
+- ONE SPINNER, AND IT'S A RING: the ✱ glyph is retired for a real CSS
+  circular spinner (.cspin — 15px, bright top arc on a dim track,
+  0.7s spin, stilled in perf mode). The trailing text caret-spinner
+  is gone entirely; the tree head owns the only one (or the status
+  line before a tree exists — never both).
+- THE BAR IS HONEST NOW. It used to be done/steps.length, so the
+  first finished step read 100% and then sat there. Replaced with a
+  weighted plan built at stream start from facts we actually have:
+  the X-Web-Search header and the model lineup tell us whether this
+  run will search (search/read/geo) and whether it's a council, and
+  each phase carries a weight (search 10, read 10, geo 5, council 35,
+  draft 30, polish 8).
+  * the RUNNING phase gets real sub-progress: council reads its
+    "i of n", drafting uses streamed characters on a saturating
+    curve (1-exp(-chars/900)).
+  * between milestones it CREEPS on a decaying curve toward — never
+    past — the next checkpoint, repainted on a 600ms clock so a
+    silent 20s model load still shows life.
+  * capped at 96% until the stream truly ends, then exactly 100 (a
+    planned phase that never materialises, e.g. geo on a non-place
+    question, must not hold it short).
+- Measured end to end: search-done 10% -> council 1of3 aged 21% ->
+  drafting@1500 chars 71% -> finished 100%, monotonic throughout.
