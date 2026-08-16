@@ -110,7 +110,7 @@ def short_version(v: str = None) -> str:
     while v.count(".") >= 1 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 229               # integer compared against the GitHub release tag
+APP_BUILD = 230               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -6678,9 +6678,28 @@ body.perf #tab-glide{transition:none}
 #funnel-wrap textarea,#funnel-wrap select,#funnel-wrap input{
   background:rgba(255,255,255,.04);border:1px solid var(--line);
   border-radius:8px;color:var(--text);font:12.5px var(--sans);
-  padding:7px 9px;outline:none;resize:vertical;width:100%}
-#funnel-wrap .fgrid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px}
-#funnel-wrap .fgrid .fq{flex-direction:column;align-items:stretch;gap:4px}
+  outline:none;width:100%;box-sizing:border-box;
+  -webkit-appearance:none;appearance:none;margin:0}
+#funnel-wrap textarea{padding:7px 9px;resize:vertical;line-height:1.45}
+/* the row of three: a select and a number input have DIFFERENT
+   intrinsic heights (and the number carries spin buttons), so they
+   only line up when height, padding and appearance are all stated
+   (6b230) */
+#funnel-wrap .fgrid select,#funnel-wrap .fgrid input{
+  height:32px;padding:0 9px;line-height:30px}
+#funnel-wrap .fgrid select{
+  padding-right:24px;cursor:pointer;
+  background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'><path d='M1 1l4 4 4-4' fill='none' stroke='%238e8e8e' stroke-width='1.4' stroke-linecap='round'/></svg>");
+  background-repeat:no-repeat;background-position:right 9px center;
+  background-size:9px 5px}
+#funnel-wrap .fgrid input::-webkit-outer-spin-button,
+#funnel-wrap .fgrid input::-webkit-inner-spin-button{
+  -webkit-appearance:none;margin:0}
+#funnel-wrap textarea:focus,#funnel-wrap select:focus,
+#funnel-wrap input:focus{border-color:rgba(255,255,255,.3)}
+#funnel-wrap .fgrid{display:grid;grid-template-columns:1fr 1fr 1fr;
+  gap:8px;align-items:end}
+#funnel-wrap .fgrid .fq{flex-direction:column;align-items:stretch;gap:5px}
 .fstage{margin:0 0 14px}
 .fstage .fsq{font-size:15px;color:#fff;font-weight:600;margin-bottom:10px}
 .fopts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));
