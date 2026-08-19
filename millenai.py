@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 243               # integer compared against the GitHub release tag
+APP_BUILD = 244               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1075,16 +1075,27 @@ def fleet_run(label: str, messages: list, status) -> str:
                             "wid": wid}
         _fleet_workers[wid]["busy"] = True
         _fleet_queue.append(jid)
-    status(f"{name}'s GPU is on it — {label}")
-    ok = done.wait(150)          # heartbeat keeps the client stream alive
-    with _fleet_lock:
-        job = _fleet_jobs.pop(jid, {})
+    # CLEANUP IS UNCONDITIONAL (6b244). status() writes to the client
+    # socket, and a reader who closed the tab raises right here — which
+    # used to skip the busy-flag reset below. Register PRESERVES the
+    # busy flag across re-registers (a worker mid-job must not be
+    # double-booked), so one dropped stream sidelined that worker
+    # FOREVER: marked busy, never picked again until the hub restarted.
+    try:
         try:
-            _fleet_queue.remove(jid)
-        except ValueError:
+            status(f"{name}'s GPU is on it — {label}")
+        except Exception:
             pass
-        if wid in _fleet_workers:
-            _fleet_workers[wid]["busy"] = False
+        ok = done.wait(150)      # heartbeat keeps the client stream alive
+    finally:
+        with _fleet_lock:
+            job = _fleet_jobs.pop(jid, {})
+            try:
+                _fleet_queue.remove(jid)
+            except ValueError:
+                pass
+            if wid in _fleet_workers:
+                _fleet_workers[wid]["busy"] = False
     text = (job.get("text") or "") if ok else ""
     if text and not _looks_degenerate(text):
         return text
@@ -8499,7 +8510,17 @@ body:not(.perf) .wtrow.run .wtdot{animation:blink 1s ease-in-out infinite}
 .codecard .codebar{font-family:var(--mono);font-size:9.5px;
   letter-spacing:.14em;text-transform:uppercase;color:var(--faint);
   padding:6px 14px;background:rgba(255,255,255,.045);
-  border-bottom:1px solid rgba(255,255,255,.07)}
+  border-bottom:1px solid rgba(255,255,255,.07);
+  display:flex;align-items:center;justify-content:space-between;gap:12px}
+/* the copy button lives in the bar's own type: same mono, same caps.
+   Greyed while its block is still streaming (.wait), a quiet flash
+   ("copied") when it lands on the clipboard. */
+.ccopy{font:inherit;letter-spacing:inherit;text-transform:inherit;
+  background:none;border:none;padding:0;color:var(--dim);cursor:pointer;
+  transition:color .13s,opacity .13s}
+.ccopy:hover{color:#fff}
+.ccopy.wait{opacity:.32;cursor:default;pointer-events:none}
+.ccopy.did{color:#fff}
 .codecard pre{margin:0;border:none;border-radius:0}
 .body code{color:#e8a08f}
 .body pre code{color:#dfe2e8}
@@ -10451,7 +10472,11 @@ function renderMD(raw){
   let s=esc(raw);
   // fenced code — ```flow becomes a real diagram, everything else a
   // language-labeled card with the mini-highlighter (6.0b206)
-  s=s.replace(/```(\w*)\n?([\s\S]*?)(```|$)/g,(_,lang,code)=>{
+  // the third group is the CLOSING fence — or $ while the block is
+  // still streaming in. That distinction drives the copy button
+  // (6b244, per Patrick): greyed while open, live once the fence lands.
+  // renderMD re-runs on every chunk, so the flip needs no state at all.
+  s=s.replace(/```(\w*)\n?([\s\S]*?)(```|$)/g,(_,lang,code,close)=>{
     code=code.replace(/\n$/,"");
     if(lang.toLowerCase()==="flow")return flowDiagram(code);
     // a fence that is JUST a pipe table renders as the table it is —
@@ -10469,8 +10494,14 @@ function renderMD(raw){
             .join("")+"</tr>").join("")+"</tbody></table>";
       }
     }
+    // every card carries the bar now — the copy button needs a home
+    // even when the model named no language
     return '<div class="codecard">'
-      +(lang?'<div class="codebar">'+esc(lang)+'</div>':"")
+      +'<div class="codebar"><span>'+esc(lang||"code")+'</span>'
+      +(close
+        ?'<button class="ccopy" title="Copy this block">copy</button>'
+        :'<button class="ccopy wait" disabled title="Still generating…">copy</button>')
+      +'</div>'
       +"<pre><code>"+hilite(code,lang)+"</code></pre></div>";
   });
   // inline code, bold, italics, headings
@@ -10786,6 +10817,20 @@ inner.addEventListener("click",e=>{
   if(!list)return;
   list.hidden=!list.hidden;
   box.classList.toggle("open",!list.hidden);
+});
+// code-card copy, delegated for the same reason as the chevron above:
+// streaming re-renders the answer via innerHTML on every chunk, so a
+// listener attached to any one button is dead within the second
+inner.addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest(".ccopy");
+  if(!b||b.classList.contains("wait"))return;
+  const code=b.closest(".codecard");
+  const pre=code&&code.querySelector("pre code");
+  if(!pre)return;
+  navigator.clipboard.writeText(pre.textContent).then(()=>{
+    b.textContent="copied";b.classList.add("did");
+    setTimeout(()=>{b.textContent="copy";b.classList.remove("did");},1200);
+  }).catch(()=>{});
 });
 const ICO={
   copy:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>',

@@ -139,6 +139,11 @@ check("flow diagram renderer", "flowDiagram" in page and "wireFlow" in page
       and "fwires" in page)
 check("code cards + mini highlighter", "codecard" in page
       and "hilite" in page and "hkw" in page)
+# 6b244: every code card carries a copy button that is greyed (.wait,
+# disabled) while its fence is still open and live once it closes
+check("code-card copy button, greyed until the fence closes",
+      'class="ccopy wait" disabled' in page and ".ccopy.wait" in page
+      and "ccopy" in page and "Still generating" in page)
 # 6b243: the burger was DEAD on phones — a 760px block set the sidebar
 # display:none while the 700px drawer block only animated transform, so
 # the ☰ toggled a class on an element that was never rendered. ONE
@@ -252,6 +257,84 @@ t = chat({"model": "", "models": [], "tier": "Fast", "auto_web": True,
           "messages": [{"role": "user", "content": "whats the weather in 11221"}]})
 check("weather answer carries real data", ("°F" in t or "degrees" in t or " mph" in t)
       and "⚠️" not in t and len(t) > 60, t[:120])
+
+# FLEET LOOPBACK (6b244): a real worker speaking the real protocol —
+# register (auto-approve + token), long-poll, take the job, submit a
+# sentinel — and the chat answer must BE that sentinel, delivered with
+# the "GPU is on it" status. Proves dispatch end to end with zero
+# engine loads. turbo is parked for the window (cloud outranks fleet
+# in the single-model path) and restored no matter what.
+import threading as _th
+
+_FSENT = ("FLEET-GAUNTLET-7391: the pooled GPU answered this, and this "
+          "sentence is long enough to clear the degenerate-output floor "
+          "standing in for a real model's reply.")
+
+
+# The hub hands a worker its token ONCE (register marks the claim
+# "claimed"); a known wid arriving with no token is an imposter and
+# parks in pending — correct security, but it made a fixed test wid
+# work exactly once. Persist the (wid, token) PAIR across runs; if the
+# cache is gone, a fresh random wid gets auto-approved and re-cached.
+import os as _os
+import secrets as _sec
+import tempfile as _tf
+
+_FCACHE = _os.path.join(_tf.gettempdir(), "millenai-gauntlet-fleet.json")
+
+
+def _fleet_worker(stop):
+    try:
+        c = json.load(open(_FCACHE))
+        wid, tok = c["wid"], c["token"]
+    except Exception:
+        wid, tok = "gauntlet" + _sec.token_hex(6), ""
+    while not stop.is_set():
+        try:
+            s2, h2, b2 = req("/api/fleet/register", "POST",
+                             {"id": wid, "token": tok, "name": "gauntlet-rig",
+                              "models": [json.loads(
+                                  req("/api/tiers", cookie=K)[2])
+                                  ["Fast"]["models"][0]]}, cookie=K)
+            out = json.loads(b2)
+            if out.get("pending"):
+                # claimed wid, lost token — start over as a new worker
+                wid, tok = "gauntlet" + _sec.token_hex(6), ""
+                continue
+            if out.get("token"):
+                tok = out["token"]
+                json.dump({"wid": wid, "token": tok}, open(_FCACHE, "w"))
+            if not tok:
+                time.sleep(1)
+                continue
+            s2, h2, b2 = req("/api/fleet/poll", "POST",
+                             {"id": wid, "token": tok}, cookie=K, timeout=40)
+            job = json.loads(b2)
+            if job.get("job"):
+                req("/api/fleet/submit", "POST",
+                    {"id": wid, "token": tok, "job": job["job"],
+                     "text": _FSENT}, cookie=K)
+                return
+        except Exception:
+            time.sleep(1)
+
+
+_prefs0 = json.loads(req("/api/prefs", cookie=K)[2])
+req("/api/prefs", "POST", {"turbo": False}, cookie=K)
+_fstop = _th.Event()
+_fth = _th.Thread(target=_fleet_worker, args=(_fstop,), daemon=True)
+_fth.start()
+time.sleep(2)
+try:
+    t = chat({"model": "", "models": [], "tier": "Fast", "auto_web": False,
+              "messages": [{"role": "user",
+                            "content": "Say hello in one sentence."}]},
+             timeout=60)
+    check("fleet: worker's answer comes back through chat",
+          "FLEET-GAUNTLET-7391" in t, t[:120])
+finally:
+    _fstop.set()
+    req("/api/prefs", "POST", {"turbo": bool(_prefs0.get("turbo"))}, cookie=K)
 
 # a place no index knows must NOT get a bare "couldn't find any info"
 # shrug (3.3) — the answer says so plainly AND asks a pin-down question

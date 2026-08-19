@@ -3138,3 +3138,59 @@ set). Four real inefficiencies found, all fixed:
   Thinking resolves [Gemma 26B, Phi-4, Nemo] here, so the reorder
   demonstrably saves reloading the 26B — the machine's biggest model —
   once per council.
+
+## 6 beta 244 (pending release) — the fleet is real, and measured
+- PROVED END TO END, twice: a real worker speaking the real protocol
+  (register -> auto-approve + token handover -> long-poll -> submit)
+  against the dev hub, then a genuine /api/chat Fast query answered BY
+  the worker — sentinel text back through the stream, "e2e-rig's GPU is
+  on it" status, zero local engine loads. Now a permanent gauntlet
+  check (62nd): fleet loopback with turbo parked and restored.
+- BANDWIDTH, MEASURED, is a non-issue BY CONSTRUCTION: the job payload
+  was 6.8KB down (system prompt + question) and under 1KB up; a searched
+  answer might reach ~50KB. Idle costs one register+poll round every
+  ~25s (~170 B/s). This design ships whole jobs to a machine that runs
+  the whole model locally — only prompt and answer cross the wire. The
+  bandwidth-doomed version of this idea (splitting one model's LAYERS
+  across homes, activations crossing the net every token) is not what
+  Concorde does.
+- FIXED A REAL BUG found in review: fleet_run's status() writes to the
+  client socket BEFORE the busy-flag cleanup, and a closed tab raised
+  through it — skipping the reset. Register PRESERVES busy across
+  re-registers (mid-job workers must not be double-booked), so ONE
+  dropped stream sidelined that worker forever. try/finally now.
+- THE PECKING ORDER, worth knowing: in the single-model path the fleet
+  sits BELOW cloud — turbo + healthy key means fleet_run is never
+  consulted. On a keyless machine (the actual community) it is first
+  in line after local. Councils never offload (single-model jobs only,
+  by design).
+- Trust flags surfaced, not changed (Patrick's calls): fleet_auto
+  defaults to ON, so anyone who knows the hub URL can register a worker
+  and will RECEIVE user prompts — and the job payload carries the
+  system prompt with the user's MEMORY and persona in it. "Friends
+  only" is the documented model; auto-approve is the one-toggle UX
+  choice (6bXXX "AUTOMATED, per Patrick").
+- 7 real workers sit approved on the hub today.
+- Gauntlet 62/62. Test residue cleaned: e2e worker entry removed from
+  fleet_workers.json, turbo restored both times.
+
+## 6 beta 244 — copy button on code cards
+- Every code card's bar carries "copy" at the right, in the bar's own
+  mono caps. GREYED WHILE THE FENCE IS OPEN: renderMD's fence regex
+  third group is the closer — ``` or $ — so a block still streaming
+  renders `.ccopy.wait` (opacity .32, disabled) and flips live the
+  chunk the closing fence lands. Zero state tracking; the re-render IS
+  the state machine.
+- Lang-less fences get the bar now too (label "code") — the button
+  needs a home. Fenced tables and ```flow diagrams stay button-free.
+- DELEGATED handler on `inner`, same reason as the chevron (6b242):
+  streaming re-renders via innerHTML kill per-element listeners within
+  the second. Copies `pre code` textContent — the un-highlighted raw —
+  then flashes "copied" for 1.2s.
+- THE GAUNTLET'S FLEET CHECK WENT FLAKY and the cause is worth keeping:
+  the hub hands a worker its token ONCE (the claim is marked claimed);
+  a known wid arriving tokenless is an imposter and parks in pending.
+  Correct security — but the test's fixed wid worked exactly once. The
+  worker now persists its (wid, token) pair in the temp dir and mints a
+  fresh identity when the cache is gone.
+- Gauntlet 63/63 (new check: ccopy present, wait state wired).
