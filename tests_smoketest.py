@@ -148,6 +148,12 @@ check("code-card copy button, greyed until the fence closes",
 # display:none while the 700px drawer block only animated transform, so
 # the ☰ toggled a class on an element that was never rendered. ONE
 # breakpoint now; this guards the second one from creeping back.
+# 6b247: the four-step first-run wizard — markup, all four steps, the
+# once-only gate, and the plan/provider machinery it drives
+check("first-run wizard present, gated on wizard_done",
+      'id="wiz-veil"' in page and page.count('class="wstep"') == 4
+      and "wizard_done" in page and "openWizard" in page
+      and "platform.moonshot.ai" in page and "aistudio.google.com" in page)
 check("mobile drawer present and openable",
       'id="mburger"' in page and "body.sbopen #sidebar" in page
       and page.count("max-width:760px") == 1

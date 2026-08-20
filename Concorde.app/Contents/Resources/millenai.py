@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 246               # integer compared against the GitHub release tag
+APP_BUILD = 247               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -805,9 +805,16 @@ def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
             if not out.strip():
                 cloud_glitch(c, "returned nothing")
             return out
-        payload = json.dumps({"model": c["model"], "messages": messages,
-                              "max_tokens": 4096,
-                              "temperature": 0.75}).encode()
+        body = {"model": c["model"], "messages": messages,
+                "max_tokens": 4096, "temperature": 0.75}
+        # MOONSHOT PINS EACH MODEL'S LEGAL TEMPERATURE (6b247, found
+        # live: kimi-k2.7-code 400s "only 1 is allowed" on 0.75, so
+        # every council draft died while the save-probe — which sends
+        # no temperature — showed a green ✓). Omit it and take the
+        # server default, which is always legal.
+        if "moonshot" in c.get("base", ""):
+            body.pop("temperature")
+        payload = json.dumps(body).encode()
         req = urllib.request.Request(
             c["base"].rstrip("/") + "/chat/completions", data=payload,
             headers={"Content-Type": "application/json",
@@ -832,6 +839,82 @@ def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
         return ""
 
 
+# ONE pick policy, shared by key-save and the boot refresh (6b247):
+# which inventory ids count as chat-capable, and which id each provider
+# should field, in preference order.
+CLOUD_SKIP_IDS = ("embed", "tts", "image", "imagen", "veo", "aqa",
+                  "audio", "live", "learnlm", "exp", "-code",
+                  # classifiers are not chat models: Groq's inventory
+                  # carries llama-prompt-guard, and it once took a
+                  # council seat (6b247, seen live)
+                  "guard", "moderation")
+CLOUD_PICK_ORDER = {
+    "gemini": ["gemini-3-flash", "gemini-3.0-flash", "flash-latest",
+               "gemini-2.5-flash", "flash", "pro"],
+    "groq": ["gpt-oss-120b", "llama", "qwen"],
+    "claude": ["sonnet", "haiku", "opus"],
+    "kimi": ["kimi-k3", "k3", "kimi-latest", "k2"],
+}
+
+
+def _cloud_refresh_picks():
+    """Re-run model discovery for every healthy provider and upgrade
+    stale picks (6b247). A provider's inventory GROWS after the key is
+    saved — seen live: a Moonshot account funded after save gained
+    kimi-k3, but discovery only ever ran at save time, so the stored
+    pick stayed kimi-k2.7-code (a code specialist) in every council
+    forever. Runs once per boot on a background thread; any provider
+    that is offline or resting just keeps its pick until next boot."""
+    try:
+        d = _cloud_all()
+        changed = False
+        for pid, v in (d.get("providers") or {}).items():
+            if not (v.get("status", "ok") == "ok" and v.get("key")
+                    and v.get("base")):
+                continue
+            try:
+                if "anthropic" in v["base"]:
+                    lq = urllib.request.Request(
+                        v["base"].rstrip("/") + "/models",
+                        headers={"x-api-key": v["key"],
+                                 "anthropic-version": "2023-06-01"})
+                else:
+                    lq = urllib.request.Request(
+                        v["base"].rstrip("/") + "/models",
+                        headers={"Authorization": "Bearer " + v["key"],
+                                 "User-Agent":
+                                     "MillenAI/%s" % APP_VERSION})
+                raw = json.loads(urllib.request.urlopen(
+                    lq, timeout=15).read().decode("utf-8", "replace"))
+                found = [str(m.get("id", "")).replace("models/", "")
+                         for m in (raw.get("data") or []) if m.get("id")]
+            except Exception:
+                continue
+            if not found:
+                continue
+            chat = [i for i in found
+                    if not any(k in i.lower() for k in CLOUD_SKIP_IDS)]
+            pick = ""
+            for want in CLOUD_PICK_ORDER.get(pid, []):
+                pick = next((i for i in chat if want in i.lower()), "")
+                if pick:
+                    break
+            if not pick:
+                pick = (v.get("model") if v.get("model") in chat
+                        else (chat[0] if chat else ""))
+            inv = chat[:6] if chat else found[:6]
+            if pick and (pick != v.get("model")
+                         or inv != v.get("models")):
+                v["model"], v["models"] = pick, inv
+                changed = True
+        if changed:
+            with open(CLOUD_FILE, "w") as f:
+                json.dump(d, f)
+            os.chmod(CLOUD_FILE, 0o600)
+    except Exception:
+        pass
+
+
 _repaired = [False]
 
 
@@ -845,6 +928,10 @@ def _cloud_repair():
     if _repaired[0]:
         return
     _repaired[0] = True
+    # stale-pick refresh rides the same once-per-process latch, but on
+    # its own thread — it makes one network call per provider and must
+    # never sit in front of the first answer
+    threading.Thread(target=_cloud_refresh_picks, daemon=True).start()
     try:
         d = _cloud_all()
         changed = False
@@ -914,7 +1001,11 @@ def cloud_bench() -> list:
         # "gemini-3.7-flash-video-understanding-eap", seating a random
         # unknown voice on the council. An alternate has to earn its
         # seat by being a bigger sibling, or the provider fields one.
-        alt = next((m for m in alts if "pro" in m.lower()
+        # "pro" as a WORD, not a substring — "pro" in "llama-PROmpt-
+        # guard-2-22m" seated a 22M safety classifier as the stronger
+        # sibling on every Groq council (6b247, seen live)
+        alt = next((m for m in alts
+                    if re.search(r"(^|[^a-z])pro($|[^a-z])", m.lower())
                     or "120b" in m.lower() or "70b" in m.lower()), "")
         if alt:
             c2 = dict(c)
@@ -1032,9 +1123,11 @@ def cloud_stream_conf(c: dict, messages: list, emit) -> bool:
         return False
     if "anthropic.com" in c.get("base", ""):
         return _anthropic_stream(c, messages, emit)
-    payload = json.dumps({"model": c["model"], "messages": messages,
-                          "max_tokens": 4096, "temperature": 0.75,
-                          "stream": True}).encode()
+    body = {"model": c["model"], "messages": messages,
+            "max_tokens": 4096, "temperature": 0.75, "stream": True}
+    if "moonshot" in c.get("base", ""):   # pinned temps — see cloud_text
+        body.pop("temperature")
+    payload = json.dumps(body).encode()
     req = urllib.request.Request(
         c["base"].rstrip("/") + "/chat/completions", data=payload,
         headers={"Content-Type": "application/json",
@@ -1842,6 +1935,20 @@ _ASKY_RX = re.compile(
     r"\b(good|best|great|favorite|favourite|top|cool|nice|solid|decent|"
     r"worth|must[- ]?(see|try|visit)|underrated|hidden\s+gem)\b.*?"
     + _PLACE_NOUNS + r"\b", re.I | re.S)
+
+# A HEALTH QUESTION ABOUT A CONSUMABLE IS NOT A VENUE ASK (6b247, seen
+# live): "is a glass of wine a day actually good for you" matched
+# _ASKY_RX via "good…wine" — wine is a _PLACE_NOUN so "best wine in
+# bushwick" searches properly — and the whole places machinery engaged:
+# the [[PLACES]] extraction read the ANSWER'S SECTION HEADINGS as venue
+# names and the geocoder pinned them, because "Brain" is a real commune
+# in France. When the query is about the body, none of it applies.
+_NOT_PLACEY_RX = re.compile(
+    r"\b(bad|good|healthy|unhealthy|safe|harmful|dangerous|worse|better)"
+    r"\s+for\s+(you|me|your|my|health)\b|"
+    r"\bhealth(y|ier|iest)?\b|\bcalories\b|\bhangovers?\b|"
+    r"\b(why|how)\s+(is|are|does|do)\b.{0,40}\b(bad|harm|hurt|affect)",
+    re.I)
 
 _BOOKING_RX = re.compile(
     r"\b(arrange|book|recommend|suggest|find|plan|help\s+me\s+"
@@ -6342,19 +6449,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             except Exception:
                 pass                      # discovery is best-effort
             if found:
-                # chat-capable only, then prefer the fastest current line
-                skip = ("embed", "tts", "image", "imagen", "veo", "aqa",
-                        "audio", "live", "learnlm", "exp")
+                # chat-capable only, then prefer the fastest current
+                # line — the policy lives in CLOUD_SKIP_IDS/
+                # CLOUD_PICK_ORDER, shared with the boot refresh (6b247)
                 chat = [i for i in found
-                        if not any(k in i.lower() for k in skip)]
-                prefs_order = {
-                    "gemini": ["gemini-3-flash", "gemini-3.0-flash",
-                               "flash-latest", "gemini-2.5-flash",
-                               "flash", "pro"],
-                    "groq": ["gpt-oss-120b", "llama", "qwen"],
-                    "claude": ["sonnet", "haiku", "opus"],
-                    "kimi": ["k3", "kimi-latest", "k2"],
-                }.get(which, [])
+                        if not any(k in i.lower() for k in CLOUD_SKIP_IDS)]
+                prefs_order = CLOUD_PICK_ORDER.get(which, [])
                 for want in prefs_order:
                     hit = next((i for i in chat if want in i.lower()), "")
                     if hit:
@@ -6989,6 +7089,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 matched = True
                 bookish = bool(_BOOKING_RX.search(query.lower())
                                or _ASKY_RX.search(query))
+                # the body override: "is wine good FOR YOU" is a health
+                # question that happens to name a consumable — no venue
+                # search, no [[PLACES]], no map (6b247, seen live)
+                if _NOT_PLACEY_RX.search(query):
+                    placey = bookish = False
                 if placey:
                     snippets, matched = place_search(query)
                     pt_ = _place_terms(query).split()
@@ -7412,7 +7517,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     pass
             hint = _place_names(getattr(_tl_search, "rows", []) or [],
                                 getattr(_tl_search, "locq", ""))
-            if hint:
+            # only when the places machinery is engaged (6b247): for a
+            # plain searched answer the "venues" mined from article
+            # titles are headline fragments, not places
+            if hint and (placey or bookish):
                 try:
                     _write((NUL + "PLACEHINT:" + json.dumps(hint) + NUL)
                            .encode("utf-8"))
@@ -9457,6 +9565,76 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   display:flex;align-items:center;justify-content:center;
 }
 #setup-veil[hidden]{display:none}
+/* -------------------------------------------------- first-run wizard */
+/* Four steps over the app (6b247). Same glass family as the setup
+   veil; the brand step reuses the stacked lockup at hero size. */
+#wiz-veil{
+  position:fixed;inset:0;z-index:52;background:rgba(0,0,0,.72);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  display:flex;align-items:center;justify-content:center;
+}
+#wiz-veil[hidden]{display:none}
+#wiz-card{
+  position:relative;width:520px;max-width:calc(100vw - 40px);
+  max-height:calc(100vh - 60px);overflow-y:auto;overflow-x:hidden;
+  background:var(--panel2);border:1px solid var(--line);
+  border-radius:14px;padding:26px 26px 18px;
+  box-shadow:0 24px 80px rgba(0,0,0,.55);
+}
+#wiz-skip{position:absolute;top:12px;right:14px;background:none;
+  border:none;cursor:pointer;color:var(--faint);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;
+  text-transform:uppercase}
+#wiz-skip:hover{color:var(--dim)}
+#wiz-card p{color:var(--dim);font-size:13px;line-height:1.6;
+  margin:0 0 12px}
+#wiz-card .set-h{margin-bottom:10px}
+#wiz-brand{display:flex;flex-direction:column;align-items:center;
+  gap:10px;padding:18px 0 20px}
+#wiz-wing{width:58px;height:23.8px;display:block}
+#wiz-brand b{font-family:var(--disp);font-size:17px;letter-spacing:.22em;
+  text-transform:uppercase;color:#fff;font-weight:400;line-height:1}
+#wiz-ver{font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--faint)}
+#wiz-plans{display:flex;gap:8px;margin:4px 0 12px}
+.wplan{flex:1;padding:12px 10px;border-radius:11px;cursor:pointer;
+  border:1px solid var(--line);background:rgba(255,255,255,.03);
+  text-align:center;transition:border-color .13s,background .13s}
+.wplan:hover{background:rgba(255,255,255,.06)}
+.wplan.on{border-color:rgba(255,255,255,.45);background:var(--accent-dim)}
+.wplan b{display:block;font-size:13.5px;margin-bottom:3px}
+.wplan span{display:block;color:var(--dim);font-size:11px;line-height:1.4}
+.wplan .wgb{font-family:var(--mono);font-size:9.5px;color:var(--faint);
+  letter-spacing:.1em;margin-top:5px;display:block}
+#wiz-nolimits{display:flex;gap:8px;align-items:flex-start;
+  font-size:11px;color:var(--faint);line-height:1.5;cursor:pointer}
+#wiz-nolimits input{margin-top:2px}
+.wprov{border:1px solid var(--line);border-radius:11px;
+  padding:10px 12px;margin-bottom:8px;background:rgba(255,255,255,.03)}
+.wprov-row{display:flex;align-items:center;gap:9px;font-size:13px}
+.wprov-row .wtag{font-family:var(--mono);font-size:9px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--faint)}
+.wprov-row .wlink{margin-left:auto;font-size:11.5px;color:#9fb8e8;
+  text-decoration:none;white-space:nowrap}
+.wprov-row .wlink:hover{text-decoration:underline}
+.wprov-row .wok{color:#a8cf9f;font-size:12px}
+.wkey{display:flex;gap:8px;margin-top:9px}
+.wkey[hidden]{display:none}
+.wkey input{flex:1;min-width:0;box-sizing:border-box;
+  background:rgba(0,0,0,.3);border:1px solid var(--line);
+  border-radius:8px;color:var(--text);padding:7px 10px;font-size:12px}
+.wkey button{flex:none}
+.wnote{font-size:11px;color:var(--dim);margin-top:6px;line-height:1.45}
+#wiz-foot{display:flex;align-items:center;gap:12px;margin-top:16px;
+  padding-top:14px;border-top:1px solid var(--line-soft)}
+#wiz-foot .about-btn{width:auto;margin-top:0;padding:9px 22px}
+/* .about-btn's display:block outranks the UA [hidden] rule — same
+   trap as every other veil, restated here so Back can actually hide */
+#wiz-foot .about-btn[hidden]{display:none}
+#wiz-dots{display:flex;gap:6px;margin:0 auto}
+#wiz-dots i{width:6px;height:6px;border-radius:50%;
+  background:rgba(255,255,255,.18)}
+#wiz-dots i.on{background:#ececec}
 #setup-card{
   width:440px;max-width:calc(100vw - 40px);background:var(--panel2);
   border:1px solid var(--line);border-radius:14px;padding:22px 22px 18px;
@@ -10092,6 +10270,71 @@ __CODE_ROWS__
     <div class="sh-foot">
       <button id="share-no">Not now</button>
       <button id="share-yes" class="primary">&#9889; Share GPU power</button>
+    </div>
+  </div>
+</div>
+
+<!-- FIRST-RUN WIZARD (6b247, per Patrick): four guided steps over the
+     app — welcome, local brains, cloud power, go. Shows once
+     (prefs.wizard_done); the old setup veil stays for updates and the
+     download progress it already draws well. -->
+<div id="wiz-veil" hidden>
+  <div id="wiz-card">
+    <button id="wiz-skip" title="Skip setup — everything lives in Settings too">skip ✕</button>
+
+    <div class="wstep" data-w="1">
+      <div id="wiz-brand">
+        <svg id="wiz-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="wwg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#wwg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg>
+        <b>Concorde</b>
+        <span id="wiz-ver">__APP_VER__</span>
+      </div>
+      <p>Concorde runs real AI models on your own machine &mdash; private,
+      free, and yours &mdash; with optional cloud power when you want a
+      frontier brain on the case. Its trick is compositing: several
+      &ldquo;minds&rdquo; draft an answer, the strongest one writes the
+      final &mdash; one clean reply, backed by many.</p>
+      <p>This setup takes about a minute: pick how much local brainpower
+      to install, connect any cloud keys you have (or skip them), and
+      you&rsquo;re flying. Everything here can be changed later in
+      Settings.</p>
+    </div>
+
+    <div class="wstep" data-w="2" hidden>
+      <div class="set-h">Local models</div>
+      <p>A large language model is a brain in a file &mdash; it lives on
+      your disk and answers on your silicon, no internet required.
+      Concorde installs a few of different sizes and personalities, asks
+      several at once on hard questions, and composites their drafts
+      into one answer. Pick how much to install:</p>
+      <div id="wiz-plans"></div>
+      <label id="wiz-nolimits"><input type="checkbox" id="wiz-nl">
+        Ignore system limits &mdash; offer every model in each list even
+        beyond this machine&rsquo;s memory. May swap hard or crash;
+        use at your own risk.</label>
+    </div>
+
+    <div class="wstep" data-w="3" hidden>
+      <div class="set-h">Cloud power</div>
+      <p>Cloud models are frontier brains that answer over the network
+      &mdash; some free, some needing a paid API key from the provider.
+      With any key saved, Concorde blends cloud drafts into its answers
+      and hands the final word to the strongest mind available. All
+      optional; your prompts only leave this machine while it&rsquo;s
+      on.</p>
+      <div id="wiz-provs"></div>
+    </div>
+
+    <div class="wstep" data-w="4" hidden>
+      <div class="set-h">That&rsquo;s it</div>
+      <p id="wiz-done-line">Thanks for setting up Concorde. Your models
+      download in the background &mdash; start chatting the moment the
+      first one lands, and find everything else under Settings.</p>
+    </div>
+
+    <div id="wiz-foot">
+      <button class="about-btn" id="wiz-back" hidden>Back</button>
+      <div id="wiz-dots"><i class="on"></i><i></i><i></i><i></i></div>
+      <button class="about-btn primary" id="wiz-next">Next</button>
     </div>
   </div>
 </div>
@@ -10811,6 +11054,19 @@ async function mountPlaces(id,places,loc,mapd){
   if(!pins.length&&mapd&&typeof mapd.lat==="number")
     pins.push({p:{n:mapd.name||""},g:mapd});
   if(!pins.length){bail();return;}
+  // COHERENCE (6b247): junk names geocode SOMEWHERE — "Brain" is a
+  // commune in France, and a health answer's section headings once
+  // scattered pins across two continents. Real venue answers share one
+  // metro; a set wider than 250km is garbage in, so no map at all.
+  if(pins.length>1){
+    const km=(a,b)=>{const d=Math.PI/180,
+      x=(b.g.lon-a.g.lon)*d*Math.cos((a.g.lat+b.g.lat)/2*d),
+      y=(b.g.lat-a.g.lat)*d;return Math.sqrt(x*x+y*y)*6371;};
+    let mx=0;
+    for(let i=0;i<pins.length;i++)for(let j=i+1;j<pins.length;j++)
+      mx=Math.max(mx,km(pins[i],pins[j]));
+    if(mx>250){bail();return;}
+  }
   try{
     const m=L.map(id,{scrollWheelZoom:false,attributionControl:true});
     L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png",
@@ -13165,6 +13421,127 @@ $("#nolimits").addEventListener("change",async()=>{
   setupTick();   // the plans + GB re-price under the new rules
 });
 $("#models-flag").addEventListener("click",()=>{openSetup();});
+
+/* -------------------------------------------------- first-run wizard */
+// Four steps over the app (6b247, per Patrick). Reuses the machinery
+// that already exists: /api/setup for plans, /api/setup/install to
+// start downloads, /api/cloud + /api/cloud/set for keys, and the old
+// setup veil for the progress bar once the wizard hands off.
+const wizVeil=$("#wiz-veil");
+let wizStep=1,wizPlan="pro";
+const WIZ_PROVS=[
+  ["gemini","Gemini","free","https://aistudio.google.com/app/apikey"],
+  ["groq","Groq","free","https://console.groq.com/keys"],
+  ["claude","Claude","paid","https://console.anthropic.com/settings/keys"],
+  ["kimi","Kimi K3","paid","https://platform.moonshot.ai/console/api-keys"]];
+function wizShow(n){
+  wizStep=n;
+  $$("#wiz-card .wstep").forEach(s=>s.hidden=+s.dataset.w!==n);
+  [...$("#wiz-dots").children].forEach((d,i)=>
+    d.classList.toggle("on",i===n-1));
+  $("#wiz-back").hidden=n===1;
+  $("#wiz-next").textContent=n===4?"Let’s go":"Next";
+  if(n===2)wizPaintPlans();
+  if(n===3)wizPaintProvs();
+}
+async function wizPaintPlans(){
+  const box=$("#wiz-plans");
+  let st={};
+  try{st=await(await fetch("/api/setup")).json();}catch(e){return;}
+  const rem=st.plans||{};
+  const meta=[["basic","Basic","Quick answers, tiny download"],
+              ["pro","Pro","Great everyday quality"],
+              ["max","Max","The best this machine can run"]];
+  box.innerHTML=meta.map(([k,name,d])=>
+    '<div class="wplan'+(wizPlan===k?" on":"")+'" data-plan="'+k+'">'
+    +'<b>'+name+'</b><span>'+d+'</span>'
+    +'<span class="wgb">'+((rem[k]||0)>0
+        ?"~"+rem[k]+" GB":"installed ✓")+'</span></div>').join("");
+}
+$("#wiz-plans").addEventListener("click",e=>{
+  const c=e.target.closest&&e.target.closest(".wplan");
+  if(!c)return;
+  wizPlan=c.dataset.plan;
+  $$("#wiz-plans .wplan").forEach(el=>
+    el.classList.toggle("on",el===c));
+});
+$("#wiz-nl").addEventListener("change",async()=>{
+  await fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({no_limits:$("#wiz-nl").checked})});
+  wizPaintPlans();          // the GB re-price under the new rules
+});
+async function wizPaintProvs(){
+  const box=$("#wiz-provs");
+  let cs={};
+  try{cs=await(await fetch("/api/cloud")).json();}catch(e){}
+  const pv=(cs||{}).providers||{};
+  box.innerHTML=WIZ_PROVS.map(([id,label,tag,url])=>{
+    const ok=(pv[id]||{}).status==="ok";
+    return '<div class="wprov" data-p="'+id+'">'
+      +'<div class="wprov-row">'
+      +(ok?'<span class="wok">✓</span>'
+          :'<input type="checkbox" class="wck">')
+      +'<b>'+label+'</b><span class="wtag">'+tag+'</span>'
+      +(ok?'<span class="wlink" style="color:var(--faint);text-decoration:none">connected</span>'
+          :'<a class="wlink" href="'+url+'" target="_blank" '
+           +'rel="noopener noreferrer">get a key ↗</a>')
+      +'</div>'
+      +'<div class="wkey" hidden>'
+      +'<input type="password" autocomplete="off" '
+      +'placeholder="paste your '+label+' API key">'
+      +'<button class="about-btn slim">Save</button></div>'
+      +'<div class="wnote"></div></div>';
+  }).join("");
+}
+// delegated: rows re-render after every save
+$("#wiz-provs").addEventListener("change",e=>{
+  if(!e.target.classList.contains("wck"))return;
+  const p=e.target.closest(".wprov");
+  p.querySelector(".wkey").hidden=!e.target.checked;
+});
+$("#wiz-provs").addEventListener("click",async e=>{
+  const b=e.target.closest&&e.target.closest(".wkey button");
+  if(!b)return;
+  const p=b.closest(".wprov"),note=p.querySelector(".wnote");
+  const key=p.querySelector(".wkey input").value.trim();
+  if(!key){note.textContent="paste a key first";return;}
+  note.textContent="testing the key…";
+  try{
+    const d=await(await fetch("/api/cloud/set",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({provider:p.dataset.p,key:key})})).json();
+    if(d.ok){
+      note.textContent="";
+      wizPaintProvs();          // the row repaints as connected
+      paintTierAvail();
+    }else note.textContent=d.err||"that didn’t work";
+  }catch(e2){note.textContent="network error — try again";}
+});
+function openWizard(){wizVeil.hidden=false;wizShow(1);}
+async function wizFinish(){
+  fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({wizard_done:true})});
+  await fetch("/api/setup/install",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({plan:wizPlan})});
+  wizVeil.hidden=true;
+  openSetup();setupManual=false;   // the familiar progress bar takes over
+}
+$("#wiz-next").addEventListener("click",()=>{
+  if(wizStep<4)wizShow(wizStep+1);
+  else wizFinish();
+});
+$("#wiz-back").addEventListener("click",()=>{
+  if(wizStep>1)wizShow(wizStep-1);
+});
+$("#wiz-skip").addEventListener("click",()=>{
+  fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({wizard_done:true})});
+  wizVeil.hidden=true;
+});
 function paintModelsFlag(st){
   const f=$("#models-flag");
   if(st.busy){
@@ -13230,10 +13607,15 @@ setTimeout(kickWipe,450);
     // auto-open only when the app can't hold a conversation yet
     paintModelsFlag(st);
     if(st.needs_setup&&IS_LOCAL){
-      // first run opens on the Fast / Pro / Max choice — the pick is
-      // the only decision, then everything is automatic. Remote
-      // visitors never see it: they use whatever the host has.
-      openSetup();setupManual=false;
+      // FIRST RUN opens the guided wizard (6b247) — once. A machine
+      // that skipped or finished it falls back to the plain download
+      // panel. Remote visitors never see either: they use whatever
+      // the host has.
+      let done=false;
+      try{done=!!(await(await fetch("/api/prefs")).json()).wizard_done;}
+      catch(e){}
+      if(!done)openWizard();
+      else{openSetup();setupManual=false;}
     }
   }catch(e){}
 })();

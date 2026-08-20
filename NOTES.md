@@ -3300,3 +3300,90 @@ set). Four real inefficiencies found, all fixed:
   dashboard-only. Those rows show nothing rather than something
   invented.
 - Gauntlet 64/64.
+
+## 6 beta 247 (pending release) — the Kimi seat actually answers
+Patrick's screenshot: Cloud Only, "KIMI K3 (no answer — cloud)". Three
+distinct defects stacked on that one seat, all found by replaying the
+EXACT bench payload against Moonshot and reading the body the app
+swallows:
+- TEMPERATURE: Moonshot pins each model's legal temperature — the bench
+  payload's 0.75 got 400 "only 1 is allowed" on EVERY council call,
+  while the save-probe (which sends no temperature) showed a green ✓.
+  Probe and runtime payloads differing is the same class of bug as the
+  b233 Groq tick. cloud_text and cloud_stream_conf now OMIT temperature
+  on moonshot bases; the server default is always legal.
+- STALE PICK: discovery ran once, at key save — when Patrick's account
+  (pre-funding) exposed only k2 models, so the stored pick was
+  kimi-k2.7-code, a CODE SPECIALIST, forever. kimi-k3 appeared in the
+  inventory after funding and nothing ever looked again.
+  _cloud_refresh_picks() now re-discovers every healthy provider once
+  per boot (background thread off the _cloud_repair latch) and upgrades
+  picks via CLOUD_PICK_ORDER — ONE policy table shared with the save
+  handler. Stored conf healed by hand for the interim (snapshot kept).
+- "pro" IS A SUBSTRING OF "prompt": the alternate-seat heuristic put
+  llama-prompt-guard-2-22m — a 22M SAFETY CLASSIFIER — on every Groq
+  council as the "stronger sibling". Word-boundary match now, and
+  guard/moderation ids are skipped at inventory level entirely.
+- Verified live end to end: Cloud Only bench = Groq 120B, Gemini,
+  Claude, Kimi K3 — all four answered, claude-sonnet-5 composited,
+  15.2s. Boot refresh then purged the junk inventories on its own and
+  upgraded Gemini's pick to gemini-3-flash-preview.
+- Gauntlet 64/64.
+
+## 6 beta 247 (cont.) — the wine question grew a map of France
+Patrick's screenshot: a health question about daily wine rendered a
+world map pinning "Short term", "Liver" and "Brain". The chain, fully
+traced:
+- WINE IS A _PLACE_NOUN (so "best wine bar in bushwick" searches
+  properly), so a quality word + a consumable classified the health
+  question as a venue ask -> bookish -> the [[PLACES]]/extraction
+  machinery engaged -> the extractor read the ANSWER'S SECTION HEADINGS
+  as venue names (they pass the exists-in-answer check, because of
+  course they do) -> the geocoder pinned them, because BRAIN IS A REAL
+  COMMUNE IN FRANCE.
+- THREE GATES NOW, layered:
+  1. _NOT_PLACEY_RX — "bad/good/healthy/safe/… for you/health",
+     health words, "why is X bad" — forces placey=bookish=False AFTER
+     the follow-up threading step, so a glued-on entity from a previous
+     venue turn can't resurrect the machinery. Tested both sides: five
+     health phrasings blocked, four venue asks untouched (the qzxvbn
+     placey gauntlet test still passes).
+  2. PLACEHINT only emits when placey/bookish — for a plain searched
+     answer the "venues" mined from article titles are headline
+     fragments.
+  3. CLIENT COHERENCE: pins wider than 250km apart = garbage in, no
+     map. Real venue answers share one metro; junk names geocode
+     SOMEWHERE on every continent.
+- Verified live twice: "is a glass of wine a day actually good for you"
+  and the reported "why is drinking bad for you" — SOURCES only, no
+  MAP, no PLACES2, no PLACEHINT, grounded prose answer.
+- Gauntlet 64/64.
+
+## 6 beta 247 (cont.) — the four-step first-run wizard
+- #wiz-veil over the app, once per machine (prefs.wizard_done; skip
+  counts). The boot gate: needs_setup && IS_LOCAL && !wizard_done ->
+  openWizard(); done/skipped machines fall back to the plain download
+  panel. Remote visitors never see either.
+- Step 1: the stacked lockup at hero size (wing SVG + Michroma wordmark
+  + version), two paragraphs — what Concorde is, and "this takes a
+  minute".
+- Step 2: one paragraph on LLMs + compositing, then Basic/Pro/Max cards
+  priced from /api/setup plans (live GB, "installed ✓" when owned), and
+  the ignore-system-limits checkbox riding the existing no_limits pref
+  (re-prices the cards on toggle).
+- Step 3: one paragraph on cloud power, then the four providers —
+  checkbox left, free/paid tag, "get a key ↗" (aistudio / console.groq /
+  console.anthropic / platform.moonshot), checking reveals paste + Save
+  through /api/cloud/set. Connected providers show ✓ instead.
+- Step 4: thanks + "Let's go" -> /api/setup/install with the chosen
+  plan, wizard_done, and the OLD setup veil takes over for the progress
+  bar it already draws well. Nothing was duplicated: plans, install,
+  keys, no-limits all ride the existing endpoints.
+- Traps hit: .about-btn's display:block beats the UA [hidden] rule
+  (Back showed on step 1 — same fix as every veil: an explicit [hidden]
+  rule); the key input needed min-width:0 + border-box or the card
+  grew a horizontal scrollbar.
+- Verified: all four steps walked live; fresh-machine branches proven
+  by stubbing /api/setup + /api/cloud (GB prices render, checkbox
+  reveals the key row, right links, right placeholders); skip writes
+  wizard_done and the gate honours it. Gauntlet 65/65.
