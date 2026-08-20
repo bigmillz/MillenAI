@@ -3194,3 +3194,83 @@ set). Four real inefficiencies found, all fixed:
   worker now persists its (wid, token) pair in the temp dir and mints a
   fresh identity when the cache is gone.
 - Gauntlet 63/63 (new check: ccopy present, wait state wired).
+
+## 6 beta 245 (pending release) — Kimi K3 joins as the 4th provider
+- K3 IS NOT A LOCAL-CATALOG CANDIDATE and never will be: 2.8T-param MoE
+  (104B active per token), open weights under Modified MIT, ~64 H100s
+  to self-host. It joins the CLOUD side instead: provider id "kimi",
+  base https://api.moonshot.ai/v1, OpenAI-compatible — the existing
+  streaming/compat path speaks it unchanged.
+- Discovery-first saves us from id guesswork: the default "kimi-k3" is
+  corrected by the /models inventory on key save (prefs_order: k3,
+  kimi-latest, k2). WIRING PROVEN LIVE without a key: a deliberately
+  invalid probe through /api/cloud/set came back with Moonshot's own
+  "Invalid Authentication" — base, headers, discovery and the
+  provider's-own-words error path all real. cloud.json snapshotted and
+  restored around the probe.
+- Seated in the pecking order as PAID: compositor ladder is now claude,
+  kimi, gemini, groq; the bench fields ONE kimi seat (no blind
+  alternate — same rule as Anthropic, it bills per token).
+- Touchpoints (the full 4th-provider checklist, for next time):
+  KEY_SHAPE ("sk-", floor 40 — Moonshot keys are OpenAI-styled bare
+  sk-, no vendor infix; per-selected-provider check so no sk-ant-
+  collision), _provider_of (moonshot -> kimi), spec map, prefs_order,
+  cloud_bench paid-skip, compositor_ladder tuple, dropdown option,
+  CK_PROVS board row, ZITO PROV map + ladder array.
+- Gauntlet 64/64 (new check: dropdown + board carry Kimi K3).
+
+## 6 beta 245 (cont.) — tier audit: three defects found and fixed
+- PRO WAS SEATING LLAVA ON TEXT QUESTIONS. BLEND_EXCLUDE exists to keep
+  the vision model out of text councils and take_all bypassed it — a 7B
+  vision model spent a whole engine swap drafting prose. Excluded now;
+  images still route to LLaVA directly before tiers resolve.
+- THINKING COULDN'T SEAT THE INSTALLED REASONING MODEL. Picks named
+  "DeepSeek R1 7B" (MLX distill); this machine holds the "DeepSeek R1"
+  ollama row — same brain, different label — so the reasoning tier
+  blended a plain Nemo instead. Both labels are in the picks now.
+- THE MERGE WAS CHOPPING FRONTIER DRAFTS TO STUMPS (Patrick: "will
+  Gemma distilling ruin it?"). The 1500-char per-draft cap exists for
+  small local mergers — repetition loops, seen in the wild — but it
+  also applied when Claude/Kimi K3 wrote the composite, so a frontier
+  draft was truncated to 1500 chars before a frontier compositor read
+  it. Two cuts now: cloud rungs get 6000 chars/draft (their contexts
+  are six to seven figures), the local merger keeps 1500.
+- THE ANSWER TO "does Gemma ruin Kimi": mostly no, BY THE LADDER — with
+  turbo on, the composite is written by Claude first, then Kimi, then
+  Gemini/Groq; local Gemma only writes when every cloud rung fails.
+  The residual flattening case: all-cloud-rungs-down mid-run, Gemma
+  rewrites a pot that contains a K3 draft. Option (NOT implemented,
+  Patrick's call): in that case ship the strongest cloud draft verbatim
+  instead — precedent exists (Cloud Only does exactly this).
+- Where Kimi sits per tier, once a key is saved: Fast = only if Moonshot
+  is the ACTIVE provider (turbo streams one provider); Thinking/Pro =
+  drafts on the bench (one seat, no paid alternate) + compositor rung 2;
+  Cloud Only = bench + rung 2.
+- Gauntlet 64/64.
+
+## 6 beta 245 (cont.) — "where is this turbo mode?"
+- IT'S THE "USE CLOUD POWER" CHECKBOX, Settings › Cloud power. "turbo"
+  is only the pref key; the one place the internal name leaked to the
+  screen was the generation status line ("turbo — Gemini") — reworded
+  to "cloud power — …" so the status speaks the switch's name.
+- FRESH-INSTALL TRAP FIXED: the key box folded away when cloud power
+  was off, and the toggle hides until a key is configured — so a fresh
+  machine's Cloud power pane was EMPTY, with no way to paste the first
+  key. The box now opens while the feature is on OR while nothing is
+  configured; it folds only for someone who has keys and switched it
+  off. (Never seen on this machine because turbo has been on forever.)
+- Gauntlet 64/64.
+
+## 6 beta 245 (cont.) — the spec list speaks one voice
+- VERSION and MODELS rendered in different type than CHIP/MEMORY/ACCEL
+  inside #set-spec: two STALE ID RULES from the pre-rail About layout —
+  #about-ver (Helvetica 14px) and #about-facts (mono 11.5px bold,
+  margin-top:10px) — outranked the list's shared mono 9.5px. The fix is
+  deletion: #up-ver keeps its rule (the update dialog still uses it),
+  #about-facts has no rule at all now. Measured after: all five rows
+  IBM Plex Mono / 9.5px / 400 / 0 margin.
+- The recurring lesson (third time now, after the duplicate #about-card
+  and #about-name ids): the rail redesign REUSED old element ids, and
+  every rule that ever targeted those ids is still live. When a row in
+  a shared list looks wrong, grep the ID before touching the list.
+- Gauntlet 64/64.

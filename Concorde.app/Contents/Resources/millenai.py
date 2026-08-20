@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 244               # integer compared against the GitHub release tag
+APP_BUILD = 245               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -434,6 +434,10 @@ KEY_SHAPE = {
     "gemini": ("AIza", 39, False),
     "groq": ("gsk_", 56, True),
     "claude": ("sk-ant-", 40, False),
+    # Moonshot keys are OpenAI-styled bare "sk-" (no vendor infix), so
+    # the floor stays conservative — the shape check is per-selected-
+    # provider, so this can never collide with sk-ant-
+    "kimi": ("sk-", 40, False),
 }
 
 
@@ -546,6 +550,8 @@ def _provider_of(c: dict) -> str:
         return "claude"
     if "groq" in b:
         return "groq"
+    if "moonshot" in b:
+        return "kimi"
     return ""
 
 
@@ -892,11 +898,13 @@ def cloud_bench() -> list:
         if not cloud_model_alive(c.get("model", "")):
             continue
         bench.append((c["name"], c))
-        # alternates only on FREE tiers — Anthropic bills per token,
-        # and the blind alternate once benched claude-opus-5 on every
-        # council question (caught live). One paid seat is plenty;
-        # the compositor ladder is where Claude earns its keep.
-        if "anthropic" in c.get("base", ""):
+        # alternates only on FREE tiers — Anthropic and Moonshot bill
+        # per token, and the blind alternate once benched claude-opus-5
+        # on every council question (caught live). One paid seat is
+        # plenty; the compositor ladder is where the paid rungs earn
+        # their keep.
+        if ("anthropic" in c.get("base", "")
+                or "moonshot" in c.get("base", "")):
             continue
         alts = [m for m in c.get("models", []) if m != c.get("model")
                 and cloud_model_alive(m)]
@@ -917,13 +925,14 @@ def cloud_bench() -> list:
 
 def compositor_ladder() -> list:
     """Confs to try for the COMPOSITE, strongest first (6b220): Claude,
-    then Gemini (upgraded to its pro model when the inventory has
-    one), then Groq. Local Gemma 4 stays the no-cloud floor — it was
-    only ever the best LOCAL compositor."""
+    then Kimi K3 (6b245 — frontier-class, 1M context), then Gemini
+    (upgraded to its pro model when the inventory has one), then Groq.
+    Local Gemma 4 stays the no-cloud floor — it was only ever the best
+    LOCAL compositor."""
     d = _cloud_all()
     pv = d.get("providers") or {}
     out = []
-    for pid in ("claude", "gemini", "groq"):
+    for pid in ("claude", "kimi", "gemini", "groq"):
         c = pv.get(pid)
         if not (c and c.get("status", "ok") == "ok" and c.get("key")
                 and c.get("base") and c.get("model")):
@@ -1221,10 +1230,15 @@ TIERS = {
         # strongest-first ladder: whatever the machine holds and the user
         # has installed autoselects \u2014 a Titan rig leads with the 235B, a
         # 16 GB laptop lands on Phi-4, nobody configures anything
+        # BOTH R1 rows are named (6b245): the picks said "DeepSeek R1
+        # 7B" (the MLX distill) while many machines hold the "DeepSeek
+        # R1" ollama row — same brain, different label — so the
+        # REASONING model couldn't seat in the REASONING tier and a
+        # plain Nemo blended in instead (seen on this very machine).
         "picks": ["Qwen 3 235B MoE", "GPT-OSS 120B", "Llama 4 Scout",
                   "Llama 3.3 70B", "Gemma 4 26B", "Qwen 3.6 35B MoE",
                   "GPT-OSS 20B", "Phi-4 14B", "DeepSeek R1 7B",
-                  "Qwen 2.5 Coder 14B", "Gemma 4 12B"],
+                  "DeepSeek R1", "Qwen 2.5 Coder 14B", "Gemma 4 12B"],
         "count": 3,
     },
     # Pro absorbed Power (5.3, per Patrick): every model that fits takes
@@ -1459,8 +1473,14 @@ def resolve_tier(name: str) -> list:
     take_all = t.get("all")
 
     def blendable(l):
-        if take_all:            # Power: memory is the only limit
-            return usable(l)
+        if take_all:
+            # Pro: memory is the only QUALITY limit — but BLEND_EXCLUDE
+            # still applies (6b245): it exists to keep the vision model
+            # out of TEXT councils, and take_all was bypassing it, so
+            # LLaVA spent an engine swap drafting on prose questions.
+            # Images never come through here — they route to LLaVA
+            # directly before the tier resolves.
+            return usable(l) and l not in BLEND_EXCLUDE
         return (usable(l) and l not in BLEND_EXCLUDE
                 and MODEL_MEM_BYTES.get(l, 0) >= BLEND_MIN_MEM)
 
@@ -4639,8 +4659,19 @@ def run_council(labels: list, messages: list, emit, status,
 
     status("compositing\u2026")
     question = messages[-1]["content"] if messages else ""
+    # TWO CUTS OF THE SAME DRAFTS (6b245, per Patrick: "will Gemma
+    # distilling ruin it?"). The 1500-char cap exists for SMALL LOCAL
+    # mergers \u2014 but it was also applied when Claude or Kimi K3 wrote the
+    # composite, so a frontier draft was chopped to a stump before a
+    # frontier compositor ever read it: the one place the council
+    # genuinely flattened its best voice. Cloud rungs read the drafts
+    # whole (6000 chars is ~a full long answer; their contexts are six
+    # to seven figures); the local merger keeps the tight cut that
+    # stops repetition loops.
     body = "\n\n".join(f"[answer {n}]\n{t[:1500]}"
                        for n, (_l, t) in enumerate(good, 1))
+    body_full = "\n\n".join(f"[answer {n}]\n{t[:6000]}"
+                            for n, (_l, t) in enumerate(good, 1))
 
     # REFLECTION (Thinking tier): before writing the final answer, the
     # merger reads the drafts as a critic and lists concrete problems —
@@ -4666,14 +4697,19 @@ def run_council(labels: list, messages: list, emit, status,
         except Exception:
             notes = ""
 
-    synth = [
-        messages[0],  # keep the dated system prompt
-        {"role": "user",
-         "content": f"{SYNTH_INSTRUCTION}\n\nQUESTION: {question}\n\n{body}"
-                    + (f"\n\nA careful reviewer flagged these issues — "
-                       f"your final answer must fix them without "
-                       f"mentioning the review:\n{notes}" if notes else "")},
-    ]
+    def _synth(b):
+        return [
+            messages[0],  # keep the dated system prompt
+            {"role": "user",
+             "content": f"{SYNTH_INSTRUCTION}\n\nQUESTION: {question}"
+                        f"\n\n{b}"
+                        + (f"\n\nA careful reviewer flagged these issues — "
+                           f"your final answer must fix them without "
+                           f"mentioning the review:\n{notes}"
+                           if notes else "")},
+        ]
+    synth = _synth(body)                # local merger: tight cut
+    synth_full = _synth(body_full)      # cloud rungs: the whole drafts
     # The drafts were each checked, but the merge never was — so a merger
     # that melted down streamed its collapse straight to the reader with
     # nothing in the way. Watch it as it arrives, and if it goes, throw away
@@ -4699,7 +4735,7 @@ def run_council(labels: list, messages: list, emit, status,
             got.append(t)
             emit(t)
         try:
-            ok = cloud_stream_conf(_cc, synth, _tap)
+            ok = cloud_stream_conf(_cc, synth_full, _tap)
         except Exception:
             ok = False
         text = strip_think("".join(got))
@@ -6179,6 +6215,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                          "openai/gpt-oss-120b"),
                 "claude": ("Claude", "https://api.anthropic.com/v1",
                            "claude-sonnet-4-5"),
+                # Moonshot's Kimi K3 (6b245, per Patrick): 2.8T-param MoE,
+                # open weights but ~64 H100s to self-host — so it joins as
+                # a provider, not a local row. OpenAI-compatible API; the
+                # default id is a guess the discovery call corrects.
+                "kimi": ("Kimi K3", "https://api.moonshot.ai/v1",
+                         "kimi-k3"),
             }.get(which)
             if not spec or len(key) < 12:
                 self._send_json({"ok": False, "err": "paste a full key"})
@@ -6232,6 +6274,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                "flash", "pro"],
                     "groq": ["gpt-oss-120b", "llama", "qwen"],
                     "claude": ["sonnet", "haiku", "opus"],
+                    "kimi": ["k3", "kimi-latest", "k2"],
                 }.get(which, [])
                 for want in prefs_order:
                     hit = next((i for i in chat if want in i.lower()), "")
@@ -7347,12 +7390,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 if turbo:
-                    status(f"turbo \u2014 {cloud_conf().get('name','cloud')}")
+                    # the status speaks the UI's name for the feature \u2014
+                    # "turbo" is the pref key, the switch says cloud power
+                    status(f"cloud power \u2014 "
+                           f"{cloud_conf().get('name','cloud')}")
                     _run_lbl([cloud_conf().get("name", "cloud")])
                     if cloud_stream(full_messages, emit):
                         hb_stop.set()
                         return
-                    status("turbo unavailable — running locally")
+                    status("cloud power unavailable — running locally")
                 # NO KEY, STILL BOOSTED: the keyless community cloud gets
                 # the same shot before local silicon does, whenever the
                 # user asked for cloud power without a key of their own.
@@ -9082,7 +9128,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #persona::placeholder{color:var(--faint)}
 #about-name{font-family:var(--helv);font-size:24px;font-weight:600;color:var(--text)}
 #about-name em{font-style:italic;font-weight:400;opacity:.85}
-#about-ver,#up-ver{font-family:var(--helv);font-size:14px;color:var(--dim);margin-top:6px}
+/* #up-ver only (6b245): #about-ver used to share this rule from the
+   old About layout, which left VERSION in 14px Helvetica inside a
+   9.5px mono spec list — one row shouting in a different face */
+#up-ver{font-family:var(--helv);font-size:14px;color:var(--dim);margin-top:6px}
 #up-detail{font-size:11.5px;color:var(--faint);margin:10px 0 4px;line-height:1.5}
 #about-sub{font-size:11.5px;color:var(--faint);margin-top:10px;line-height:1.5}
 #new-pct{font-family:var(--mono);font-size:11px;color:var(--dim);
@@ -9198,10 +9247,9 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   color:var(--text);font-size:12.5px;outline:none;
 }
 #fleet-box input:focus{border-color:var(--accent-dim)}
-#about-facts{
-  font-family:var(--mono);font-size:11.5px;font-weight:700;
-  color:var(--dim);margin-top:10px;line-height:1.6;
-}
+/* #about-facts carries no rule of its own anymore (6b245): it is a row
+   of the #set-spec list and inherits its type like every sibling — the
+   old 11.5px bold + margin made MODELS the loudest line in the box */
 .about-btn{
   display:block;width:100%;margin-top:8px;padding:9px 12px;
   font:500 13.5px var(--helv);cursor:pointer;color:var(--text);
@@ -9891,6 +9939,7 @@ __CODE_ROWS__
             <option value="gemini">Gemini (free tier)</option>
             <option value="groq">Groq (free tier)</option>
             <option value="claude">Claude (paid)</option>
+            <option value="kimi">Kimi K3 (paid)</option>
           </select>
           <input id="ck-key" type="password" autocomplete="off"
                  placeholder="paste API key">
@@ -12918,12 +12967,13 @@ function shareDone(on){
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({contrib_on:true})});
 }
-// THE PROVIDER BOARD (6b218, per Patrick): three fixed rows —
-// Gemini / Groq / Claude — grey until a key is saved, green ✓ when
-// its key works, red ✗ with the reason when it doesn't. The rows
+// THE PROVIDER BOARD (6b218, per Patrick): fixed rows —
+// Gemini / Groq / Claude / Kimi K3 — grey until a key is saved, green ✓
+// when its key works, red ✗ with the reason when it doesn't. The rows
 // never change with the dropdown; add keys one by one and watch the
 // board fill in.
-const CK_PROVS=[["gemini","Gemini"],["groq","Groq"],["claude","Claude"]];
+const CK_PROVS=[["gemini","Gemini"],["groq","Groq"],["claude","Claude"],
+                ["kimi","Kimi K3"]];
 function ckBoard(provs,active){
   const box=$("#ck-models");if(!box)return;
   provs=provs||{};
@@ -13165,10 +13215,16 @@ async function openAbout(){
       $("#betaup").checked=!!pr2.beta_updates;
       // unchecked features fold their furniture away (6.0b5)
       $("#fleet-box").hidden=!pr2.contrib_on;
-      $("#cloudkey-box").hidden=!pr2.turbo;
       try{
         const cs=await(await fetch("/api/cloud")).json();
         $("#turbo-row").hidden=!cs.configured;
+        // THE KEY BOX IS THE ONLY DOOR (6b245): folding it behind the
+        // cloud-power toggle left a FRESH machine's pane empty — the
+        // toggle hides too when nothing is configured, so there was no
+        // way to paste the first key. Open while the feature is on OR
+        // while there is no key yet; it folds only for someone who has
+        // keys and switched the feature off.
+        $("#cloudkey-box").hidden=!pr2.turbo&&cs.configured;
         if(typeof ckBoard==="function")
           ckBoard(cs.providers,cs.active);
         paintTierAvail();
@@ -13445,13 +13501,13 @@ async function zBuild(){
   up.sort((a,b)=>(eng[b].mem||0)-(eng[a].mem||0));
   const spokes=up.slice(0,9).map(k=>({n:k,
     t:/port \d/.test(eng[k].note||"")?"local \u00b7 loaded":"local"}));
-  const PROV={claude:"CLAUDE",gemini:"GEMINI",groq:"GROQ"};
+  const PROV={claude:"CLAUDE",kimi:"KIMI K3",gemini:"GEMINI",groq:"GROQ"};
   const pv=(cl||{}).providers||{};
   const keys=Object.keys(PROV).filter(id=>(pv[id]||{}).status==="ok");
   keys.forEach(id=>spokes.push({n:PROV[id],t:"cloud"}));
   if(!spokes.length)spokes.push({n:model,t:"selected"});
 
-  const ladder=keys.length?PROV[["claude","gemini","groq"]
+  const ladder=keys.length?PROV[["claude","kimi","gemini","groq"]
     .find(id=>keys.indexOf(id)>=0)]:"GEMMA \u00b7 local";
   const facts=((mm||{}).facts||[]).length;
   const clips=((sky||{}).cached||[]).length;

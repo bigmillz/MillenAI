@@ -211,6 +211,11 @@ print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)
 tiers = json.loads(b)
 # 5.3: no skip list — Pro (all-models) must resolve like everything else
+# 6b245: Kimi K3 is the 4th provider — dropdown option and board row.
+# (The backend spec was proven live: a probe key reached api.moonshot.ai
+# and came back with Moonshot's own "Invalid Authentication".)
+check("Kimi K3 wired as a provider",
+      'value="kimi">Kimi K3 (paid)' in page and '"kimi","Kimi K3"' in page)
 check("every tier resolves", all(t.get("models") for t in tiers.values()),
       str({n: t.get("models") for n, t in tiers.items()}))
 check("Best and Power tiers are gone",
