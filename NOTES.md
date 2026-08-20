@@ -3274,3 +3274,29 @@ set). Four real inefficiencies found, all fixed:
   every rule that ever targeted those ids is still live. When a row in
   a shared list looks wrong, grep the ID before touching the list.
 - Gauntlet 64/64.
+
+## 6 beta 246 (pending release) — Fast rides the speed ladder, and Kimi shows its money
+- FAST PREFERS A FAST CLOUD MODEL OVER ANY LOCAL LLM (per Patrick).
+  fast_cloud_ladder(): groq -> gemini -> kimi -> claude, SPEED order
+  not strength order — Groq's LPUs first, Gemini's pick is already
+  flash, Claude last and downshifted to haiku when the inventory has
+  one (Fast fires constantly; frontier tokens don't belong in it).
+  Every healthy rung gets a try before local silicon; the old path took
+  ONE shot at whichever provider was "active" — which could be the
+  slowest paid one — and dropped straight to local when it hiccuped.
+- The turbo gate now rides the ladder, not cloud_conf(): a dead ACTIVE
+  key used to skip cloud entirely while a healthy second key sat
+  unused.
+- PROVEN LIVE, including the fallthrough: one run answered via Groq in
+  0.7s; the next caught Groq mid-hiccup and the ladder walked to Gemini
+  ("cloud power — Groq 120B" then "cloud power — Gemini"), 7.7s total,
+  answer intact. The old code would have run Gemma locally instead.
+- Fast's hover bubble names the actual rung now: "✓ Cloud Enabled —
+  Groq 120B answers first, this machine is the fallback."
+- BALANCES, honestly: only Moonshot exposes money to a normal key
+  (GET /users/me/balance). The board shows it — measured live, "Kimi K3
+  ✓ · $25.00 left" off Patrick's real account — cached 5 minutes.
+  Anthropic exposes cost only to an org ADMIN key; Groq and Gemini are
+  dashboard-only. Those rows show nothing rather than something
+  invented.
+- Gauntlet 64/64.

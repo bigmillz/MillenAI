@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 245               # integer compared against the GitHub release tag
+APP_BUILD = 246               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -949,6 +949,75 @@ def compositor_ladder() -> list:
             continue
         out.append(c)
     return out
+
+
+def fast_cloud_ladder() -> list:
+    """Confs for the FAST single-answer path, QUICKEST first (6b246,
+    per Patrick: 'prefer one fast cloud model over any LLM'). Speed
+    order, deliberately not strength order: Groq's LPUs stream hundreds
+    of tokens a second, Gemini's stored pick is already a flash model,
+    then Kimi, and Claude last — downshifted to its lightest (haiku)
+    when the inventory has one, because Fast is the default tier, fires
+    constantly, and should not burn frontier tokens on quick questions.
+    Unlike the old path (ONE shot at whichever provider was 'active'),
+    every healthy rung gets a try before local silicon."""
+    d = _cloud_all()
+    pv = d.get("providers") or {}
+    now = time.time()
+    out = []
+    for pid in ("groq", "gemini", "kimi", "claude"):
+        c = pv.get(pid)
+        if not (c and c.get("status", "ok") == "ok" and c.get("key")
+                and c.get("base") and c.get("model")):
+            continue
+        try:                       # resting quota = skip, it 429s anyway
+            if float(c.get("cool") or 0) > now:
+                continue
+        except (TypeError, ValueError):
+            pass
+        c = dict(c)
+        if pid == "claude":
+            light = next((m for m in c.get("models", [])
+                          if "haiku" in m.lower()
+                          and cloud_model_alive(m)), "")
+            if light:
+                c["model"] = light
+        if not cloud_model_alive(c.get("model", "")):
+            continue
+        out.append(c)
+    return out
+
+
+_bal_cache = {}   # pid -> (expires_ts, text)
+
+
+def cloud_balance(pid: str, c: dict) -> str:
+    """Money left on a provider, when its API will say — '' otherwise.
+    ONLY MOONSHOT exposes balance to a normal key (/users/me/balance,
+    USD on the .ai platform). Anthropic shows cost only to an org ADMIN
+    key, Groq and Gemini only in their dashboards — so those rows show
+    nothing rather than something invented. Cached 5 minutes; Settings
+    repaints constantly and must not spend a request each time."""
+    if pid != "kimi" or not (c.get("key") and c.get("base")):
+        return ""
+    now = time.time()
+    hit = _bal_cache.get(pid)
+    if hit and hit[0] > now:
+        return hit[1]
+    text = ""
+    try:
+        req = urllib.request.Request(
+            c["base"].rstrip("/") + "/users/me/balance",
+            headers={"Authorization": "Bearer " + c["key"],
+                     "User-Agent": "MillenAI/%s" % APP_VERSION})
+        d = json.loads(urllib.request.urlopen(req, timeout=6).read())
+        avail = (d.get("data") or {}).get("available_balance")
+        if isinstance(avail, (int, float)):
+            text = "$%.2f left" % avail
+    except Exception:
+        text = ""                 # a balance is a nicety, never a blocker
+    _bal_cache[pid] = (now + 300, text)
+    return text
 
 
 def cloud_stream(messages: list, emit) -> bool:
@@ -5916,7 +5985,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     return 0
             provs = {k: {"status": v.get("status", ""),
                          "note": (v.get("note") or "")[:80],
-                         "cool": _cool_left(v)}
+                         "cool": _cool_left(v),
+                         # real money where the provider will say (Kimi);
+                         # '' where it won't — never invented
+                         "balance": (cloud_balance(k, v)
+                                     if v.get("status") == "ok" else "")}
                      for k, v in (d.get("providers") or {}).items()}
             self._send_json({"configured": bool(c),
                              "name": (c or {}).get("name", ""),
@@ -5955,6 +6028,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                            and not model_fits_memory(l)]
                 out[name] = {"desc": t["desc"], "models": chosen,
                              "skipped": skipped, "available": True}
+                # Fast's bubble names the rung that will actually answer
+                # (6b246) — "Cloud Enabled" alone didn't say WHO
+                if name == "Fast" and load_prefs(None).get("turbo"):
+                    _fl = fast_cloud_ladder()
+                    if _fl:
+                        out[name]["fastcloud"] = _fl[0].get("name", "")
             self._send_json(out)
         elif self.path == "/api/prefs":
             self._send_json(load_prefs(self._data_base()))
@@ -7379,9 +7458,13 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                             peer=(tier == "Pro"))
             else:
                 lbl = route_label or model_name
-                # cloud is a pref, not a tier (Best retired in 5.3)
+                # cloud is a pref, not a tier (Best retired in 5.3).
+                # Gated on the LADDER, not on cloud_conf (6b246): the
+                # old gate needed the ACTIVE provider healthy, so a dead
+                # active key skipped cloud entirely while a perfectly
+                # good second key sat unused.
                 turbo = (load_prefs(None).get("turbo")
-                         and cloud_conf() and not images)
+                         and fast_cloud_ladder() and not images)
 
                 def _run_lbl(names):
                     try:
@@ -7390,14 +7473,21 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     except Exception:
                         pass
                 if turbo:
-                    # the status speaks the UI's name for the feature \u2014
-                    # "turbo" is the pref key, the switch says cloud power
-                    status(f"cloud power \u2014 "
-                           f"{cloud_conf().get('name','cloud')}")
-                    _run_lbl([cloud_conf().get("name", "cloud")])
-                    if cloud_stream(full_messages, emit):
-                        hb_stop.set()
-                        return
+                    # FAST WALKS THE SPEED LADDER (6b246, per Patrick:
+                    # "prefer one fast cloud model over any LLM").
+                    # Quickest healthy rung first, next rung on any
+                    # failure \u2014 the old path took ONE shot at whichever
+                    # provider happened to be 'active', which could be
+                    # the slowest paid one, and gave up straight to
+                    # local silicon when it hiccuped. The status speaks
+                    # the UI's name: "turbo" is only the pref key.
+                    for _fc in fast_cloud_ladder():
+                        _nm = _fc.get("name", "cloud")
+                        status("cloud power \u2014 " + _nm)
+                        _run_lbl([_nm])
+                        if cloud_stream_conf(_fc, full_messages, emit):
+                            hb_stop.set()
+                            return
                     status("cloud power unavailable — running locally")
                 # NO KEY, STILL BOOSTED: the keyless community cloud gets
                 # the same shot before local silicon does, whenever the
@@ -10242,7 +10332,9 @@ async function showTierPop(el,name){
         bench.map(m=>'<div class="mline mcloud">'+esc(m)
           +' <i>· cloud</i></div>').join("")+
         (cloudOn
-          ?'<span class="note"><i class="gcheck">✓</i> Cloud Enabled</span>'
+          ?'<span class="note"><i class="gcheck">✓</i> Cloud Enabled'
+            +(info.fastcloud?' — '+esc(info.fastcloud)+' answers first, '
+              +'this machine is the fallback':'')+'</span>'
           :list.length>1?'<span class="note">answers blended by Gemma</span>'
                         :'<span class="note">single model — fastest</span>')
       : '<div class="mline">nothing downloaded yet</div>')+
@@ -12985,6 +13077,7 @@ function ckBoard(provs,active){
     // refills by itself, so it gets an hourglass and a countdown instead
     // of the red ✗ that means "go and fix your key" (6b235)
     const rest=st==="ok"&&cool>0;
+    const bal=(provs[id]||{}).balance||"";
     const mark=rest?'<span class="ckz">⏳</span>'
       :st==="ok"?'<span class="ckt">✓</span>'
       :st==="fail"?'<span class="ckx">✗</span>':"";
@@ -12993,6 +13086,7 @@ function ckBoard(provs,active){
       +'">'+mark+label
       +(rest?' <i>· resting '+Math.ceil(cool/60)+'m · quota</i>'
         :st==="ok"&&id===active?' <i>· in use</i>':"")
+      +(st==="ok"&&bal?' <i>· '+esc(bal)+'</i>':"")
       +(st==="fail"&&note?' <i>· '+esc(note)+'</i>':"")+'</div>';
   }).join("");
 }
