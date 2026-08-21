@@ -9,7 +9,12 @@ import sys
 import time
 import urllib.request
 import urllib.error
+import urllib.parse
 from collections import Counter
+
+
+def _uq(s):
+    return urllib.parse.quote(s, safe="")
 
 BASE = "http://127.0.0.1:9894"
 KEY = "smoketestkey123"
@@ -148,6 +153,29 @@ check("code-card copy button, greyed until the fence closes",
 # display:none while the 700px drawer block only animated transform, so
 # the ☰ toggled a class on an element that was never rendered. ONE
 # breakpoint now; this guards the second one from creeping back.
+# 6b249: the Remote SSH agent — autonomy throttle, connection bar, and
+# the live approval card in the stream
+check("remote agent UI present",
+      'id="remote-bar"' in page and 'id="autonomy-seg"' in page
+      and 'data-a="manual"' in page and 'data-a="full"' in page
+      and "showApprove" in page and 'data-agent="Remote"' in page)
+# 6b249: the command safety classifier — the real gate behind the
+# autonomy levels. Verified over the wire against the running server so
+# a regression in _DANGER_RX/classify_cmd can never ship silently.
+s, h, b = req("/api/remote/classify?cmd=" + _uq("rm -rf /"), cookie=K)
+if s == 200:
+    def _cls(c):
+        s2, h2, b2 = req("/api/remote/classify?cmd=" + _uq(c), cookie=K)
+        return json.loads(b2).get("risk")
+    check("classifier: catastrophic commands are 'danger'",
+          _cls("rm -rf /") == "danger" and _cls("mkfs.ext4 /dev/sda1")
+          == "danger" and _cls("reboot") == "danger"
+          and _cls("apt update && reboot") == "danger")
+    check("classifier: reads and writes separate correctly",
+          _cls("ls -la /etc") == "read"
+          and _cls("systemctl status nginx") == "read"
+          and _cls("apt-get install -y nginx") == "write"
+          and _cls("ufw allow 51820/udp") == "write")
 # 6b248: the Advanced council — menu row behind a divider, the picker
 # veil, per-model use-lines, and the compositor dropdown with guidance
 check("advanced council picker present",

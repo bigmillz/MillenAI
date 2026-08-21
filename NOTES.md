@@ -3439,3 +3439,48 @@ traced:
   4 clouds / 7 compositor options; save -> chip Custom, stored JSON
   correct; a 1-local/no-cloud run answered locally in 4.9s with zero
   cloud attempts. Gauntlet 66/66.
+
+## 6 beta 249 (pending release) — the Remote SSH agent
+Patrick's ask: his competitor's AI edits a VPS over SSH; roll the same
+into the Code tab so "help me set up a VPN on my VPS" asks the right
+questions and grinds. Built as a "Remote" agent (🛰️) beside Coding and
+Workspace.
+- LOOP: plan -> run one command over SSH -> read output -> repeat, up to
+  REMOTE_CAP=40. The driver is the STRONGEST available brain
+  (compositor_ladder first — cloud when keyed — else the best local
+  coder); agentic multi-step work needs it. Each command + exit code
+  streams into the same activity tree the council uses.
+- TRANSPORT: shells out to the system ssh binary, KEY-FIRST. BatchMode
+  means a password prompt can never hang the loop; a keyless box fails
+  with a clean "ssh-copy-id …" nudge. accept-new host key, 12s connect
+  timeout. The app never invents a target and never takes a secret —
+  the user saves their own host/user/port/key (remote.json, 0600,
+  owner-only, never over the tunnel).
+- THE AUTONOMY THROTTLE (the "be creative" bit): three escalating
+  segments — 🔒 Manual (approve every command) / ⚡ Auto (reads run,
+  changes ask) / 🔥 Full (grinds, pauses only for irreversible). Cool
+  grey -> amber -> hot red left to right; Full pulses. Stored in
+  millen.autonomy, sent as `autonomy`.
+- THE REAL GATE is classify_cmd() -> read|write|danger, unit-tested
+  36/36 including rm -rf /, mkfs, dd, reboot, fork bombs, and compound
+  commands (a pipeline takes its riskiest segment). Auto pauses on
+  write+danger; even FULL always pauses on danger — a floor no mode
+  crosses. Guarded in the gauntlet over the wire via /api/remote/classify.
+- APPROVAL CHANNEL: the loop emits an APPROVE marker and blocks on an
+  Event (the fleet-job pattern); the client shows a Run/Skip card with a
+  risk chip; POST /api/remote/approve sets the Event and the loop
+  continues (or feeds "user declined" back to the model). 600s window.
+- SECURITY: the whole feature is owner-only. A tunnel guest selecting
+  Remote gets "owner's machine only"; every /api/remote/* is in
+  ADMIN_PATHS AND re-checks _remote() in its handler.
+- VERIFIED: classifier 36/36 (unit) + over the wire (gauntlet); ssh argv
+  construction; config save/read roundtrip with the key; bogus-host test
+  fails in ~5s, NO hang; the full /api/chat loop reaches the connect
+  step and returns the guided failure in 5s; the approval card renders
+  read/write/danger and POSTs {jid,ok} correctly.
+- NOT YET EXERCISED (needs a real reachable VPS — the WebKit-pass
+  equivalent): the live multi-command grind with the model driving, and
+  the end-to-end approval gate through an actually-running command. The
+  mechanism is the proven fleet Event pattern; only the command phase
+  is untested from here. Ship, then shake out against a real box.
+- Gauntlet 69/69.

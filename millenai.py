@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 248               # integer compared against the GitHub release tag
+APP_BUILD = 249               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1455,6 +1455,18 @@ AGENTS = {
             "file or folder you'd need to see — never guess at code you "
             "cannot see."),
     },
+    "Remote": {
+        # 6b249, per Patrick: drive the user's OWN VPS over SSH, the way
+        # Claude Code drives a shell. The model here is only the FLOOR —
+        # run_remote_agent picks the strongest available driver (cloud
+        # when keyed). Lives in the Code tab beside Coding/Workspace.
+        "icon": "🛰️", "desc": "runs commands on your server over SSH",
+        "picks": ["Qwen 2.5 Coder 14B", "Qwen 3.6 35B MoE", "GPT-OSS 20B",
+                  "Gemma 4 26B", "Qwen 2.5 Coder 7B", "Gemma 4 12B",
+                  "Llama 3.1 8B"],
+        "remote": True,
+        "system": "",       # the loop supplies REMOTE_SYSTEM itself
+    },
     "Coding": {
         "icon": "💻", "desc": "working code, tight explanations",
         "picks": ["Qwen 2.5 Coder 14B", "Qwen 2.5 Coder 7B",
@@ -1575,7 +1587,7 @@ SHOW_AGENTS = False
 
 # The CODE tab owns the two code specialists (5.2, per Patrick: "pull
 # coding from agents and make it into a 3rd tab"); Agents keeps the rest.
-CODE_AGENTS = ("Coding", "Workspace")
+CODE_AGENTS = ("Coding", "Workspace", "Remote")
 
 
 def build_agent_rows() -> str:
@@ -5081,6 +5093,310 @@ def run_research(labels: list, messages: list, emit, status) -> None:
         for n, s in enumerate(sources, 1)))
 
 
+# ================================================================ REMOTE
+# THE REMOTE AGENT (6b249, per Patrick): drive the user's OWN server over
+# SSH, one command at a time, the way Claude Code drives a shell. Three
+# autonomy levels the user picks in the composer — Manual (approve every
+# command), Auto (diagnostics run free, changes ask first), Full (grinds,
+# pausing only for irreversible destruction). Key-first: BatchMode means
+# no password prompt can ever hang the loop, and a keyless box fails with
+# a clean "set up an SSH key" nudge instead. The app never invents a
+# target and never handles a secret — the user configures their own host.
+REMOTE_FILE = os.path.join(app_dir(), "remote.json")
+REMOTE_CAP = 40                 # hard ceiling on commands per run
+_remote_jobs = {}               # jid -> {"gate": Event, "ok": bool}
+_remote_lock = threading.Lock()
+
+
+def remote_conf() -> dict:
+    try:
+        with open(REMOTE_FILE) as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def _remote_save(d: dict):
+    try:
+        with open(REMOTE_FILE, "w") as f:
+            json.dump(d, f)
+        os.chmod(REMOTE_FILE, 0o600)
+    except Exception:
+        pass
+
+
+def _ssh_argv(conf: dict) -> list:
+    """The ssh invocation for this connection, sans the remote command.
+    Key-only (BatchMode), host key auto-accepted on first sight, short
+    connect timeout so a dead host fails fast."""
+    argv = ["ssh", "-o", "BatchMode=yes",
+            "-o", "StrictHostKeyChecking=accept-new",
+            "-o", "ConnectTimeout=12"]
+    port = str(conf.get("port") or "22")
+    if port != "22":
+        argv += ["-p", port]
+    key = (conf.get("key") or "").strip()
+    if key:
+        argv += ["-i", os.path.expanduser(key)]
+    argv.append("%s@%s" % (conf.get("user", "root"), conf.get("host", "")))
+    return argv
+
+
+def ssh_run(conf: dict, cmd: str, timeout: int = 120):
+    """(exit_code, combined_output). rc -1 == the connection itself
+    failed; the text carries ssh's own words so the UI can guide."""
+    try:
+        p = subprocess.run(_ssh_argv(conf) + [cmd],
+                           capture_output=True, text=True, timeout=timeout)
+        out = (p.stdout or "") + (p.stderr or "")
+        return p.returncode, out
+    except subprocess.TimeoutExpired:
+        return -1, "(command timed out after %ds)" % timeout
+    except FileNotFoundError:
+        return -1, "ssh client not found on this machine"
+    except Exception as exc:
+        return -1, "ssh failed: %s" % (str(exc)[:200])
+
+
+# ---- the safety classifier: what the autonomy levels actually gate on
+# DANGER = irreversible / whole-system. Even Full autonomy stops here.
+_DANGER_RX = re.compile(
+    r"\brm\s+(-\w*\s+)*-\w*[rf]\w*\s+(-\w*\s+)*(/|/\*|~|\$HOME|\.|\*|"
+    r"/etc|/var|/usr|/boot|/home|/lib|/opt|/root)(\s|/|$)|"
+    r"\bmkfs\b|\bwipefs\b|\bfdisk\b|\bparted\b|"
+    r"\bdd\b.*\bof=/dev/|>\s*/dev/(sd|nvme|vd|hd)|"
+    r"\b(reboot|shutdown|halt|poweroff|init\s+0|init\s+6)\b|"
+    r"\b(chmod|chown)\s+-\w*[rR]\w*\s+.*\s+/(\s|$)|"
+    r"\buserdel\b|\bpasswd\b|"
+    r":\s*\(\s*\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:|"   # fork bomb
+    r"\bdrop\s+database\b|>\s*/etc/(passwd|shadow|fstab)", re.I)
+
+# WRITE = mutates the box. Auto confirms these; Full runs them.
+_WRITE_RX = re.compile(
+    r"\b(apt|apt-get|aptitude|yum|dnf|pacman|zypper|snap|brew|pip3?|"
+    r"npm|pnpm|yarn|gem|cargo)\s+(install|remove|purge|upgrade|update|add|"
+    r"uninstall|-\w*[iSRU])|"
+    r"\b(systemctl|service)\s+(start|stop|restart|reload|enable|disable|"
+    r"mask|unmask)|"
+    r"\b(ufw|iptables|ip6tables|nft|firewall-cmd)\b|"
+    r"\bsed\s+-i|\btee\b|>>?\s*[^&\s]|"
+    r"\b(mv|cp|mkdir|rmdir|rm|touch|ln|chmod|chown|chgrp)\b|"
+    r"\b(useradd|groupadd|usermod|adduser|ssh-keygen|ssh-copy-id)\b|"
+    r"\b(git)\s+(clone|pull|checkout|reset|clean|push)|"
+    r"\b(docker|podman)\s+(run|build|rm|rmi|compose|stop|kill)|"
+    r"\bcrontab\b|\b(curl|wget)\b.*\|\s*(sudo\s+)?(sh|bash)|"
+    r"\bnpx\b|\bmake\b\s|\b\.\/", re.I)
+
+# READ = observe only. Runs free in Auto and Full (Manual still confirms).
+_READ_CMDS = frozenset(
+    "ls cat less more head tail grep egrep fgrep find stat file wc sort "
+    "uniq cut awk sed tr ps top htop ss netstat ip ifconfig ping ping6 "
+    "dig nslookup host traceroute mtr df du free uname whoami id uptime "
+    "date env printenv which whereis type pwd echo hostname arch nproc "
+    "lscpu lsblk lsof journalctl dmesg systemctl service tailscale "
+    "docker podman git curl wget test true false readlink realpath "
+    "getent locale timedatectl".split())
+_READ_SAFE_SUB = {          # verb -> subcommands that stay read-only
+    "systemctl": {"status", "is-active", "is-enabled", "is-failed",
+                  "list-units", "list-unit-files", "show", "cat"},
+    "service": {"status"},
+    "docker": {"ps", "images", "logs", "inspect", "version", "info", "stats"},
+    "podman": {"ps", "images", "logs", "inspect", "version", "info"},
+    "git": {"status", "log", "diff", "show", "branch", "remote", "config"},
+    "tailscale": {"status", "ip", "netcheck", "version"},
+}
+
+
+def classify_cmd(cmd: str) -> str:
+    """'read' | 'write' | 'danger'. Unknown defaults to 'write' — the
+    cautious side. A pipeline takes the risk of its riskiest segment."""
+    cmd = (cmd or "").strip()
+    if not cmd:
+        return "read"
+    if _DANGER_RX.search(cmd):
+        return "danger"
+    # segment on shell separators; the whole command is the max of parts
+    worst = "read"
+    for seg in re.split(r"\|\||&&|;|\||\n", cmd):
+        seg = seg.strip()
+        if not seg:
+            continue
+        r = _classify_seg(seg)
+        if r == "danger":
+            return "danger"
+        if r == "write":
+            worst = "write"
+    return worst
+
+
+def _classify_seg(seg: str) -> str:
+    if _DANGER_RX.search(seg):
+        return "danger"
+    # a redirect to a file mutates state
+    if re.search(r">>?\s*[^&\s]", seg) and not re.search(r">\s*/dev/null", seg):
+        return "write"
+    if _WRITE_RX.search(seg):
+        return "write"
+    toks = seg.split()
+    i = 0
+    while i < len(toks) and toks[i] in ("sudo", "env", "nohup", "time",
+                                        "nice", "ionice", "exec"):
+        i += 1
+        # skip VAR=val and -flags that belong to the wrapper
+        while i < len(toks) and ("=" in toks[i] or toks[i].startswith("-")):
+            i += 1
+    if i >= len(toks):
+        return "write"
+    verb = os.path.basename(toks[i])
+    if verb in _READ_CMDS:
+        safe = _READ_SAFE_SUB.get(verb)
+        if safe is not None:
+            sub = toks[i + 1] if i + 1 < len(toks) else ""
+            return "read" if sub in safe else "write"
+        return "read"
+    return "write"       # unknown verb — treat as a mutation
+
+
+def remote_driver():
+    """Who plans the commands: the strongest CLOUD brain when a key is
+    active (agentic multi-step work needs it), else the strongest local
+    coding model. Returns ('cloud', conf) or ('local', label) or None."""
+    ladder = compositor_ladder()      # claude, kimi, gemini, groq
+    if ladder:
+        return ("cloud", ladder[0])
+    pulled = ollama_pulled_tags() or set()
+    for l in ("Qwen 2.5 Coder 14B", "Qwen 3.6 35B MoE", "GPT-OSS 20B",
+              "Gemma 4 26B", "Qwen 2.5 Coder 7B", "Gemma 4 12B",
+              "Llama 3.1 8B"):
+        if l in MODEL_ROUTES and model_cached(l, pulled) \
+                and model_fits_memory(l):
+            return ("local", l)
+    return None
+
+
+def _agent_turn(driver, convo) -> str:
+    kind, who = driver
+    if kind == "cloud":
+        return strip_think(cloud_text(who, convo, timeout=90))
+    parts = []
+    try:
+        run_model(who, convo, parts.append)
+    except Exception:
+        return ""
+    return strip_think("".join(parts))
+
+
+def _parse_action(text: str) -> dict:
+    """Lenient: prefer a JSON object, fall back to a fenced shell block."""
+    m = re.search(r"\{[^{}]*\"(?:cmd|done|ask)\"[^{}]*\}", text, re.S)
+    if m:
+        try:
+            d = json.loads(m.group(0))
+            if isinstance(d, dict):
+                return d
+        except Exception:
+            pass
+    fb = re.search(r"```(?:bash|sh|shell)?\s*\n?(.+?)```", text, re.S)
+    if fb:
+        cmd = fb.group(1).strip().splitlines()
+        cmd = next((l for l in cmd if l.strip()
+                    and not l.strip().startswith("#")), "")
+        if cmd:
+            return {"cmd": cmd, "thought": "", "done": False}
+    return {}
+
+
+REMOTE_SYSTEM = (
+    "You are a careful remote systems engineer operating the user's OWN "
+    "server over SSH, one command at a time, like a shell agent. The "
+    "server is a Debian/Ubuntu VPS unless the output shows otherwise.\n"
+    "Respond with ONLY a single JSON object, nothing before or after:\n"
+    "  run a command:  {\"thought\":\"why, one line\",\"cmd\":\"exact "
+    "shell command\",\"done\":false}\n"
+    "  task complete:  {\"done\":true,\"summary\":\"what you did, plainly\"}\n"
+    "  need a detail only the user knows (a domain, a choice, a secret "
+    "they must type themselves): {\"ask\":\"one clear question\"}\n"
+    "Rules:\n"
+    "- ONE command per step. Inspect before you change anything.\n"
+    "- NEVER put a password, private key or token in a command — have "
+    "the user place secrets themselves and reference the file.\n"
+    "- Prefer idempotent, reversible steps; note risky ones in thought.\n"
+    "- The command's real output is fed back to you next turn — read it "
+    "and adapt. Don't guess at output you haven't seen.\n"
+    "- If a required detail (IP is set already; but a domain, an email "
+    "for certs, whether they have an SSH key, a port choice) is missing, "
+    "ASK before running anything that needs it.")
+
+
+def run_remote_agent(messages, conf, autonomy, emit, status, step,
+                     await_approval) -> None:
+    """Plan -> run -> read -> repeat over SSH, honouring the autonomy
+    level. `await_approval(cmd, risk)` blocks for the user's OK and
+    returns True/False; the caller wires it to the approval channel."""
+    driver = remote_driver()
+    if not driver:
+        emit("No model is available to drive the remote agent. Install a "
+             "coding model in Settings, or add a cloud key.")
+        return
+    host = conf.get("host", "the server")
+    status("connecting to %s" % host)
+    rc, out = ssh_run(conf, "echo __ok__ && uname -a", timeout=20)
+    if rc != 0 or "__ok__" not in out:
+        emit("**Couldn't connect to %s.**\n\n```\n%s\n```\n\nThis agent "
+             "uses key-based SSH only. Make sure your key is set up "
+             "(`ssh-copy-id %s@%s`) and the host, user and port are right "
+             "in the connection settings."
+             % (host, out.strip()[:400], conf.get("user", "root"), host))
+        return
+    step("conn", "Connected to " + host, "done", out.strip().split("\n")[0][:60])
+    convo = [{"role": "system", "content": REMOTE_SYSTEM}] + list(messages)
+    driver_name = driver[1].get("name", "cloud") if driver[0] == "cloud" \
+        else driver[1]
+    for i in range(1, REMOTE_CAP + 1):
+        status("%s is planning step %d" % (driver_name, i))
+        text = _agent_turn(driver, convo)
+        act = _parse_action(text)
+        if not act:
+            emit(text.strip() or "(the agent had nothing to say)")
+            return
+        if act.get("ask"):
+            emit(str(act["ask"]))
+            return
+        if act.get("done"):
+            emit(str(act.get("summary") or "Done.").strip())
+            return
+        cmd = str(act.get("cmd") or "").strip()
+        if not cmd:
+            emit(str(act.get("thought") or "Done.").strip())
+            return
+        risk = classify_cmd(cmd)
+        sid = "cmd%d" % i
+        step(sid, cmd, "run", {"read": "reading", "write": "changes",
+                               "danger": "irreversible"}[risk])
+        need_ok = (autonomy == "manual"
+                   or (autonomy == "auto" and risk != "read")
+                   or risk == "danger")
+        if need_ok:
+            step(sid, cmd, "wait", "waiting for you")
+            if not await_approval(cmd, risk):
+                step(sid, cmd, "skip", "you skipped it")
+                convo.append({"role": "assistant", "content": text})
+                convo.append({"role": "user", "content":
+                              "The user DECLINED that command. Do not run "
+                              "it. Choose a different approach or ask why."})
+                continue
+        status("running: " + cmd[:60])
+        rc, out = ssh_run(conf, cmd)
+        step(sid, cmd, "done", ("exit %d" % rc) if rc == 0
+             else "FAILED exit %d" % rc)
+        convo.append({"role": "assistant", "content": text})
+        convo.append({"role": "user", "content":
+                      "Command: %s\nExit code: %d\nOutput:\n%s"
+                      % (cmd, rc, out[:4000])})
+    emit("Reached the %d-command limit for one run. Tell me to continue "
+         "and I'll pick up where I left off." % REMOTE_CAP)
+
+
 def offline_hint(kind: str, err: Exception) -> str:
     """Turn a backend error into an actually useful message."""
     # NB: HTTPError subclasses URLError — it MUST be checked first,
@@ -5866,7 +6182,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
     # guests in the chat, not operators of the computer.
     ADMIN_PATHS = ("/api/open-logs", "/api/setup/install",
                    "/api/model/download", "/api/update/install",
-                   "/api/speak", "/api/voice/prepare")
+                   "/api/speak", "/api/voice/prepare",
+                   "/api/remote/config", "/api/remote/test",
+                   "/api/remote/approve")
 
     def _admin_gate(self) -> bool:
         """True = allowed. Answers the request itself when blocked."""
@@ -6115,6 +6433,29 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                                           "busy": v.get("busy", False),
                                           "models": len(v.get("models", []))}
                                          for v in alive.values()]})
+        elif self.path.startswith("/api/remote/classify"):
+            # read-only introspection of the safety classifier (6b249):
+            # the UI uses it to preview a command's risk, and the gauntlet
+            # to guard the classifier over the wire. Owner-only, no side
+            # effects — it never touches the server.
+            if self._remote():
+                self._send_json({"err": "owner only"})
+                return
+            q = urllib.parse.urlparse(self.path).query
+            cmd = urllib.parse.parse_qs(q).get("cmd", [""])[0]
+            self._send_json({"risk": classify_cmd(cmd)})
+        elif self.path == "/api/remote/config":
+            # the SSH connection is OWNER-ONLY and never leaves the host —
+            # a tunnel visitor has no business driving the owner's server
+            if self._remote():
+                self._send_json({"err": "owner only"})
+                return
+            c = remote_conf()
+            self._send_json({"host": c.get("host", ""),
+                             "user": c.get("user", ""),
+                             "port": c.get("port", "22"),
+                             "key": c.get("key", ""),
+                             "configured": bool(c.get("host"))})
         elif self.path == "/api/cloud":
             if self._remote():
                 self._send_json({"err": "owner only"})
@@ -6645,6 +6986,60 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if self.path.startswith("/api/remote/"):
+            # SSH connection + the live approval channel (6b249). All
+            # owner-only: never let a tunnel guest touch the server or
+            # approve a command running on it.
+            if self._remote():
+                self._send_json({"ok": False, "err": "owner only"})
+                return
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                d = json.loads(self.rfile.read(n)) if n else {}
+            except (ValueError, json.JSONDecodeError):
+                d = {}
+            if self.path == "/api/remote/approve":
+                jid = str(d.get("jid", ""))
+                with _remote_lock:
+                    job = _remote_jobs.get(jid)
+                    if job:
+                        job["ok"] = bool(d.get("ok"))
+                        job["gate"].set()
+                self._send_json({"ok": bool(job)})
+                return
+            if self.path == "/api/remote/config":
+                host = str(d.get("host", "")).strip()[:200]
+                if not host:
+                    try:
+                        os.remove(REMOTE_FILE)
+                    except Exception:
+                        pass
+                    self._send_json({"ok": True, "cleared": True})
+                    return
+                conf = {"host": host,
+                        "user": str(d.get("user", "root")).strip()[:80]
+                        or "root",
+                        "port": str(d.get("port", "22")).strip()[:6] or "22",
+                        "key": str(d.get("key", "")).strip()[:300]}
+                _remote_save(conf)
+                self._send_json({"ok": True})
+                return
+            if self.path == "/api/remote/test":
+                conf = remote_conf()
+                if not conf.get("host"):
+                    self._send_json({"ok": False,
+                                     "err": "no connection saved yet"})
+                    return
+                rc, out = ssh_run(conf, "echo __ok__ && whoami && uname -sr",
+                                  timeout=20)
+                ok = rc == 0 and "__ok__" in out
+                self._send_json({
+                    "ok": ok,
+                    "detail": out.replace("__ok__", "").strip()[:300]
+                    if ok else out.strip()[:300]})
+                return
+            self.send_error(404)
+            return
         if self.path.startswith("/api/fleet/"):
             n = int(self.headers.get("Content-Length", 0) or 0)
             try:
@@ -6974,16 +7369,22 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         # a selected AGENT owns the request: its best installed model, its
         # specialist system prompt; Research routes to the research flow
         agent_name = req_json.get("agent") or ""
-        ag_system, ag_research = "", False
+        ag_system, ag_research, ag_remote = "", False, False
         if agent_name and not req_json.get("images"):
             ag_label, ag = resolve_agent(agent_name)
             if ag:
                 ag_research = bool(ag.get("research"))
+                ag_remote = bool(ag.get("remote"))
                 ag_system = ag.get("system", "")
                 if ag_label:
                     council = [ag_label]
                     model_name = ag_label
                     tier = "Research" if ag_research else ""
+        # the Remote agent (6b249) resolves its own driver — even with no
+        # local model installed, a cloud key can drive it — so it must
+        # not fall through the "no council" guard below
+        if ag_remote:
+            tier = ""
 
         docs = [d for d in (req_json.get("docs") or [])
                 if isinstance(d, dict) and d.get("text")][:2]
@@ -7606,6 +8007,39 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                      "and the local vision engine will look at it.")
             elif cloud_only:
                 run_cloud_only(full_messages, emit, status, step)
+            elif ag_remote:
+                # THE REMOTE AGENT (6b249): drive the user's VPS over
+                # SSH. await_approval blocks on the approval channel —
+                # the client answers with POST /api/remote/approve.
+                rconf = remote_conf()
+                if self._remote():
+                    # a tunnel guest must never drive the OWNER's server
+                    emit("The Remote agent runs on the owner's machine "
+                         "only — it isn't available over the web.")
+                elif not rconf.get("host"):
+                    emit("Set up a server connection first — the ⚙️ next "
+                         "to the Remote agent takes host, user and your "
+                         "SSH key.")
+                else:
+                    autonomy = str(req_json.get("autonomy") or "auto")
+
+                    def _await(cmd, risk):
+                        jid = secrets.token_hex(8)
+                        ev = threading.Event()
+                        with _remote_lock:
+                            _remote_jobs[jid] = {"gate": ev, "ok": False}
+                        try:
+                            _write((NUL + "APPROVE:" + json.dumps(
+                                {"jid": jid, "cmd": cmd, "risk": risk})
+                                + NUL).encode("utf-8"))
+                        except Exception:
+                            pass
+                        got = ev.wait(600)
+                        with _remote_lock:
+                            j = _remote_jobs.pop(jid, {})
+                        return bool(got and j.get("ok"))
+                    run_remote_agent(messages, rconf, autonomy,
+                                     emit, status, step, _await)
             elif TIERS.get(tier, {}).get("research") or ag_research:
                 run_research(council, full_messages, emit, status)
             elif len(council) > 1:
@@ -8715,6 +9149,75 @@ body.perf .msg{animation:none}
   font:12px var(--mono);padding:7px 9px;outline:none;min-width:0}
 #ws-path:focus{border-color:rgba(143,157,255,.6)}
 #ws-note{font-size:11px;color:var(--faint);margin-top:7px;min-height:13px}
+/* -------------------------------------------------- remote agent */
+/* The autonomy THROTTLE (6b249, per Patrick: "be creative"). Three
+   escalating segments — a lock, a bolt, a flame — cool grey to hot
+   red left to right, the way a risk dial should read. The active one
+   lights in its own colour; Full pulses, because it should feel like
+   it's running. */
+#remote-bar{margin:8px 2px 2px;padding:10px 12px;border-radius:12px;
+  background:rgba(255,255,255,.045);border:1px solid rgba(255,255,255,.08)}
+#remote-bar[hidden]{display:none}
+#autonomy-seg{display:flex;gap:6px;margin-bottom:4px}
+.autoseg{flex:1;display:flex;flex-direction:column;align-items:center;
+  gap:2px;padding:9px 4px 8px;border-radius:10px;cursor:pointer;
+  background:rgba(18,20,26,.55);border:1px solid rgba(255,255,255,.09);
+  color:var(--dim);transition:all .15s ease;text-align:center}
+.autoseg:hover{background:rgba(255,255,255,.06)}
+.autoseg .ai{font-size:16px;line-height:1;filter:grayscale(.55);
+  transition:filter .15s}
+.autoseg b{font-size:12px;font-weight:600;color:var(--text)}
+.autoseg .ad{font-size:9.5px;line-height:1.25;color:var(--faint)}
+.autoseg.on .ai{filter:none}
+.autoseg[data-a="manual"].on{border-color:rgba(125,143,255,.75);
+  background:rgba(125,143,255,.14);
+  box-shadow:inset 0 0 0 1px rgba(125,143,255,.35)}
+.autoseg[data-a="auto"].on{border-color:rgba(240,190,90,.8);
+  background:rgba(240,190,90,.13);
+  box-shadow:inset 0 0 0 1px rgba(240,190,90,.4)}
+.autoseg[data-a="full"].on{border-color:rgba(226,109,90,.85);
+  background:rgba(226,109,90,.15);
+  box-shadow:inset 0 0 0 1px rgba(226,109,90,.45)}
+body:not(.perf) .autoseg[data-a="full"].on .ai{animation:flameP 1.5s ease infinite}
+@keyframes flameP{0%,100%{transform:scale(1);opacity:.85}
+  50%{transform:scale(1.18);opacity:1}}
+#remote-row{display:flex;gap:6px;margin-bottom:6px}
+#remote-bar input{background:rgba(18,20,26,.7);color:var(--text);
+  border:1px solid rgba(255,255,255,.12);border-radius:8px;
+  font:12px var(--mono);padding:7px 9px;outline:none;min-width:0}
+#remote-bar input:focus{border-color:rgba(143,157,255,.6)}
+#rm-host{flex:1}#rm-user{width:78px}#rm-port{width:52px}
+#rm-key{width:100%;box-sizing:border-box;font-size:11px}
+#remote-foot{display:flex;gap:7px;margin-top:7px}
+#remote-foot .about-btn.slim{margin-top:0}
+#rm-note{font-size:11px;color:var(--faint);margin-top:7px;min-height:13px;
+  line-height:1.4;white-space:pre-wrap}
+/* the live approval card in the answer stream */
+.apcard{margin:0 0 12px;border-radius:12px;overflow:hidden;
+  border:1px solid rgba(255,255,255,.12);background:rgba(8,9,12,.5)}
+.apcard .aptop{display:flex;align-items:center;gap:8px;padding:8px 12px;
+  border-bottom:1px solid rgba(255,255,255,.08);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--faint)}
+.apcard .aprisk{margin-left:auto;padding:2px 7px;border-radius:20px;
+  font-weight:600}
+.apcard .aprisk.read{color:#9fb8e8;background:rgba(125,143,255,.14)}
+.apcard .aprisk.write{color:#f0be5a;background:rgba(240,190,90,.14)}
+.apcard .aprisk.danger{color:#ff8a75;background:rgba(226,109,90,.18)}
+.apcard pre{margin:0;padding:11px 13px;font:12.5px var(--mono);
+  color:#dfe2e8;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
+.apcard .apfoot{display:flex;gap:8px;padding:0 12px 11px}
+.apbtn{flex:1;padding:8px;border-radius:9px;border:none;cursor:pointer;
+  font:600 12px var(--sans)}
+.apbtn.ok{background:var(--accent);color:#1a1a1a}
+.apbtn.ok:hover{background:var(--accent-hot)}
+.apbtn.no{background:rgba(255,255,255,.08);color:var(--dim)}
+.apbtn.no:hover{background:rgba(255,255,255,.14);color:#fff}
+.apcard.decided .apfoot{display:none}
+.apcard .apverdict{padding:8px 13px 11px;font-size:12px;
+  font-family:var(--mono)}
+.apcard.ok .apverdict{color:#a8cf9f}
+.apcard.no .apverdict{color:var(--faint)}
 /* the working tree — progress plus what it's actually doing */
 .worktree{margin:0 0 14px;padding:11px 13px;border-radius:12px;
   background:rgba(6,7,10,.5);border:1px solid rgba(255,255,255,.09);
@@ -10121,6 +10624,37 @@ __CODE_ROWS__
       </div>
       <div id="ws-note"></div>
     </div>
+    <!-- REMOTE agent (6b249): autonomy throttle + SSH connection -->
+    <div id="remote-bar" hidden>
+      <div class="set-h">Autonomy</div>
+      <div id="autonomy-seg" role="group" aria-label="Autonomy level">
+        <button class="autoseg" data-a="manual" type="button">
+          <span class="ai">🔒</span><b>Manual</b>
+          <span class="ad">approve every command</span></button>
+        <button class="autoseg" data-a="auto" type="button">
+          <span class="ai">⚡</span><b>Auto</b>
+          <span class="ad">diagnostics run · changes ask</span></button>
+        <button class="autoseg" data-a="full" type="button">
+          <span class="ai">🔥</span><b>Full auto</b>
+          <span class="ad">grinds · pauses only to destroy</span></button>
+      </div>
+      <div class="set-h">Server connection</div>
+      <div id="remote-row">
+        <input id="rm-host" placeholder="host or IP" autocomplete="off"
+               spellcheck="false">
+        <input id="rm-user" placeholder="user" value="root"
+               autocomplete="off" spellcheck="false">
+        <input id="rm-port" placeholder="22" value="22"
+               autocomplete="off" spellcheck="false">
+      </div>
+      <input id="rm-key" placeholder="~/.ssh/id_ed25519  —  SSH key path (blank uses your ssh-agent)"
+             autocomplete="off" spellcheck="false">
+      <div id="remote-foot">
+        <button class="about-btn slim" id="rm-save">Save</button>
+        <button class="about-btn slim" id="rm-test">Test connection</button>
+      </div>
+      <div id="rm-note"></div>
+    </div>
   </div>
   <div id="model-list">
   <div class="group-label chats">Chats</div>
@@ -10974,7 +11508,72 @@ function setAgent(name){
     localStorage.setItem("millen.codeagent",name);
   paintAgents();
   if(typeof wsRefresh==="function")wsRefresh();
+  if(typeof remoteRefresh==="function")remoteRefresh();
 }
+
+/* ------------------------------------------------- remote agent (6b249) */
+// The autonomy throttle: Manual / Auto / Full, stored and sent with the
+// request. The server's classifier decides which commands actually pause.
+let autonomy=localStorage.getItem("millen.autonomy")||"auto";
+function paintAutonomy(){
+  $$("#autonomy-seg .autoseg").forEach(el=>
+    el.classList.toggle("on",el.dataset.a===autonomy));
+}
+$$("#autonomy-seg .autoseg").forEach(el=>
+  el.addEventListener("click",()=>{
+    autonomy=el.dataset.a;localStorage.setItem("millen.autonomy",autonomy);
+    paintAutonomy();
+  }));
+paintAutonomy();
+// the connection bar shows only when the Remote agent is active; it loads
+// the saved host so a returning user sees their box, key path and all
+async function remoteRefresh(){
+  const bar=$("#remote-bar");if(!bar)return;
+  const on=agent==="Remote"&&IS_LOCAL;
+  bar.hidden=!on;
+  if(!on)return;
+  try{
+    const c=await(await fetch("/api/remote/config")).json();
+    if(c&&!c.err){
+      $("#rm-host").value=c.host||"";
+      $("#rm-user").value=c.user||"root";
+      $("#rm-port").value=c.port||"22";
+      $("#rm-key").value=c.key||"";
+      $("#rm-note").textContent=c.configured
+        ?"Saved. Test the connection, then just tell me what you need done."
+        :"Key-based SSH. On a fresh box: ssh-copy-id your key first.";
+    }
+  }catch(e){}
+}
+async function remoteSave(){
+  const body={host:$("#rm-host").value.trim(),user:$("#rm-user").value.trim(),
+    port:$("#rm-port").value.trim(),key:$("#rm-key").value.trim()};
+  const r=await(await fetch("/api/remote/config",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)})).json();
+  return r&&r.ok;
+}
+if($("#rm-save"))$("#rm-save").addEventListener("click",async()=>{
+  const note=$("#rm-note");
+  if(!$("#rm-host").value.trim()){note.textContent="enter a host or IP";return;}
+  note.textContent="saving…";
+  note.textContent=await remoteSave()?"Saved ✓":"couldn't save";
+});
+if($("#rm-test"))$("#rm-test").addEventListener("click",async()=>{
+  const note=$("#rm-note");
+  if(!$("#rm-host").value.trim()){note.textContent="enter a host first";return;}
+  note.textContent="saving + connecting…";
+  if(!await remoteSave()){note.textContent="couldn't save";return;}
+  try{
+    const r=await(await fetch("/api/remote/test",{method:"POST",
+      headers:{"Content-Type":"application/json"},body:"{}"})).json();
+    note.textContent=r.ok?"✓ connected — "+(r.detail||"ready")
+      :"✗ "+(r.detail||"couldn't connect")
+        +"\nKey-based SSH only: run  ssh-copy-id "
+        +$("#rm-user").value.trim()+"@"+$("#rm-host").value.trim()
+        +"  to install your key.";
+  }catch(e){note.textContent="network error";}
+});
 // the CODE tab's two rows: always visible, plain radio behavior
 $$("#code-wrap .agent").forEach(el=>
   el.addEventListener("click",()=>setAgent(el.dataset.agent||"")));
@@ -11097,6 +11696,35 @@ function wireFlow(scope){
   });
 }
 addEventListener("resize",()=>wireFlow());
+// THE LIVE APPROVAL CARD (6b249): the Remote agent proposes a command
+// and blocks; this renders it with a risk chip and Run/Skip, and the
+// click answers the server's approval channel so the loop continues.
+const AP_RISK={read:"read-only",write:"changes the box",
+               danger:"irreversible — careful"};
+function showApprove(host,d){
+  if(!host)return;
+  const card=document.createElement("div");
+  card.className="apcard "+(d.risk||"write");
+  card.innerHTML='<div class="aptop">proposed command'
+    +'<span class="aprisk '+esc(d.risk||"write")+'">'
+    +(AP_RISK[d.risk]||"changes")+'</span></div><pre></pre>'
+    +'<div class="apfoot"><button class="apbtn ok">Run it</button>'
+    +'<button class="apbtn no">Skip</button></div>'
+    +'<div class="apverdict" hidden></div>';
+  card.querySelector("pre").textContent=d.cmd||"";
+  host.appendChild(card);
+  if(typeof autoScroll==="function")autoScroll();
+  const decide=ok=>{
+    fetch("/api/remote/approve",{method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({jid:d.jid,ok:!!ok})}).catch(()=>{});
+    card.classList.add("decided",ok?"ok":"no");
+    const v=card.querySelector(".apverdict");
+    v.hidden=false;v.textContent=ok?"✓ running…":"skipped";
+  };
+  card.querySelector(".apbtn.ok").addEventListener("click",()=>decide(true));
+  card.querySelector(".apbtn.no").addEventListener("click",()=>decide(false));
+}
 function renderMD(raw){
   // pull out think blocks first (DeepSeek R1)
   let thinks=[];
@@ -11715,7 +12343,9 @@ async function send(){
           auto_web:autoWeb,images:sentImages,docs:sentDocs,agent,
           cloud:adv.cloud||[],compositor:adv.comp||""}
         :{model,models:council,tier,messages,
-          auto_web:autoWeb,images:sentImages,docs:sentDocs,agent}),
+          auto_web:autoWeb,images:sentImages,docs:sentDocs,agent,
+          // the Remote agent (6b249) carries the autonomy throttle
+          autonomy:agent==="Remote"?autonomy:undefined}),
     });
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
@@ -11813,7 +12443,12 @@ async function send(){
               .replace(/\u0000STEP:(.*?)\u0000/g,(_,j)=>{
                  try{addStep(JSON.parse(j));}catch(e){}
                  return "";})
-              .replace(/\u0000STEP:[^\u0000]*$/,"");
+              .replace(/\u0000STEP:[^\u0000]*$/,"")
+              // the Remote agent live approval card (6b249)
+              .replace(/\u0000APPROVE:(.*?)\u0000/g,(_,j)=>{
+                 try{showApprove(aiDiv,JSON.parse(j));}catch(e){}
+                 return "";})
+              .replace(/\u0000APPROVE:[^\u0000]*$/,"");
       if(drafts.length||(status&&/of \d+/.test(status)))
         paintDrafts(aiDiv,drafts,true,status);
       // the council reports into the SAME tree the searches use
