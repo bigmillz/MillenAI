@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 249               # integer compared against the GitHub release tag
+APP_BUILD = 250               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -1433,6 +1433,29 @@ TIERS = {
 # Task specialists, named for what they're GOOD AT. An agent is a strong
 # system prompt married to the best installed model for that craft —
 # radio-selected in the sidebar against "Standard model".
+# 6b250, per Patrick: when someone picks a task from the Code tab's
+# library ("I want to: Harden this box"), the model GUIDES them — it
+# opens warmly, gathers what it needs one question at a time, and asks
+# structured questions as a [[FORM]] trailer the UI renders as radio /
+# checkbox cards. One question per turn: a wall of forms is a survey,
+# not a conversation.
+TASK_GUIDE = (
+    "\n\nWhen the user says they want to DO something (\"I want to: set "
+    "up a firewall\"), do not dump instructions immediately. Guide them:\n"
+    "- Open with one warm, specific sentence — 'Alright, let's get that "
+    "firewall sorted.'\n"
+    "- Ask for what you genuinely need, ONE question per reply, easiest "
+    "first. Never ask for something you can find out yourself.\n"
+    "- When a question has a small set of sensible answers, end your "
+    "reply with EXACTLY this on the last line and nothing after it:\n"
+    "  [[FORM]] {\"q\":\"your question\",\"multi\":false,"
+    "\"opts\":[\"Option A\",\"Option B\"]}\n"
+    "  multi:true for check-all-that-apply, false for pick-one. Keep to "
+    "2-5 short options. Ask the question in your prose too, so it reads "
+    "naturally; the form is how they answer.\n"
+    "- Free-text answers (a domain, an IP) need no form — just ask.\n"
+    "- Once you have enough, lay out the plan and get to work.")
+
 AGENTS = {
     "Workspace": {
         # Claude-Code-shaped, honestly scoped: it READS the folder you
@@ -5179,7 +5202,11 @@ _WRITE_RX = re.compile(
     r"\b(systemctl|service)\s+(start|stop|restart|reload|enable|disable|"
     r"mask|unmask)|"
     r"\b(ufw|iptables|ip6tables|nft|firewall-cmd)\b|"
-    r"\bsed\s+-i|\btee\b|>>?\s*[^&\s]|"
+    # NB: file redirects are handled by _classify_seg's own check, which
+    # excludes >/dev/null — this used to carry a duplicate redirect
+    # pattern WITHOUT that exclusion, so every `cmd 2>/dev/null` recon
+    # line read as a mutation (6b250, caught in the first live run).
+    r"\bsed\s+-i|\btee\b|"
     r"\b(mv|cp|mkdir|rmdir|rm|touch|ln|chmod|chown|chgrp)\b|"
     r"\b(useradd|groupadd|usermod|adduser|ssh-keygen|ssh-copy-id)\b|"
     r"\b(git)\s+(clone|pull|checkout|reset|clean|push)|"
@@ -5195,7 +5222,12 @@ _READ_CMDS = frozenset(
     "date env printenv which whereis type pwd echo hostname arch nproc "
     "lscpu lsblk lsof journalctl dmesg systemctl service tailscale "
     "docker podman git curl wget test true false readlink realpath "
-    "getent locale timedatectl".split())
+    "getent locale timedatectl "
+    # recon verbs a real ops agent reaches for constantly (6b250): a
+    # first live run flagged a pure `lsb_release; ip a; cat` recon line
+    # as a mutation only because lsb_release was missing here, which
+    # would make Auto mode pause on inspection. All strictly read-only.
+    "lsb_release apt-cache dpkg-query getcap needrestart wg".split())
 _READ_SAFE_SUB = {          # verb -> subcommands that stay read-only
     "systemctl": {"status", "is-active", "is-enabled", "is-failed",
                   "list-units", "list-unit-files", "show", "cat"},
@@ -5204,6 +5236,7 @@ _READ_SAFE_SUB = {          # verb -> subcommands that stay read-only
     "podman": {"ps", "images", "logs", "inspect", "version", "info"},
     "git": {"status", "log", "diff", "show", "branch", "remote", "config"},
     "tailscale": {"status", "ip", "netcheck", "version"},
+    "wg": {"show", "showconf"},   # genkey/set/setconf stay write
 }
 
 
@@ -5287,7 +5320,19 @@ def _agent_turn(driver, convo) -> str:
 
 
 def _parse_action(text: str) -> dict:
-    """Lenient: prefer a JSON object, fall back to a fenced shell block."""
+    """Lenient: prefer a JSON object, fall back to a fenced shell block.
+    Understands a BATCH (6b250) — {"plan":"…","cmds":[…]} — which is one
+    approval for several steps, and normalises it to a cmds list."""
+    mb = re.search(r"\{[\s\S]*?\"cmds\"\s*:\s*\[[\s\S]*?\][\s\S]*?\}", text)
+    if mb:
+        try:
+            d = json.loads(mb.group(0))
+            cmds = [str(c) for c in (d.get("cmds") or []) if str(c).strip()]
+            if cmds:
+                return {"cmds": cmds[:6], "plan": str(d.get("plan", "")),
+                        "done": False}
+        except Exception:
+            pass
     m = re.search(r"\{[^{}]*\"(?:cmd|done|ask)\"[^{}]*\}", text, re.S)
     if m:
         try:
@@ -5313,6 +5358,11 @@ REMOTE_SYSTEM = (
     "Respond with ONLY a single JSON object, nothing before or after:\n"
     "  run a command:  {\"thought\":\"why, one line\",\"cmd\":\"exact "
     "shell command\",\"done\":false}\n"
+    "  run a BATCH of 2-6 related steps that don't depend on each "
+    "other's output — one approval covers the lot, so prefer this when "
+    "the next few moves are already obvious:\n"
+    "  {\"plan\":\"what this batch does, one line\",\"cmds\":[\"cmd "
+    "one\",\"cmd two\"],\"done\":false}\n"
     "  task complete:  {\"done\":true,\"summary\":\"what you did, plainly\"}\n"
     "  need a detail only the user knows (a domain, a choice, a secret "
     "they must type themselves): {\"ask\":\"one clear question\"}\n"
@@ -5325,7 +5375,29 @@ REMOTE_SYSTEM = (
     "and adapt. Don't guess at output you haven't seen.\n"
     "- If a required detail (IP is set already; but a domain, an email "
     "for certs, whether they have an SSH key, a port choice) is missing, "
-    "ASK before running anything that needs it.")
+    "ASK before running anything that needs it.\n"
+    "\n"
+    "THE LOCKOUT RULE (6b250, per Patrick — this is the one pattern that "
+    "covers most of what can go irreversibly wrong). Before ANY change "
+    "to sshd, the firewall, or network configuration:\n"
+    "1. NEVER end your own session to apply a change. Reload rather "
+    "than restart where the service supports it, and never take the "
+    "interface you are connected over down and up in one command.\n"
+    "2. Make the permissive change FIRST and the restrictive one after "
+    "— open the new SSH port in the firewall before sshd listens on it; "
+    "prove the key works before passwords are disabled.\n"
+    "3. VERIFY WITH A SECOND CONNECTION before anything is final. A "
+    "fresh `ssh -o BatchMode=yes ... true` from the same host, or "
+    "`ss -tlnp` plus a loopback check, must confirm the new path works "
+    "while the old one is still available.\n"
+    "4. SCHEDULE A ROLLBACK for anything that could lock the user out: "
+    "before applying, arrange an automatic revert (a systemd-run timer, "
+    "an `at` job, or a backgrounded sleep-then-restore holding a copy "
+    "of the old config) that fires in 5-10 minutes and undoes the "
+    "change. Tell the user it is armed, and cancel it only once they "
+    "confirm they still have access.\n"
+    "5. Say plainly, in one line, what you are protecting against "
+    "before you do it.")
 
 
 def run_remote_agent(messages, conf, autonomy, emit, status, step,
@@ -5365,34 +5437,58 @@ def run_remote_agent(messages, conf, autonomy, emit, status, step,
         if act.get("done"):
             emit(str(act.get("summary") or "Done.").strip())
             return
-        cmd = str(act.get("cmd") or "").strip()
-        if not cmd:
+        # ONE STEP OR A BATCH (6b250): a batch is several commands under a
+        # SINGLE approval, priced at its riskiest member. It stops early
+        # the moment one fails, so a bad step can't drag the rest along.
+        cmds = [c for c in (act.get("cmds") or []) if str(c).strip()] \
+            or ([str(act.get("cmd") or "").strip()]
+                if str(act.get("cmd") or "").strip() else [])
+        if not cmds:
             emit(str(act.get("thought") or "Done.").strip())
             return
-        risk = classify_cmd(cmd)
+        risks = [classify_cmd(c) for c in cmds]
+        risk = ("danger" if "danger" in risks
+                else "write" if "write" in risks else "read")
+        batch = len(cmds) > 1
+        label = (str(act.get("plan") or "").strip()
+                 or "%d steps" % len(cmds)) if batch else cmds[0]
         sid = "cmd%d" % i
-        step(sid, cmd, "run", {"read": "reading", "write": "changes",
-                               "danger": "irreversible"}[risk])
+        step(sid, label, "run", {"read": "reading", "write": "changes",
+                                 "danger": "irreversible"}[risk]
+             + (" · %d steps" % len(cmds) if batch else ""))
         need_ok = (autonomy == "manual"
                    or (autonomy == "auto" and risk != "read")
                    or risk == "danger")
         if need_ok:
-            step(sid, cmd, "wait", "waiting for you")
-            if not await_approval(cmd, risk):
-                step(sid, cmd, "skip", "you skipped it")
+            step(sid, label, "wait", "waiting for you")
+            # the approval card shows every command in the batch, so one
+            # tap is never a blind yes
+            if not await_approval("\n".join(cmds), risk):
+                step(sid, label, "skip", "you skipped it")
                 convo.append({"role": "assistant", "content": text})
                 convo.append({"role": "user", "content":
-                              "The user DECLINED that command. Do not run "
-                              "it. Choose a different approach or ask why."})
+                              "The user DECLINED that. Do not run it. "
+                              "Choose a different approach or ask why."})
                 continue
-        status("running: " + cmd[:60])
-        rc, out = ssh_run(conf, cmd)
-        step(sid, cmd, "done", ("exit %d" % rc) if rc == 0
-             else "FAILED exit %d" % rc)
+        results, ran, failed = [], 0, False
+        for n, c in enumerate(cmds, 1):
+            status("running: " + c[:60])
+            rc, out = ssh_run(conf, c)
+            ran += 1
+            if batch:
+                step("%s_%d" % (sid, n), c, "done",
+                     ("exit %d" % rc) if rc == 0 else "FAILED exit %d" % rc)
+            results.append("Command: %s\nExit code: %d\nOutput:\n%s"
+                           % (c, rc, out[:2500]))
+            if rc != 0:
+                failed = True
+                results.append("(batch stopped here — this step failed)")
+                break
+        step(sid, label, "done",
+             ("%d of %d ran" % (ran, len(cmds)) if batch
+              else ("exit 0" if not failed else "failed")))
         convo.append({"role": "assistant", "content": text})
-        convo.append({"role": "user", "content":
-                      "Command: %s\nExit code: %d\nOutput:\n%s"
-                      % (cmd, rc, out[:4000])})
+        convo.append({"role": "user", "content": "\n\n".join(results)})
     emit("Reached the %d-command limit for one run. Tell me to continue "
          "and I'll pick up where I left off." % REMOTE_CAP)
 
@@ -7376,6 +7472,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 ag_research = bool(ag.get("research"))
                 ag_remote = bool(ag.get("remote"))
                 ag_system = ag.get("system", "")
+                # the guided-task voice rides along on the Code lane
+                # (6b250) — that's where the task library lives
+                if agent_name in CODE_AGENTS and ag_system:
+                    ag_system += TASK_GUIDE
                 if ag_label:
                     council = [ag_label]
                     model_name = ag_label
@@ -8774,6 +8874,104 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
 #undobar button{background:none;border:none;color:#8fb8ff;cursor:pointer;
   font:600 13px var(--sans);padding:2px 4px}
 #undobar button:hover{text-decoration:underline}
+/* ------------------------------------------------ task library (6b250) */
+.sugg.more{font-family:var(--mono);letter-spacing:.1em;padding-left:14px;
+  padding-right:14px;flex:none}
+#task-veil{position:fixed;inset:0;z-index:57;background:rgba(0,0,0,.72);
+  backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
+  display:flex;align-items:center;justify-content:center}
+#task-veil[hidden]{display:none}
+#task-card{width:720px;max-width:calc(100vw - 40px);
+  height:min(560px,calc(100vh - 80px));
+  background:var(--panel2);border:1px solid var(--line);border-radius:14px;
+  box-shadow:0 24px 80px rgba(0,0,0,.55);overflow:hidden;
+  display:grid;grid-template-columns:186px 1fr}
+#task-rail{background:var(--panel);border-right:1px solid var(--line-soft);
+  padding:16px 0 12px;display:flex;flex-direction:column;min-width:0}
+#task-brand{font-family:var(--disp);font-size:11px;letter-spacing:.2em;
+  text-transform:uppercase;color:#fff;padding:0 16px 14px}
+#task-cats{display:flex;flex-direction:column}
+.tcat{display:block;width:100%;text-align:left;background:none;border:none;
+  font-family:var(--sans);font-size:12.5px;color:var(--dim);
+  padding:8px 16px;cursor:pointer;border-left:2px solid transparent;
+  transition:color .13s,background .13s}
+.tcat:hover{color:var(--text);background:rgba(255,255,255,.035)}
+.tcat.on{color:#fff;background:rgba(255,255,255,.055);
+  border-left-color:#ececec}
+#task-main{display:flex;flex-direction:column;min-width:0;overflow:hidden}
+#task-head{display:flex;gap:8px;padding:14px 16px;
+  border-bottom:1px solid var(--line-soft)}
+#task-head .about-btn.slim{margin-top:0;width:auto}
+#task-q{flex:1;min-width:0;background:rgba(0,0,0,.3);color:var(--text);
+  border:1px solid var(--line);border-radius:9px;padding:8px 11px;
+  font-size:12.5px;outline:none}
+#task-q:focus{border-color:rgba(143,157,255,.6)}
+#task-list{flex:1;overflow-y:auto;padding:10px 12px 14px;
+  display:grid;grid-template-columns:1fr 1fr;gap:7px;align-content:start}
+.trow{display:flex;align-items:center;gap:9px;padding:10px 11px;
+  border-radius:10px;cursor:pointer;text-align:left;
+  background:rgba(255,255,255,.03);border:1px solid var(--line);
+  color:var(--text);font-size:12.5px;transition:all .13s}
+.trow:hover{background:var(--accent-dim);border-color:rgba(255,255,255,.3)}
+.trow .ti{font-size:15px;flex:none}
+.trow .tn{min-width:0;overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap}
+#task-list .tempty{grid-column:1/-1;color:var(--faint);font-size:12px;
+  padding:14px 4px}
+/* the small grey flag on a risky task — grey, not red: it's a heads-up,
+   not an alarm, and the card does the real explaining (6b250) */
+.twarn{margin-left:6px;color:var(--faint);font-size:10.5px;opacity:.8}
+.trow .twarn{margin-left:auto;flex:none}
+/* ------------------------------------------- the risk card (6b250) */
+.riskcard{margin:0 0 12px;border-radius:12px;overflow:hidden;
+  border:1px solid rgba(255,255,255,.13);background:rgba(8,9,12,.55)}
+.riskcard .rktop{display:flex;gap:14px;padding:15px 16px 12px}
+.riskcard .rkico{font-size:30px;line-height:1;color:var(--faint);
+  flex:none;filter:grayscale(1);opacity:.75}
+.riskcard .rktext{min-width:0}
+.riskcard .rktext b{display:block;font-size:13.5px;line-height:1.4;
+  color:var(--text);margin-bottom:7px}
+.riskcard .rktext p{margin:0;font-size:12.5px;line-height:1.6;
+  color:var(--dim)}
+.riskcard .rkfoot{display:flex;gap:8px;padding:0 16px 14px}
+.rkbtn{flex:1;padding:9px;border-radius:9px;border:none;cursor:pointer;
+  font:600 12.5px var(--sans)}
+.rkbtn.go{background:var(--accent);color:#1a1a1a}
+.rkbtn.go:hover{background:var(--accent-hot)}
+.rkbtn.no{background:rgba(255,255,255,.08);color:var(--dim)}
+.rkbtn.no:hover{background:rgba(255,255,255,.14);color:#fff}
+.rkverdict{font-size:12.5px;color:#a8cf9f;font-family:var(--mono)}
+.rkverdict.quiet{color:var(--faint)}
+/* ------------------------------------ interactive form cards (6b250) */
+/* The model asks structured questions and the answer comes back as a
+   click, not a typed sentence — Claude-style. */
+.qform{margin:0 0 12px;border-radius:12px;overflow:hidden;
+  border:1px solid rgba(255,255,255,.12);background:rgba(8,9,12,.5)}
+.qform .qtop{padding:10px 13px 2px;font-size:13.5px;color:var(--text);
+  line-height:1.45}
+.qform .qhint{padding:0 13px 8px;font-size:10.5px;font-style:italic;
+  color:var(--faint)}
+.qform .qopts{display:flex;flex-wrap:wrap;gap:7px;padding:4px 13px 11px}
+.qopt{display:flex;align-items:center;gap:7px;padding:7px 12px;
+  border-radius:9px;cursor:pointer;font-size:12.5px;color:var(--dim);
+  background:rgba(255,255,255,.04);border:1px solid var(--line);
+  transition:all .13s;user-select:none}
+.qopt:hover{background:rgba(255,255,255,.08);color:var(--text)}
+.qopt.on{background:var(--accent-dim);border-color:rgba(255,255,255,.4);
+  color:#fff}
+.qopt .qbox{width:13px;height:13px;border-radius:4px;flex:none;
+  border:1.5px solid rgba(255,255,255,.35);position:relative}
+.qopt.radio .qbox{border-radius:50%}
+.qopt.on .qbox{background:#ececec;border-color:#ececec}
+.qopt.on .qbox::after{content:"";position:absolute;inset:2.5px;
+  border-radius:inherit;background:#15161a}
+.qform .qfoot{display:flex;gap:8px;padding:0 13px 12px}
+.qform .qsend{flex:1;padding:8px;border-radius:9px;border:none;
+  cursor:pointer;font:600 12px var(--sans);
+  background:var(--accent);color:#1a1a1a}
+.qform .qsend:hover{background:var(--accent-hot)}
+.qform.sent .qopts{opacity:.55;pointer-events:none}
+.qform.sent .qfoot{display:none}
 /* thin rule that sets Advanced apart from the modes (6b248) */
 .engdiv{height:1px;background:var(--line-soft);margin:5px 8px}
 /* ------------------------------------------------- advanced picker */
@@ -10761,6 +10959,24 @@ __CODE_ROWS__
   </div>
 </main>
 
+<!-- TASK LIBRARY (6b250): rail of categories, pane of server tasks -->
+<div id="task-veil" hidden>
+  <div id="task-card">
+    <nav id="task-rail">
+      <div id="task-brand">Server tasks</div>
+      <div id="task-cats"></div>
+    </nav>
+    <div id="task-main">
+      <div id="task-head">
+        <input id="task-q" placeholder="Search tasks…" autocomplete="off"
+               spellcheck="false">
+        <button class="about-btn slim" id="task-close">Close</button>
+      </div>
+      <div id="task-list"></div>
+    </div>
+  </div>
+</div>
+
 <!-- ADVANCED picker (6b248): hand-pick the council + the compositor -->
 <div id="adv-veil" hidden>
   <div id="adv-card">
@@ -11476,13 +11692,15 @@ function modeShow(which){
   // synchronous renderChats() call here is a TDZ crash that kills the
   // whole boot script (seen live: empty sidebar, dead app)
   setTimeout(renderChats,0);
+  // the starter chips are lane-specific (6b250) — repaint on every switch
+  if(typeof syncSuggest==="function")setTimeout(syncSuggest,0);
 }
 // each tab owns its lane: opening CODE activates a code specialist on
 // the spot (the tab IS the mode); leaving it drops back to the standard
 // path so the chip never says "Coding" under the Chat tab
 function switchLane(m){
   modeShow(m);
-  const codey=agent==="Coding"||agent==="Workspace";
+  const codey=agent==="Coding"||agent==="Workspace"||agent==="Remote";
   if(m==="code"&&!codey)
     setAgent(localStorage.getItem("millen.codeagent")||"Coding");
   else if(m!=="code"&&codey)setAgent("");
@@ -11509,6 +11727,101 @@ function setAgent(name){
   paintAgents();
   if(typeof wsRefresh==="function")wsRefresh();
   if(typeof remoteRefresh==="function")remoteRefresh();
+}
+
+/* -------------------------------------------------- task library (6b250) */
+// The "…" chip opens a rail/pane picker over the app; clicking any task
+// starts a GUIDED conversation rather than dumping a command.
+let taskCat="all";
+function paintTaskCats(){
+  const box=$("#task-cats");if(!box)return;
+  const cats=[["all","All"]].concat(TASK_CATS);
+  box.innerHTML=cats.map(([id,label])=>
+    '<button class="tcat'+(taskCat===id?" on":"")+'" data-c="'+id+'">'
+    +esc(label)+'</button>').join("");
+}
+function paintTaskList(){
+  const box=$("#task-list");if(!box)return;
+  const q=($("#task-q").value||"").trim().toLowerCase();
+  let rows=TASKS.filter(t=>{
+    const inCat=taskCat==="all"||(taskCat==="pop"?t.pop:t.c===taskCat);
+    return inCat&&(!q||t.n.toLowerCase().indexOf(q)>=0);
+  });
+  box.innerHTML=rows.length
+    ? rows.map(t=>'<button class="trow" data-task="'+esc(t.n)+'">'
+        +'<span class="ti">'+t.i+'</span>'
+        +'<span class="tn">'+esc(t.n)+'</span>'
+        +(t.w?'<span class="twarn" title="Higher risk">⚠</span>':"")
+        +'</button>').join("")
+    : '<div class="tempty">nothing matches “'+esc(q)+'”</div>';
+}
+function openTaskPicker(){
+  $("#task-veil").hidden=false;
+  $("#task-q").value="";
+  paintTaskCats();paintTaskList();
+  setTimeout(()=>$("#task-q").focus(),40);
+}
+$("#task-close").addEventListener("click",()=>{$("#task-veil").hidden=true;});
+$("#task-veil").addEventListener("click",e=>{
+  if(e.target.id==="task-veil")$("#task-veil").hidden=true;});
+$("#task-q").addEventListener("input",paintTaskList);
+$("#task-cats").addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest(".tcat");
+  if(!b)return;
+  taskCat=b.dataset.c;paintTaskCats();paintTaskList();
+});
+$("#task-list").addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest(".trow");
+  if(!b)return;
+  $("#task-veil").hidden=true;
+  startTask(b.dataset.task);
+});
+// starting a task = a normal turn with a GUIDED framing, so the model
+// opens by gathering what it needs (with [[FORM]] cards) instead of
+// guessing. The Remote agent runs it for real when a server is set up.
+function startTask(name,confirmed){
+  if(!name)return;
+  if(uiMode!=="code")switchLane("code");
+  const t=TASK_BY_NAME[name];
+  // a flagged task explains itself FIRST (6b250, per Patrick) — the
+  // risk card is the first thing in the chat, and nothing is sent
+  // until "let's go for it"
+  if(t&&t.w&&!confirmed){riskCard(t);return;}
+  input.value="I want to: "+name;
+  input.dispatchEvent(new Event("input"));
+  syncSuggest();
+  send();
+}
+// the warning card: big grey triangle, the headline, the why, two ways out
+function riskCard(t){
+  const hero=$("#hero"); if(hero)hero.remove();
+  const sg=$("#suggest"); if(sg)sg.hidden=true;
+  const div=document.createElement("div");
+  div.className="msg ai";
+  div.innerHTML='<div class="who">Concorde</div><div class="body"></div>';
+  const card=document.createElement("div");
+  card.className="riskcard";
+  card.innerHTML='<div class="rktop"><span class="rkico">⚠</span>'
+    +'<div class="rktext"><b>This task has a higher risk of causing '
+    +'issues that may be challenging to undo</b>'
+    +'<p>'+esc(t.w)+'</p></div></div>'
+    +'<div class="rkfoot">'
+    +'<button class="rkbtn go">🤞 Let’s go for it</button>'
+    +'<button class="rkbtn no">🙅‍♂️ Not today</button></div>';
+  div.querySelector(".body").appendChild(card);
+  inner.appendChild(div);
+  scroller.scrollTop=scroller.scrollHeight;
+  card.querySelector(".rkbtn.go").addEventListener("click",()=>{
+    card.classList.add("decided");
+    card.querySelector(".rkfoot").innerHTML=
+      '<span class="rkverdict">Right then — here we go.</span>';
+    startTask(t.n,true);
+  });
+  card.querySelector(".rkbtn.no").addEventListener("click",()=>{
+    card.classList.add("decided");
+    card.querySelector(".rkfoot").innerHTML=
+      '<span class="rkverdict quiet">Skipped — nothing was run.</span>';
+  });
 }
 
 /* ------------------------------------------------- remote agent (6b249) */
@@ -11696,6 +12009,40 @@ function wireFlow(scope){
   });
 }
 addEventListener("resize",()=>wireFlow());
+// INTERACTIVE QUESTION CARDS (6b250, per Patrick): the model ends a turn
+// with a [[FORM]] trailer and the reader ANSWERS BY CLICKING — radios for
+// one-of, checkboxes for many-of — instead of typing prose. The reply is
+// posted as a normal user turn, so the whole thing is just conversation.
+//   [[FORM]] {"q":"...","multi":true,"opts":["Security","Performance"]}
+function formCard(spec){
+  const wrap=document.createElement("div");
+  wrap.className="qform";
+  const multi=!!spec.multi;
+  wrap.innerHTML='<div class="qtop">'+esc(spec.q||"")+'</div>'
+    +'<div class="qhint">'+(multi?"check all that apply"
+        :"pick one")+'</div>'
+    +'<div class="qopts">'+(spec.opts||[]).map((o,i)=>
+      '<div class="qopt'+(multi?"":" radio")+'" data-i="'+i+'">'
+      +'<span class="qbox"></span>'+esc(o)+'</div>').join("")+'</div>'
+    +'<div class="qfoot"><button class="qsend" type="button">Send</button></div>';
+  wrap.querySelectorAll(".qopt").forEach(el=>{
+    el.addEventListener("click",()=>{
+      if(!multi)wrap.querySelectorAll(".qopt").forEach(o=>
+        o.classList.remove("on"));
+      el.classList.toggle("on");
+    });
+  });
+  wrap.querySelector(".qsend").addEventListener("click",()=>{
+    const picked=[...wrap.querySelectorAll(".qopt.on")]
+      .map(el=>(spec.opts||[])[+el.dataset.i]).filter(Boolean);
+    if(!picked.length)return;
+    wrap.classList.add("sent");
+    input.value=picked.join(", ");
+    input.dispatchEvent(new Event("input"));
+    send();
+  });
+  return wrap;
+}
 // THE LIVE APPROVAL CARD (6b249): the Remote agent proposes a command
 // and blocks; this renders it with a risk chip and Run/Skip, and the
 // click answers the server's approval channel so the loop continues.
@@ -11705,7 +12052,11 @@ function showApprove(host,d){
   if(!host)return;
   const card=document.createElement("div");
   card.className="apcard "+(d.risk||"write");
-  card.innerHTML='<div class="aptop">proposed command'
+  // a BATCH arrives as newline-joined commands (6b250) — one approval,
+  // but every line is shown so the tap is never blind
+  const n=String(d.cmd||"").split("\n").filter(x=>x.trim()).length;
+  card.innerHTML='<div class="aptop">'
+    +(n>1?"proposed batch · "+n+" steps":"proposed command")
     +'<span class="aprisk '+esc(d.risk||"write")+'">'
     +(AP_RISK[d.risk]||"changes")+'</span></div><pre></pre>'
     +'<div class="apfoot"><button class="apbtn ok">Run it</button>'
@@ -12176,7 +12527,19 @@ function addMsg(role,text,drafts,srcs,mapd,ph,places,loc){
   const who=role==="user"?"you":(whoLabel(lastModels)||tier);
   div.innerHTML='<div class="who">'+who+'</div><div class="body"></div>';
   const body=div.querySelector(".body");
+  // a [[FORM]] trailer becomes a clickable question card (6b250) and is
+  // stripped from the prose — the reader sees the question, not the JSON
+  let form=null;
+  if(role!=="user"&&typeof text==="string"){
+    const fm=/\[\[FORM\]\]\s*(\{[\s\S]*?\})\s*$/.exec(text);
+    if(fm){
+      try{form=JSON.parse(fm[1]);}catch(e){form=null;}
+      if(form&&form.q&&(form.opts||[]).length)text=text.slice(0,fm.index).trim();
+      else form=null;
+    }
+  }
   if(role==="user")body.textContent=text; else{body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text)+photoRow(ph)+(places&&places.length?placesModule(places,loc,mapd):mapCard(mapd));requestAnimationFrame(()=>wireFlow(body));}
+  if(form)body.appendChild(formCard(form));
   if(role!=="user"&&drafts&&drafts.length)paintDrafts(div,drafts,false);
   if(text)msgActions(div,role,text);
   inner.appendChild(div);
@@ -12675,6 +13038,217 @@ async function pushChatsToDisk(){
 /* ---------------------------------------------------- starter prompts */
 // Grouped so a refresh can take ONE from each area rather than five
 // dinner questions in a row — variety is the whole point of showing them.
+// ---------------------------------------------------- task library (6b250)
+// The Code tab's bubbles become common server tasks; the "…" chip opens a
+// rail/pane picker. Clicking a task kicks off a GUIDED flow — the model
+// gathers requirements with interactive [[FORM]] cards, then walks you
+// through it (and runs it over SSH if a server is connected).
+const TASK_CATS=[["pop","Most Popular"],["sec","Security"],
+  ["pkg","Updates & Packages"],["diag","Monitoring"],
+  ["svc","Services"],["net","Networking"],["stor","Storage & Backups"],
+  ["env","Setup & Environment"]];
+// `w` = the risk note (6b250, per Patrick). Tasks carrying one show a
+// small grey warning triangle and open a plain-language card BEFORE any
+// work starts. Most of the flagged set is one of four shapes: lockout
+// (sshd / firewall / network — answered by keep-alive + a proven second
+// connection + a scheduled revert), destructive delete (answered by
+// dry-run and literal paths), service disruption (answered by naming the
+// exact unit or PID), and system-wide change (reboot, upgrade, clock).
+const TASKS=[
+  {n:"Harden this system with sane defaults",i:"\u{1F512}",c:"sec",pop:1,
+   w:"Hardening touches sshd, the firewall and user accounts together — "
+     +"the three fastest ways to lock yourself out of a remote box. "
+     +"Disabling password auth before your key is proven, or enabling a "
+     +"firewall that doesn't allow your SSH port, ends the session with "
+     +"no way back in but your provider's console. I'll keep this session open the whole time, prove a second connection still works before anything is finalised, and set a timed revert that undoes it unless you confirm you're still in."},
+  {n:"Disable password auth and enforce key-only SSH",i:"\u{1F511}",c:"sec",
+   w:"This is irreversible from the outside. If your key isn't installed "
+     +"correctly for the user you'll log in as, there is no second way "
+     +"in — password login is gone and the console becomes your only "
+     +"option. I'll keep this session open the whole time, prove a second connection still works before anything is finalised, and set a timed revert that undoes it unless you confirm you're still in."},
+  {n:"Change the SSH port and update the firewall",i:"\u{1F6AA}",c:"sec",
+   w:"Two changes that must agree exactly: sshd starts listening on the "
+     +"new port and the firewall must already allow it. Apply them out "
+     +"of order, or mistype either number, and the next connection has "
+     +"nowhere to land. SELinux can also block a non-standard port "
+     +"outright. I'll keep this session open the whole time, prove a second connection still works before anything is finalised, and set a timed revert that undoes it unless you confirm you're still in."},
+  {n:"Set up UFW with a basic allow list",i:"\u{1F6E1}\uFE0F",c:"sec",pop:1,
+   w:"A firewall's default-deny takes effect the moment it's enabled. If "
+     +"the rule allowing your SSH port is missing, wrong, or on the "
+     +"wrong port, the connection you're reading this over dies "
+     +"instantly. I'll keep this session open the whole time, prove a second connection still works before anything is finalised, and set a timed revert that undoes it unless you confirm you're still in."},
+  {n:"Install and configure fail2ban",i:"\u{1F6AB}",c:"sec",
+   w:"fail2ban bans addresses that look like they're guessing passwords "
+     +"— and yours is as bannable as anyone's. A tight retry limit plus "
+     +"a few reconnects while testing can jail you out of your own box "
+     +"for hours. I'll put your current IP on the ignore list before "
+     +"the service ever starts."},
+  {n:"Create a non-root sudo user and disable root login",i:"\u{1F464}",
+   c:"sec",
+   w:"Disabling root login is safe only once the new user is proven to "
+     +"work — correct group, working password or key, and sudo that "
+     +"actually elevates. If any link in that chain is wrong, you lose "
+     +"root and the only account that could have replaced it. I'll keep this session open the whole time, prove a second connection still works before anything is finalised, and set a timed revert that undoes it unless you confirm you're still in."},
+  {n:"Audit which users can log in and which have sudo",i:"\u{1F9FE}",c:"sec"},
+  {n:"Run a security audit and show me what's exposed",i:"\u{1F575}\uFE0F",
+   c:"sec",pop:1},
+  {n:"Set up SSL with Let's Encrypt and auto-renewal",i:"\u{1F510}",c:"sec",
+   pop:1},
+  {n:"Review open ports and tell me what's listening",i:"\u{1F4CB}",c:"sec"},
+  {n:"Rotate SSH host keys",i:"\u{1F513}",c:"sec",
+   w:"Replacing host keys makes every client that has ever connected "
+     +"refuse the next connection with a loud man-in-the-middle warning "
+     +"— including your own machine, your deploy scripts and any CI. "
+     +"Existing sessions survive; new ones are blocked until each "
+     +"client's known_hosts is updated. I'll keep this session open and "
+     +"give you the new fingerprints before you need them."},
+  {n:"Enable and configure SELinux/AppArmor",i:"\u{1F9F1}",c:"sec",
+   w:"Switching mandatory access control to enforcing can silently "
+     +"block services that worked a minute ago — including sshd on a "
+     +"non-standard port. SELinux in particular may need a full "
+     +"filesystem relabel and a reboot to come up clean, and a "
+     +"mislabelled box can boot into an unusable state. I'll go through "
+     +"permissive mode first and read what it would have blocked."},
+  {n:"Update everything and tell me if a reboot is needed",i:"\u{2B06}\uFE0F",
+   c:"pkg",
+   w:"Package upgrades restart the services they touch, so anything "
+     +"running can drop mid-update, and a config file that ships in a "
+     +"new version may replace or conflict with yours. Kernel and libc "
+     +"updates need a reboot to take effect — and a reboot is the "
+     +"moment you find out whether the box comes back. I'll tell you "
+     +"what changed and what needs restarting rather than rebooting on "
+     +"my own."},
+  {n:"Enable unattended security updates",i:"\u{1F504}",c:"pkg"},
+  {n:"Clean up orphaned packages and old kernels",i:"\u{1F4E6}",c:"pkg",
+   w:"Autoremove decides what's orphaned from package metadata, not "
+     +"from what you actually use — manually installed dependencies and "
+     +"anything installed outside the package manager can be swept up "
+     +"with it. Removing the wrong kernel, or the one you're currently "
+     +"booted into, leaves a box that won't come back from its next "
+     +"reboot. I'll show you the full removal list first and always "
+     +"keep the running kernel plus one."},
+  {n:"Show me what's installed that I probably don't need",i:"\u{1F5C2}\uFE0F",
+   c:"pkg"},
+  {n:"Hold a package at its current version",i:"\u{1F4CC}",c:"pkg"},
+  {n:"Clear the package cache and reclaim space",i:"\u{1F9F9}",c:"pkg"},
+  {n:"Do a distro release upgrade",i:"\u{1F680}",c:"pkg",
+   w:"The heaviest thing on this list. A release upgrade replaces "
+     +"thousands of packages, rewrites config across the system, takes "
+     +"a long time, and requires a reboot you cannot skip — and if it "
+     +"fails partway the box can be left unbootable with no console "
+     +"access. Third-party repositories routinely break it. Take a "
+     +"snapshot or image first; I'll check for one before starting."},
+  {n:"Why is my disk full?",i:"\u{1F4BE}",c:"diag",pop:1},
+  {n:"What's eating my memory right now?",i:"\u{1F4CA}",c:"diag"},
+  {n:"Show me the top CPU consumers",i:"\u{1F525}",c:"diag"},
+  {n:"Set up basic resource monitoring with alerts",i:"\u{1F4C8}",c:"diag"},
+  {n:"Run a general health check on this box",i:"\u{1FA7A}",c:"diag",pop:1},
+  {n:"Check load average and tell me if I should worry",i:"\u{1F4C9}",
+   c:"diag"},
+  {n:"Show me disk I/O and identify bottlenecks",i:"\u{1F321}\uFE0F",c:"diag"},
+  {n:"Tail the logs and summarize what's going wrong",i:"\u{1F50D}",c:"diag",
+   pop:1},
+  {n:"Find out why the last reboot happened",i:"\u{1F9EF}",c:"diag"},
+  {n:"Show me all enabled services and flag anything unusual",
+   i:"\u{2699}\uFE0F",c:"svc"},
+  {n:"Create a systemd service for my app",i:"\u{1F501}",c:"svc"},
+  {n:"Restart a service and confirm it came back healthy",i:"\u{267B}\uFE0F",
+   c:"svc",
+   w:"\"Just restart it\" is how people take down the thing they were "
+     +"trying to fix — especially when the unit name is a guess, or the "
+     +"config it reloads has an error that only surfaces on start. A "
+     +"web server or database that fails to come back stays down until "
+     +"someone notices. I'll name the exact unit, test the config where "
+     +"the service supports it, and reload instead of restarting when "
+     +"that's enough."},
+  {n:"Install Docker and add my user to the group",i:"\u{1F433}",c:"svc",
+   pop:1,
+   w:"Two things worth knowing. Membership of the docker group is "
+     +"effectively root — anyone in it can mount the host filesystem "
+     +"inside a container and write anywhere. And Docker installs its "
+     +"own iptables rules that can bypass or reorder a UFW allow list "
+     +"you've already set up, quietly exposing published ports you "
+     +"thought were firewalled. I'll flag both as we go."},
+  {n:"Set up nginx as a reverse proxy",i:"\u{1F6A6}",c:"svc",
+   w:"If nginx is already serving something, a new config that fails to "
+     +"parse — or that grabs port 80/443 while another service holds it "
+     +"— takes the existing site down on reload. I'll validate with "
+     +"nginx -t before any reload and keep the old config to fall back "
+     +"to."},
+  {n:"Show me all cron jobs and systemd timers",i:"\u{23F0}",c:"svc"},
+  {n:"Disable a service from starting at boot",i:"\u{1F6D1}",c:"svc",
+   w:"Disabling the wrong unit is a problem you don't discover until "
+     +"the next reboot, when the box comes back without networking, "
+     +"without sshd, or without the database everything else depends "
+     +"on. Some units are also pulled in by others, so disabling one "
+     +"can stop more than you meant. I'll confirm exactly what it is "
+     +"and what depends on it first."},
+  {n:"Find and kill a runaway process",i:"\u{1F52A}",c:"svc",
+   w:"Killing by name or by a pattern match hits everything that "
+     +"matches — which routinely includes a database, the SSH daemon "
+     +"you're connected through, or the search command itself. I'll "
+     +"show you the exact PID, what it is and what it's doing, then "
+     +"signal that one number, starting politely before anything "
+     +"forceful."},
+  {n:"Show me my network config and public IP",i:"\u{1F310}",c:"net"},
+  {n:"Set a static IP on this interface",i:"\u{1F9ED}",c:"net",
+   w:"Network settings apply to the very interface you're connected "
+     +"over. A wrong gateway, netmask or interface name doesn't fail "
+     +"loudly — it drops your session mid-command and the box comes "
+     +"back unreachable. I'll keep this session open the whole time, prove a second connection still works before anything is finalised, and set a timed revert that undoes it unless you confirm you're still in."},
+  {n:"Diagnose why I can't reach an external host",i:"\u{1F4E1}",c:"net"},
+  {n:"Set up a WireGuard VPN",i:"\u{1F517}",c:"net",pop:1,
+   w:"A VPN rewrites routing and firewall rules on a box you reach over "
+     +"the network. A full-tunnel AllowedIPs of 0.0.0.0/0 applied on "
+     +"the server side, or a NAT rule naming the wrong interface, can "
+     +"blackhole its traffic — including the SSH session you're using. "
+     +"I'll keep this session open the whole time, prove a second connection still works before anything is finalised, and set a timed revert that undoes it unless you confirm you're still in."},
+  {n:"Set the hostname and fix /etc/hosts",i:"\u{1F4DB}",c:"net"},
+  {n:"Test bandwidth and latency to a target",i:"\u{1F55B}",c:"net"},
+  {n:"Show me disk usage by directory, largest first",i:"\u{1F4BD}",c:"stor"},
+  {n:"Mount a new volume and make it persist across reboots",
+   i:"\u{1F5C4}\uFE0F",c:"stor",
+   w:"The persistence half is the risky half: a wrong device name or "
+     +"UUID in /etc/fstab doesn't fail now, it fails at the next boot, "
+     +"and a box that can't mount a required filesystem drops to an "
+     +"emergency shell you can't reach over SSH. Formatting the wrong "
+     +"block device destroys whatever was on it. I'll identify the "
+     +"device by UUID, mount by hand to prove it, and validate fstab "
+     +"before it's trusted."},
+  {n:"Set up automated backups to remote storage",i:"\u{1F9F0}",c:"stor",
+   pop:1},
+  {n:"Set up log rotation so logs stop filling the disk",i:"\u{1F500}",
+   c:"stor"},
+  {n:"Sync a directory to another server",i:"\u{1F4E4}",c:"stor",
+   w:"File sync is one flag away from file deletion. rsync's --delete "
+     +"makes the destination match the source exactly, so a reversed "
+     +"source and destination, or a trailing slash in the wrong place, "
+     +"wipes real data at the far end. Every run starts as a --dry-run "
+     +"you get to read before anything moves."},
+  {n:"Free up space by clearing caches and old logs",i:"\u{1F9FD}",c:"stor",
+   w:"Cleanup commands are usually built from a path in a variable. If "
+     +"that variable comes back empty, a tidy-up aimed at a cache "
+     +"directory becomes a recursive delete starting at the filesystem "
+     +"root. Truncating a log a running service still holds open can "
+     +"also confuse or crash it. I'll show you what's actually large, "
+     +"delete by explicit literal path — never a constructed one — and "
+     +"use logrotate rather than removing logs by hand."},
+  {n:"Set up Python with a virtualenv for this project",i:"\u{1F40D}",
+   c:"env"},
+  {n:"Set the timezone and enable NTP sync",i:"\u{1F30F}",c:"env",
+   w:"Looks harmless, and mostly is — but a large jump in system time "
+     +"invalidates TLS certificates that suddenly aren't valid yet or "
+     +"have \"expired\", breaks Kerberos tickets, and confuses anything "
+     +"doing time-based auth like TOTP or signed API requests. Sessions "
+     +"and cron schedules can behave strangely the instant the clock "
+     +"moves. I'll tell you how far off it is before changing it."},
+  {n:"Configure swap on a box that doesn't have any",i:"\u{1F4A4}",c:"env"},
+  {n:"Show me this system's specs and distro info",i:"\u{1F4DD}",c:"env"},
+  {n:"Set up my shell with sensible defaults and aliases",i:"\u{1F41A}",
+   c:"env"},
+];
+const TASK_BY_NAME={};TASKS.forEach(t=>{TASK_BY_NAME[t.n]=t;});
+
 const SUGG_SETS=[
 ["🍝 What should I make for dinner tonight?","🥘 What can I cook with what's in my fridge?","🍳 How do I cook the perfect egg?","🌮 Cheap meals that taste expensive","🍕 Is pizza actually that unhealthy?","☕ How much caffeine is too much?","🥗 Meal prep ideas for a busy week","🍞 How hard is it to bake bread at home?","🔪 Knife skills every beginner should know","🍜 Why does restaurant food taste better than mine?","🧄 Ingredients that make everything taste better","🍗 How do I stop overcooking chicken?","🍰 Desserts with 5 ingredients or less","🌶️ Why does spicy food hurt?","🍺 What's the actual difference between beers?","🥤 How bad is soda really?","🍎 Foods people think are healthy but aren't","🧊 How long does food really last in the fridge?","🍽️ How do I cook for one without wasting food?","🥑 Why is avocado so expensive?"],
 ["🍔 What's good to eat near me?","✈️ Cheapest places to travel right now","🗺️ Plan me a weekend trip","🏝️ Best beaches in the world","🎒 What should I pack for a week away?","🏔️ Countries cheaper than staying home","🚗 Best road trips to take","🛂 How do I get a passport?","🌍 Safest countries for solo travelers","💺 How do I find genuinely cheap flights?","🚆 Is train travel better than flying?","🧳 How do people travel carry-on only?","🗼 Most overrated tourist attractions","🌆 Best cities in the world to live in","🏕️ How do I start camping?","🕰️ How do I beat jet lag?","🌋 Natural wonders worth seeing once","🚙 Things to do near me this weekend","💸 How much does a trip to Japan cost?","🧭 Underrated places most people skip"],
@@ -12689,6 +13263,48 @@ const SUGG_SETS=[
 
 function paintSuggest(){
   const box=$("#suggest"); if(!box)return;
+  // THE CODE TAB GETS SERVER TASKS (6b250, per Patrick), not dinner
+  // questions — a shuffled handful of the popular ones plus a "…" chip
+  // that opens the full library.
+  if(uiMode==="code"){
+    const pool=TASKS.filter(t=>t.pop).concat(
+      TASKS.filter(t=>!t.pop).sort(()=>Math.random()-0.5));
+    box.innerHTML=pool.slice(0,6).map(t=>
+      '<button class="sugg task" type="button" data-task="'+esc(t.n)+'">'
+      +t.i+" "+esc(t.n)
+      +(t.w?'<span class="twarn" title="Higher risk — I\'ll explain '
+        +'before anything runs">⚠</span>':"")+'</button>').join("")
+      +'<button class="sugg more" type="button" id="task-more" '
+      +'title="All server tasks">⋯</button>';
+    box.hidden=false;
+    // measure-and-trim to ONE row, but the "…" chip always survives.
+    // rAF NEVER FIRES IN A HIDDEN DOCUMENT (the Browser pane, a
+    // background tab) — a setTimeout fallback keeps the trim honest
+    // there, which rAF alone would skip forever.
+    const trim=()=>{
+      const kids=[...box.children];
+      if(!kids.length)return;
+      const top0=Math.round(kids[0].getBoundingClientRect().top);
+      kids.forEach(k=>{
+        if(k.id!=="task-more"
+           &&Math.round(k.getBoundingClientRect().top)!==top0)k.remove();
+      });
+      // if the "…" itself wrapped, drop tasks until it fits back up
+      const more=$("#task-more");
+      let guard=0;
+      while(more&&Math.round(more.getBoundingClientRect().top)!==top0
+            &&box.querySelectorAll(".sugg.task").length>1&&guard++<10){
+        box.querySelector(".sugg.task:last-of-type").remove();
+      }
+    };
+    requestAnimationFrame(trim);
+    setTimeout(trim,60);          // hidden documents never run rAF
+    box.querySelectorAll(".sugg.task").forEach(el=>
+      el.addEventListener("click",()=>startTask(el.dataset.task)));
+    const mb=$("#task-more");
+    if(mb)mb.addEventListener("click",openTaskPicker);
+    return;
+  }
   // one from each area, shuffled — never five dinner questions together
   const pick=SUGG_SETS.map(s=>s[Math.floor(Math.random()*s.length)]);
   for(let i=pick.length-1;i>0;i--){
@@ -12726,7 +13342,13 @@ function paintSuggest(){
 // belongs to the conversation
 function syncSuggest(){
   const box=$("#suggest"); if(!box)return;
-  if($("#hero")&&!generating){ if(box.hidden)paintSuggest(); }
+  // the chips belong to a LANE (6b250): switching Chat<->Code must
+  // repaint, not reuse the other tab's set
+  if($("#hero")&&!generating){
+    if(box.hidden||box.dataset.lane!==uiMode){
+      paintSuggest();box.dataset.lane=uiMode;
+    }
+  }
   else box.hidden=true;
 }
 

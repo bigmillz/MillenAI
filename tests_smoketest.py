@@ -153,6 +153,24 @@ check("code-card copy button, greyed until the fence closes",
 # display:none while the 700px drawer block only animated transform, so
 # the ☰ toggled a class on an element that was never rendered. ONE
 # breakpoint now; this guards the second one from creeping back.
+# 6b250: the Code tab's task library, the rail/pane picker, interactive
+# [[FORM]] cards, and batched approvals in the remote loop
+check("server task library + picker present",
+      "const TASKS=[" in page and 'id="task-veil"' in page
+      and 'id="task-cats"' in page and "openTaskPicker" in page
+      and "Harden this system" in page and "startTask" in page)
+check("interactive form cards wired",
+      "function formCard" in page and "[[FORM]]" in page
+      and ".qopt" in page and "TASK_GUIDE" not in page)  # server-side only
+# 6b250: risky tasks carry a grey ⚠ and gate behind an explaining card
+# with two ways out; the lockout safeguard is taught to the agent itself
+check("risky tasks gated by a warning card",
+      "function riskCard" in page and "riskcard" in page
+      and "challenging to undo" in page
+      and "Let\u2019s go for it" in page and "Not today" in page
+      and 'class="twarn"' in page)
+check("full 53-task library with the flagged set",
+      page.count("{n:\"") == 53 and page.count("w:\"") == 22)
 # 6b249: the Remote SSH agent — autonomy throttle, connection bar, and
 # the live approval card in the stream
 check("remote agent UI present",
@@ -176,6 +194,19 @@ if s == 200:
           and _cls("systemctl status nginx") == "read"
           and _cls("apt-get install -y nginx") == "write"
           and _cls("ufw allow 51820/udp") == "write")
+    # 6b250: recon lines with 2>/dev/null must stay 'read' or Auto mode
+    # pauses on pure inspection (caught in the first live droplet run)
+    check("classifier: recon with 2>/dev/null stays read",
+          _cls("lsb_release -a 2>/dev/null; ip a; cat /etc/os-release")
+          == "read" and _cls("wg show wg0") == "read"
+          and _cls("wg genkey | tee k") == "write")
+    # 6b250: a BATCH is priced at its riskiest member, never averaged
+    _RANK = ["read", "write", "danger"]
+    check("batch risk aggregates to its riskiest step",
+          max(_RANK.index(_cls(c))
+              for c in ("ls -la", "apt install -y nginx")) == 1
+          and max(_RANK.index(_cls(c))
+                  for c in ("ls -la", "reboot")) == 2)
 # 6b248: the Advanced council — menu row behind a divider, the picker
 # veil, per-model use-lines, and the compositor dropdown with guidance
 check("advanced council picker present",

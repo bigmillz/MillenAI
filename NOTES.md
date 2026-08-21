@@ -3484,3 +3484,76 @@ Workspace.
   mechanism is the proven fleet Event pattern; only the command phase
   is untested from here. Ship, then shake out against a real box.
 - Gauntlet 69/69.
+
+## 6 beta 250 (pending) — first LIVE remote-agent run + classifier polish
+- PROVED END TO END against a real DigitalOcean droplet (Ubuntu 26.04):
+  the Remote agent, driven by Claude Sonnet 5, set up a full WireGuard
+  VPN autonomously in 17 commands, all clean. Recon-first (OS, ifaces,
+  firewall, SSH port — it checked the SSH port BEFORE touching ufw so it
+  couldn't lock itself out), then install, keys, wg0.conf with NAT +
+  MASQUERADE, client config, ufw (kept 22 open), DEFAULT_FORWARD_POLICY
+  DROP->ACCEPT, systemctl enable --now. Independently verified over SSH:
+  service active+enabled, wg0 up on 51820, peer present, forwarding on,
+  firewall correct. NOT the agent's word — my own probe.
+- Key bootstrap stayed the user's hands (the app is BatchMode key-only,
+  and I don't handle plaintext passwords): generated a throwaway
+  keypair, wrote remote.json, user ran one ssh-copy-id. Background
+  harness (scratchpad/remote_grind.py) waited for the key then drove the
+  real run_remote_agent with a danger-DENY approval callback.
+- CLASSIFIER BUG the live run exposed: `_WRITE_RX` carried a DUPLICATE
+  redirect pattern `>>?\s*[^&\s]` WITHOUT the /dev/null exclusion the
+  dedicated _classify_seg check has — so every `cmd 2>/dev/null` recon
+  line (nearly all of them) read as a mutation. In Full auto it didn't
+  matter (writes run), but Auto would have paused on pure inspection.
+  Removed the duplicate; redirects are handled once, with the exclusion.
+- Also widened the read set: lsb_release, apt-cache, dpkg-query, getcap,
+  needrestart, and wg (safe subs show/showconf — genkey/set stay write;
+  wg needed to be in BOTH _READ_CMDS and _READ_SAFE_SUB, like systemctl).
+- Re-verified 17/17 incl. the two real recon lines now 'read', every
+  write still 'write', full danger floor intact. Gauntlet 69/69.
+- Reminder for Pat: destroy that test droplet (root pw was pasted in
+  chat); client1.conf holds a live private key.
+
+## 6 beta 250 (pending) — task library, guided flows, batching, risk cards
+- THE CODE TAB'S CHIPS BECOME SERVER TASKS. 53 of them, Patrick's list
+  verbatim, across 7 categories (Security 12, Updates 7, Monitoring 9,
+  Services 8, Networking 6, Storage 6, Setup 5). A "⋯" chip opens a
+  rail/pane picker (categories left, tasks right, live search) styled
+  like Settings. Chips are lane-aware — syncSuggest repaints on every
+  Chat<->Code switch via box.dataset.lane.
+- RISK CARDS (per Patrick): 22 tasks carry a `w` note and render a small
+  GREY warning triangle — grey not red, it's a heads-up not an alarm.
+  Clicking one shows a card FIRST (large grey triangle, bold "This task
+  has a higher risk of causing issues that may be challenging to undo",
+  a plain-language paragraph on the actual failure mode) with "🤞 Let's
+  go for it" / "🙅‍♂️ Not today". Nothing is sent until confirmed;
+  declining runs nothing at all. Unflagged tasks skip the gate entirely.
+- THE LOCKOUT RULE is now taught to the agent, not just described in
+  copy — Patrick's insight that one pattern covers most of the ⚠️ list.
+  REMOTE_SYSTEM gained five numbered rules for any sshd/firewall/network
+  change: never end your own session; permissive change BEFORE the
+  restrictive one; verify with a SECOND connection while the old path
+  still works; arm an automatic revert (systemd-run/at/backgrounded
+  sleep) that fires in 5-10 min unless confirmed; say what you're
+  protecting against.
+- INTERACTIVE FORM CARDS: the model ends a turn with a [[FORM]] trailer
+  ({"q","multi","opts"}) and the reader answers by CLICKING — radios for
+  one-of, checkboxes for many-of. The trailer is stripped from the prose;
+  the answer posts as a normal user turn. TASK_GUIDE (server-side, added
+  to Code-lane system prompts) teaches the voice: warm opener, ONE
+  question per turn, forms only where options are small and discrete.
+- MULTI-STEP BATCHING: the model may answer {"plan","cmds":[...]} for
+  2-6 independent steps. ONE approval covers the batch, priced at its
+  RISKIEST member (never averaged — verified), the card lists every
+  command so a tap is never blind, and execution stops the moment a step
+  fails. Single-command form unchanged.
+- Verified live: 53/22 counts and category split; picker filtering +
+  search; one-row chip trim with "⋯" always surviving; risk card gates
+  (nothing sent), declines silently, proceeds on confirm; unflagged
+  tasks bypass; form multi-select accumulates, radio replaces, answer
+  posts as "Security, Low maintenance", card locks; [[FORM]] trailer
+  parsed AND stripped from prose; batch parser + risk aggregation.
+- rAF NEVER FIRES IN A HIDDEN DOCUMENT — the chip trim needed a
+  setTimeout fallback beside requestAnimationFrame or it silently never
+  ran in the Browser pane (same trap as the drawer transitions).
+- Gauntlet 75/75.
