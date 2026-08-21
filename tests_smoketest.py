@@ -148,6 +148,12 @@ check("code-card copy button, greyed until the fence closes",
 # display:none while the 700px drawer block only animated transform, so
 # the ☰ toggled a class on an element that was never rendered. ONE
 # breakpoint now; this guards the second one from creeping back.
+# 6b248: the Advanced council — menu row behind a divider, the picker
+# veil, per-model use-lines, and the compositor dropdown with guidance
+check("advanced council picker present",
+      '"__adv__"' in page and 'class="engdiv"' in page
+      and 'id="adv-veil"' in page and 'id="adv-comp"' in page
+      and "who holds the pen" in page and "ADV_USE" in page)
 # 6b247: the four-step first-run wizard — markup, all four steps, the
 # once-only gate, and the plan/provider machinery it drives
 check("first-run wizard present, gated on wizard_done",

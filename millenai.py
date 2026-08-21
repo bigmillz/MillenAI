@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 247               # integer compared against the GitHub release tag
+APP_BUILD = 248               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -4585,7 +4585,8 @@ def _cloud_all_down() -> str:
 
 def run_council(labels: list, messages: list, emit, status,
                 reflect: bool = False, peer: bool = False,
-                cloud_only: bool = False) -> None:
+                cloud_only: bool = False,
+                bench_allow=None, comp: str = "") -> None:
     """Ask each selected model in turn, then stream a merged answer.
 
     Sequential on purpose: only one MLX engine can be resident at a time
@@ -4656,8 +4657,16 @@ def run_council(labels: list, messages: list, emit, status,
     # loop — frontier voices join the council at zero local cost.
     cloud_threads = []
     # Cloud Only forces the bench on: picking that tier IS the opt-in, so
-    # it must not also depend on the separate turbo preference
-    if cloud_only or load_prefs(None).get("turbo"):
+    # it must not also depend on the separate turbo preference. An
+    # ADVANCED run (6b248) is its own opt-in the same way: a named
+    # bench_allow list engages exactly those providers regardless of the
+    # turbo pref — and an EMPTY list means explicitly none, turbo or not.
+    _bench = cloud_bench()
+    if bench_allow is not None:
+        _bench = [(l, c) for l, c in _bench
+                  if _provider_of(c) in bench_allow]
+    if cloud_only or (bool(_bench) and (bench_allow is not None
+                                        or load_prefs(None).get("turbo"))):
         def _cloud_draft(lbl, conf):
             # WHOLE BODY GUARDED (6b236). status() writes to the client
             # socket, so a reader who closes the tab raises in here \u2014 and
@@ -4695,7 +4704,7 @@ def run_council(labels: list, messages: list, emit, status,
                     run_mark(rm=lbl)
                 except Exception:
                     pass
-        for _lbl, _c in cloud_bench():
+        for _lbl, _c in _bench:
             _th = threading.Thread(target=_cloud_draft,
                                    args=(_lbl, _c), daemon=True)
             _th.start()
@@ -4823,6 +4832,11 @@ def run_council(labels: list, messages: list, emit, status,
     _mp = merge_pref_label()
     if _mp:
         merger = _mp
+    # ADVANCED (6b248): a hand-picked LOCAL compositor beats policy —
+    # the user chose who holds the pen
+    if comp in MODEL_ROUTES and model_cached(comp) \
+            and model_fits_memory(comp):
+        merger = comp
 
     # feed the merger only the strongest few answers, each truncated:
     # an unbounded merge prompt overflows small models' context and sends
@@ -4923,18 +4937,26 @@ def run_council(labels: list, messages: list, emit, status,
             except Exception:
                 pass
         return False
+    # ADVANCED (6b248): a named CLOUD compositor narrows the ladder to
+    # that one provider; a named LOCAL one skips the cloud ladder cold.
+    _ladder = compositor_ladder()
+    _comp_cloud = bool(comp) and comp not in MODEL_ROUTES
+    if _comp_cloud:
+        _ladder = [c for c in _ladder if _provider_of(c) == comp]
     if cloud_only:
         # every rung here is a cloud one, and if they all fail the
         # strongest draft ships as it stands — a local merge would break
         # the one promise this tier makes
-        for _cc in compositor_ladder():
+        for _cc in _ladder:
             run_mark(compositor=_cc.get("model") or _cc.get("name", ""))
             if _stream_composite(_cc):
                 return
         emit(good[0][1])
         return
-    if load_prefs(None).get("turbo"):
-        for _cc in compositor_ladder():
+    if comp in MODEL_ROUTES:
+        pass          # the user chose a LOCAL pen — no cloud ladder
+    elif _comp_cloud or load_prefs(None).get("turbo"):
+        for _cc in _ladder:
             run_mark(compositor=_cc.get("model") or _cc.get("name", ""))
             if _stream_composite(_cc):
                 return
@@ -5942,10 +5964,26 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     .replace("__SKY_DARK__", json.dumps(SKY_DARK))
                     .replace("__SKY_NYC__", json.dumps(SKY_NYC))
                     .replace("__APP_VER__", short_version()))
+            # THE PAGE CAN NEVER GO STALE AGAIN (6b248, per Patrick:
+            # "the hosted web ui is not up to date" — the server was
+            # current, his BROWSER was serving a heuristically-cached
+            # copy: this page shipped with no cache headers at all).
+            # ETag = the build number, no-cache = revalidate every
+            # load: a fresh build turns the next reload into a full
+            # fetch, an unchanged one into an instant tiny 304.
+            etag = '"b%d"' % APP_BUILD
+            if self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "no-cache")
+                self.end_headers()
+                return
             body = brand(html).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
+            self.send_header("ETag", etag)
+            self.send_header("Cache-Control", "no-cache")
             self.end_headers()
             self.wfile.write(body)
         elif self.path == "/auth/google":
@@ -6893,6 +6931,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if tier == "Power":
             tier = "Pro"    # Pro absorbed Power (5.3)
         cloud_only = bool(TIERS.get(tier, {}).get("cloud_only"))
+        # ADVANCED overrides (6b248, per Patrick): a custom run names its
+        # own cloud voices and its own compositor. cloud=None means "no
+        # opinion" (tier rules apply); cloud=[] means explicitly none.
+        req_cloud = req_json.get("cloud")
+        if isinstance(req_cloud, list):
+            req_cloud = [str(x)[:16] for x in req_cloud][:8]
+        else:
+            req_cloud = None
+        req_comp = str(req_json.get("compositor") or "")[:40]
         if tier in TIERS:
             council = resolve_tier(tier)
         else:
@@ -6913,7 +6960,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         # swap spent purely on ordering. Same models, same merger, same
         # answers — one fewer multi-GB load per council.
         if len(council) > 1 and not model_name:
-            _mp = merge_pref_label()
+            _mp = (req_comp if req_comp in MODEL_ROUTES
+                   else merge_pref_label())
             if _mp in council:
                 council = [l for l in council if l != _mp] + [_mp]
         # a tier request arrives with model="" — the router matches on
@@ -7563,16 +7611,25 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             elif len(council) > 1:
                 run_council(council, full_messages, emit, status,
                             reflect=(tier == "Thinking"),
-                            peer=(tier == "Pro"))
+                            peer=(tier == "Pro"),
+                            bench_allow=req_cloud, comp=req_comp)
             else:
                 lbl = route_label or model_name
                 # cloud is a pref, not a tier (Best retired in 5.3).
                 # Gated on the LADDER, not on cloud_conf (6b246): the
                 # old gate needed the ACTIVE provider healthy, so a dead
                 # active key skipped cloud entirely while a perfectly
-                # good second key sat unused.
-                turbo = (load_prefs(None).get("turbo")
-                         and fast_cloud_ladder() and not images)
+                # good second key sat unused. An ADVANCED run's cloud
+                # list narrows the ladder (6b248) — and engages it even
+                # with the turbo pref off, because naming providers IS
+                # the opt-in; an empty list means none at all.
+                _fl = fast_cloud_ladder() if not images else []
+                if req_cloud is not None:
+                    _fl = [c for c in _fl
+                           if _provider_of(c) in req_cloud]
+                turbo = bool(_fl) and bool(
+                    load_prefs(None).get("turbo")
+                    or (req_cloud is not None and req_cloud))
 
                 def _run_lbl(names):
                     try:
@@ -7589,7 +7646,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     # the slowest paid one, and gave up straight to
                     # local silicon when it hiccuped. The status speaks
                     # the UI's name: "turbo" is only the pref key.
-                    for _fc in fast_cloud_ladder():
+                    for _fc in _fl:
                         _nm = _fc.get("name", "cloud")
                         status("cloud power \u2014 " + _nm)
                         _run_lbl([_nm])
@@ -7600,7 +7657,12 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 # NO KEY, STILL BOOSTED: the keyless community cloud gets
                 # the same shot before local silicon does, whenever the
                 # user asked for cloud power without a key of their own.
-                elif load_prefs(None).get("turbo") and not images:
+                # An ADVANCED run that named its clouds (or named none)
+                # said exactly what it wants — the community GPU is not
+                # on that list (6b248, caught live: cloud:[] still tried
+                # the free cloud).
+                elif (load_prefs(None).get("turbo") and not images
+                        and req_cloud is None):
                     if time.time() >= _free_cold[0]:
                         status("trying the free community cloud")
                         if free_cloud_stream(full_messages, emit):
@@ -8278,6 +8340,41 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
 #undobar button{background:none;border:none;color:#8fb8ff;cursor:pointer;
   font:600 13px var(--sans);padding:2px 4px}
 #undobar button:hover{text-decoration:underline}
+/* thin rule that sets Advanced apart from the modes (6b248) */
+.engdiv{height:1px;background:var(--line-soft);margin:5px 8px}
+/* ------------------------------------------------- advanced picker */
+#adv-veil{position:fixed;inset:0;z-index:56;background:rgba(0,0,0,.7);
+  backdrop-filter:blur(7px);-webkit-backdrop-filter:blur(7px);
+  display:flex;align-items:center;justify-content:center}
+#adv-veil[hidden]{display:none}
+#adv-card{width:520px;max-width:calc(100vw - 40px);
+  max-height:calc(100vh - 60px);overflow-y:auto;overflow-x:hidden;
+  background:var(--panel2);border:1px solid var(--line);
+  border-radius:14px;padding:22px 24px 16px;
+  box-shadow:0 24px 80px rgba(0,0,0,.55)}
+#adv-card .advp{color:var(--dim);font-size:12px;line-height:1.55;
+  margin:0 0 10px}
+.adv-h{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint);margin:12px 0 7px}
+.advrow{display:flex;gap:9px;align-items:flex-start;padding:5px 2px;
+  cursor:pointer;border-radius:8px}
+.advrow:hover{background:rgba(255,255,255,.04)}
+.advrow input{margin-top:3px;flex:none}
+.advrow .an{font-size:13px;line-height:1.3}
+.advrow .an b{font-weight:600}
+/* the brief best-use line, small grey italic per Patrick */
+.advrow .au{display:block;font-size:10.5px;font-style:italic;
+  color:var(--faint);margin-top:1px}
+.advrow.off{opacity:.4;cursor:default}
+.advrow.off:hover{background:none}
+#adv-comp{width:100%;background:rgba(0,0,0,.3);color:var(--text);
+  border:1px solid var(--line);border-radius:9px;padding:8px 10px;
+  font-size:12.5px;margin-bottom:8px}
+#adv-comp-why{min-height:28px}
+#adv-note{font-size:11px;color:#e8a08f;min-height:14px}
+#adv-foot{display:flex;gap:10px;justify-content:flex-end;margin-top:8px;
+  padding-top:12px;border-top:1px solid var(--line-soft)}
+#adv-foot .about-btn{width:auto;margin-top:0;padding:9px 20px}
 #tierpop{
   position:fixed;z-index:70;max-width:250px;
   background:var(--panel2);border:1px solid var(--line);border-radius:10px;
@@ -10130,6 +10227,31 @@ __CODE_ROWS__
   </div>
 </main>
 
+<!-- ADVANCED picker (6b248): hand-pick the council + the compositor -->
+<div id="adv-veil" hidden>
+  <div id="adv-card">
+    <div class="set-h">Advanced — your own council</div>
+    <p class="advp">Pick exactly which minds draft an answer. Every
+    checked model answers your question; the compositor then reads all
+    the drafts and writes the single reply you see.</p>
+    <div class="adv-h">Local models</div>
+    <div id="adv-local"></div>
+    <div class="adv-h">Cloud models</div>
+    <div id="adv-cloud"></div>
+    <div class="adv-h">Compositor — who holds the pen</div>
+    <p class="advp">One mind writes the final answer from every draft.
+    Stronger compositors keep more nuance; the local one keeps
+    everything on this machine.</p>
+    <select id="adv-comp"></select>
+    <p class="advp" id="adv-comp-why"></p>
+    <div id="adv-note"></div>
+    <div id="adv-foot">
+      <button class="about-btn" id="adv-cancel">Cancel</button>
+      <button class="about-btn primary" id="adv-save">Use this council</button>
+    </div>
+  </div>
+</div>
+
 <div id="tierpop" hidden></div>
 <div id="celebrate" hidden></div>
 
@@ -10533,6 +10655,9 @@ if(tier==="Best")tier="Fast";         // Best retired (5.3)
 if(tier==="Power")tier="Pro";         // Pro absorbed Power (5.3)
 function setTier(name){
   if(tierOff[name])return;       // a mode that can't answer isn't pickable
+  // picking a real tier exits the custom council (6b248); the boot call
+  // with the stored empty tier keeps it
+  if(name&&advOn){advOn=false;localStorage.setItem("millen.advon","0");}
   tier=name;localStorage.setItem("millen.tier",name);
   councilManual=false;
   if(agent){agent="";localStorage.setItem("millen.agent","");
@@ -10590,6 +10715,120 @@ async function showTierPop(el,name){
   tierPop.style.top=Math.round(r.top-4)+"px";
 }
 function hideTierPop(){tierPop.hidden=true;}
+/* ------------------------------------------------- advanced council */
+// 6b248, per Patrick: hand-pick which minds draft and who composites.
+// Stored client-side (millen.adv); the request carries models + cloud
+// + compositor, and the server treats a named cloud list as its own
+// opt-in. Picking any tier exits custom mode.
+let adv=null;
+try{adv=JSON.parse(localStorage.getItem("millen.adv")||"null");}catch(e){}
+let advOn=localStorage.getItem("millen.advon")==="1"&&!!adv;
+const ADV_USE={
+  "Llama 3.2 1B":"instant drafts, the simplest questions",
+  "Llama 3.2 3B":"quick everyday answers",
+  "Gemma 2 2B":"tiny and fast",
+  "Gemma 2 9B IT":"solid all-rounder, capable merge writer",
+  "Llama 3.1 8B":"general chat, light reasoning",
+  "Hermes 3 8B":"creative writing and roleplay",
+  "Qwen 2.5 7B":"multilingual, decent math",
+  "Qwen 2.5 Coder 7B":"code completion and review",
+  "Qwen 2.5 Coder 14B":"stronger code work",
+  "Mistral Nemo 12B":"long context, natural prose",
+  "Gemma 4 12B":"strong generalist, good merge writer",
+  "Gemma 4 26B":"the house heavyweight — best local compositor",
+  "Phi-4 14B":"reasoning and STEM",
+  "DeepSeek R1 7B":"step-by-step reasoning",
+  "DeepSeek R1":"step-by-step reasoning",
+  "Mistral Small 24B":"sharp, concise general answers",
+  "GPT-OSS 20B":"strong open reasoning",
+  "Qwen 3.6 27B":"heavyweight generalist",
+  "Qwen 3.6 35B MoE":"heavyweight generalist, fast for its size",
+  "Llama 3.3 70B":"big-iron generalist",
+  "Llama 4 Scout":"frontier-class, huge context",
+  "GPT-OSS 120B":"frontier-class open reasoning",
+  "Qwen 3 235B MoE":"the biggest local brain",
+};
+const ADV_CLOUD={
+  gemini:["Gemini","fast frontier drafts · free tier"],
+  groq:["Groq","the fastest tokens anywhere · free tier"],
+  claude:["Claude","deep reasoning and careful prose · paid"],
+  kimi:["Kimi K3","frontier open model, 1M context · paid"]};
+const ADV_WHY={
+  "":"Automatic — the strongest available mind writes the final: "
+    +"Claude, then Kimi K3, then Gemini, then Groq, with local Gemma "
+    +"as the private fallback. The right default.",
+  claude:"Best for research, analysis and nuanced writing.",
+  kimi:"Best for long documents and coding advice — 1M-token context.",
+  gemini:"Best for quick general questions.",
+  groq:"Best when speed matters more than polish."};
+function advChip(){
+  if(advOn)$("#chip-model").textContent="Custom";
+}
+async function openAdv(){
+  $("#adv-veil").hidden=false;
+  $("#adv-note").textContent="";
+  const sel=adv||{local:[],cloud:[],comp:""};
+  let st={},cs={};
+  try{[st,cs]=await Promise.all([
+    (await fetch("/api/setup")).json(),
+    (await fetch("/api/cloud")).json()]);}catch(e){}
+  const ready=(st.models||[]).filter(m=>m.status==="ready"
+    &&m.label.indexOf("Vision")<0);   // LLaVA routes itself on images
+  $("#adv-local").innerHTML=ready.map(m=>
+    '<label class="advrow"><input type="checkbox" data-l="'
+    +esc(m.label)+'"'+(sel.local.indexOf(m.label)>=0?" checked":"")+'>'
+    +'<span class="an"><b>'+esc(m.label)+'</b>'
+    +'<span class="au">'+esc(ADV_USE[m.label]||"capable generalist")
+    +'</span></span></label>').join("")
+    ||'<p class="advp">no local models installed yet</p>';
+  const pv=(cs||{}).providers||{};
+  $("#adv-cloud").innerHTML=Object.keys(ADV_CLOUD).map(id=>{
+    const ok=(pv[id]||{}).status==="ok";
+    const[nm,use]=ADV_CLOUD[id];
+    return '<label class="advrow'+(ok?"":" off")+'">'
+      +'<input type="checkbox" data-c="'+id+'"'
+      +(ok?(sel.cloud.indexOf(id)>=0?" checked":""):" disabled")+'>'
+      +'<span class="an"><b>'+nm+'</b>'
+      +'<span class="au">'+(ok?use:"no key — add one in Settings › Cloud power")
+      +'</span></span></label>';}).join("");
+  // compositor: automatic, each keyed cloud, and the local Gemmas
+  const comps=[['',"Automatic (recommended)"]]
+    .concat(Object.keys(ADV_CLOUD).filter(id=>(pv[id]||{}).status==="ok")
+      .map(id=>[id,ADV_CLOUD[id][0]+" · cloud"]))
+    .concat(ready.filter(m=>/^Gemma/.test(m.label))
+      .map(m=>[m.label,m.label+" · local, private"]));
+  $("#adv-comp").innerHTML=comps.map(([v,t])=>
+    '<option value="'+esc(v)+'"'+(sel.comp===v?" selected":"")+'>'
+    +esc(t)+'</option>').join("");
+  advWhy();
+}
+function advWhy(){
+  const v=$("#adv-comp").value;
+  $("#adv-comp-why").textContent=ADV_WHY[v]
+    ||(v?"Runs on this machine — private, nothing leaves your Mac. "
+        +"Best when privacy matters most.":"");
+}
+$("#adv-comp").addEventListener("change",advWhy);
+$("#adv-cancel").addEventListener("click",()=>{$("#adv-veil").hidden=true;});
+$("#adv-veil").addEventListener("click",e=>{
+  if(e.target.id==="adv-veil")$("#adv-veil").hidden=true;});
+$("#adv-save").addEventListener("click",()=>{
+  const local=[...document.querySelectorAll("#adv-local input:checked")]
+    .map(i=>i.dataset.l);
+  const cloud=[...document.querySelectorAll("#adv-cloud input:checked")]
+    .map(i=>i.dataset.c);
+  if(!local.length){
+    $("#adv-note").textContent=
+      "pick at least one local model — for pure cloud, use ☁️ Cloud Only";
+    return;
+  }
+  adv={local:local,cloud:cloud,comp:$("#adv-comp").value};
+  localStorage.setItem("millen.adv",JSON.stringify(adv));
+  advOn=true;localStorage.setItem("millen.advon","1");
+  tier="";localStorage.setItem("millen.tier","");
+  advChip();
+  $("#adv-veil").hidden=true;
+});
 // THE ONLY MODE PICKER (6b242, per Patrick): the composer's engine pill
 // drops it RIGHT THERE — emoji rows for each tier, hover shows the models
 // bubble, click picks. The sidebar used to carry a second copy of this
@@ -10603,12 +10842,18 @@ document.body.appendChild(engMenu);
 function openEngMenu(){
   engMenu.innerHTML=Object.keys(TIER_META).map(n=>{
     const m=TIER_META[n];
-    return '<div class="engrow'+(tier===n?" on":"")
+    return '<div class="engrow'+(tier===n&&!advOn?" on":"")
       +(tierOff[n]?" off":"")+'" data-t="'+n+'">'
       +'<span class="eico">'+m.icon+'</span>'
       +'<span class="enm">'+esc(n)+'</span>'
       +'<span class="edsc">'+esc(m.desc)+'</span></div>';
-  }).join("");
+  }).join("")
+  // ADVANCED (6b248, per Patrick): hand-pick the council + compositor,
+  // set apart from the modes by a thin rule
+  +'<div class="engdiv"></div>'
+  +'<div class="engrow'+(advOn?" on":"")+'" data-t="__adv__">'
+  +'<span class="eico">⚙️</span><span class="enm">Advanced</span>'
+  +'<span class="edsc">hand-pick models &amp; compositor</span></div>';
   engMenu.hidden=false;
   const r=$("#model-chip").getBoundingClientRect();
   engMenu.style.left=Math.round(r.left)+"px";
@@ -10616,10 +10861,15 @@ function openEngMenu(){
   engMenu.style.top=below?Math.round(r.bottom+8)+"px"
     :Math.round(r.top-engMenu.offsetHeight-8)+"px";
   engMenu.querySelectorAll(".engrow").forEach(el=>{
-    el.addEventListener("mouseenter",()=>showTierPop(el,el.dataset.t));
-    el.addEventListener("mouseleave",hideTierPop);
+    if(el.dataset.t!=="__adv__"){
+      el.addEventListener("mouseenter",()=>showTierPop(el,el.dataset.t));
+      el.addEventListener("mouseleave",hideTierPop);
+    }
     el.addEventListener("click",ev=>{
       ev.stopPropagation();
+      if(el.dataset.t==="__adv__"){
+        hideTierPop();engMenu.hidden=true;openAdv();return;
+      }
       // an unavailable mode keeps the menu open and leaves its bubble
       // up — the bubble is where the fix is written
       if(tierOff[el.dataset.t]){showTierPop(el,el.dataset.t);return;}
@@ -10638,6 +10888,7 @@ document.addEventListener("click",e=>{
     em.hidden=true;
 });
 setTier(tier);
+advChip();     // a custom council survives the restart (6b248)
 
 // the acceleration lockup next to the engine chip. One fetch at boot —
 // the silicon doesn't change while the app is open.
@@ -11458,8 +11709,13 @@ async function send(){
     const resp=await fetch("/api/chat",{
       method:"POST",headers:{"Content-Type":"application/json"},
       signal:abortCtl.signal,
-      body:JSON.stringify({model,models:council,tier,messages,
-        auto_web:autoWeb,images:sentImages,docs:sentDocs,agent}),
+      body:JSON.stringify(advOn&&adv
+        // the custom council (6b248): hand-picked minds, hand-picked pen
+        ?{model:"",models:adv.local||[],tier:"",messages,
+          auto_web:autoWeb,images:sentImages,docs:sentDocs,agent,
+          cloud:adv.cloud||[],compositor:adv.comp||""}
+        :{model,models:council,tier,messages,
+          auto_web:autoWeb,images:sentImages,docs:sentDocs,agent}),
     });
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
@@ -11808,14 +12064,15 @@ function paintSuggest(){
     +esc(q)+'</button>').join("");
   box.hidden=false;
   // HOW MANY FIT IS MEASURED, NOT GUESSED: lay them out, then drop
-  // anything that wrapped past the second row. Chip widths vary with
+  // anything that wrapped past the FIRST row (6b248, per Patrick: one
+  // row only, even if that means 3-4 chips). Chip widths vary with
   // the text, so a fixed count would either overflow or leave a gap.
   requestAnimationFrame(()=>{
     const kids=[...box.children];
     if(!kids.length)return;
     const rows=[...new Set(kids.map(k=>
       Math.round(k.getBoundingClientRect().top)))].sort((a,b)=>a-b);
-    const keep=rows.slice(0,2);
+    const keep=rows.slice(0,1);
     kids.forEach(k=>{
       if(keep.indexOf(Math.round(k.getBoundingClientRect().top))<0)k.remove();
     });

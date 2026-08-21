@@ -3387,3 +3387,55 @@ traced:
   by stubbing /api/setup + /api/cloud (GB prices render, checkbox
   reveals the key row, right links, right placeholders); skip writes
   wizard_done and the gate honours it. Gauntlet 65/65.
+
+## 6 beta 248 (pending release) — the hosted page can never go stale again
+- Patrick: "i dont think the hosted web ui is up to date". IT WAS — the
+  local :9889 self-updated to 247 on its hourly tick, the tunnel door
+  was byte-identical to a locally simulated remote request, and a
+  signed-in remote fetch titled beta 247. The staleness was HIS
+  BROWSER: the app page shipped with NO cache headers, and mobile
+  browsers heuristically cache such pages for days.
+- ETag = "b<APP_BUILD>" + Cache-Control: no-cache on the app page.
+  Every load revalidates: unchanged build = instant tiny 304, new
+  build = full fetch. Verified all three: 200+ETag on first fetch,
+  304 on matching If-None-Match, 200 on a stale one.
+- Diagnosis path worth keeping: door pages hide the version, so
+  compare builds by simulating remoteness against localhost
+  (curl -H "X-Forwarded-For: …" — and a cookie with any 20-hex
+  millen_user gets the app page, which titles its build).
+- Gauntlet 65/65.
+
+## 6 beta 248 (cont.) — one row of starter chips
+- rows.slice(0,2) -> slice(0,1) in paintSuggest's measurement pass (per
+  Patrick: single row, even if only 3-4 fit). The measured-not-guessed
+  approach did all the work — one character changed. Verified live:
+  3 chips, 1 row at 780px.
+- Gauntlet 65/65.
+
+## 6 beta 248 (cont.) — the Advanced council
+- ⚙️ Advanced sits under a thin rule (.engdiv) at the bottom of the
+  engine menu. Its veil: every READY local model with a checkbox and a
+  small grey-italic best-use line (ADV_USE map; LLaVA excluded — vision
+  routes itself), the four cloud providers (keyless ones greyed with
+  "no key — add one in Settings"), then the COMPOSITOR dropdown —
+  Automatic, each keyed cloud, and the local Gemmas — with a guidance
+  line per pick (research/writing -> Claude, long docs/code -> Kimi,
+  quick general -> Gemini, speed -> Groq, privacy -> local).
+- Wire contract: the request carries models + cloud + compositor.
+  cloud=None means no opinion; cloud=[] means EXPLICITLY none — it
+  suppresses the fast ladder, the bench, and (caught live) the free
+  community cloud, which fired on the first pass because its elif only
+  checked the turbo pref. Naming providers IS the opt-in: a custom run
+  engages its clouds even with turbo off.
+- Compositor override: local label -> merger=comp, no cloud ladder at
+  all (the user chose a private pen); provider id -> the ladder narrows
+  to that one provider, engaged even without turbo. The handler's
+  merger-last roster reorder follows the override.
+- State: localStorage millen.adv + millen.advon; chip reads "Custom";
+  picking any real tier exits custom (the boot call with the stored
+  empty tier keeps it). Save requires ≥1 local model — pure cloud is
+  what ☁️ Cloud Only is for, and the note says so.
+- Verified live: menu row + divider render; picker lists 10 locals /
+  4 clouds / 7 compositor options; save -> chip Custom, stored JSON
+  correct; a 1-local/no-cloud run answered locally in 4.9s with zero
+  cloud attempts. Gauntlet 66/66.

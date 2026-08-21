@@ -93,5 +93,16 @@ release) needs nothing else: no Python, no admin. On an NVIDIA machine CUDA
 is used automatically. The .zip is the same app for people who prefer a
 portable copy (needs Python 3.10+)."
 
+# THE HOSTED WEB UI UPDATES WITH THE CUT (6b248, per Patrick: "going
+# forth always update the web ui too"). The live :9889 self-updates
+# hourly on its own; running its updater here closes the gap so
+# ai.millertechnology.net serves the new build the moment it exists.
+if [[ -x "$HOME/Library/MillenAI-live/update.sh" ]]; then
+  echo "→ updating the hosted web ui"
+  bash "$HOME/Library/MillenAI-live/update.sh" \
+    && echo "  live instance now on the new build" \
+    || echo "  (live update failed — it will catch up on its hourly tick)"
+fi
+
 echo ""
 echo "✓ published $VERSION — existing installs will offer it within the hour."
