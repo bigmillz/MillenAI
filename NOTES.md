@@ -4022,3 +4022,96 @@ one of which made a SUCCESSFUL job look like a failure:
   a bogus hid gets {"ok": false}.
 - Gauntlet 94/94 (+4: spinner-first, smooth bar + time-left, Answer
   now, seamless title bar).
+
+## 6 beta 257 (cont.) — settings round two, and the door nobody had locked
+- SIX PANES, SIX DESCRIPTIONS (per Patrick's concept picks): every
+  pane opens with one quiet .tdesc line in one voice. Written in the
+  template as "MillenAI" so brand() rewrites them — the tokens must
+  never be hard-coded to the brand.
+- ACCOUNT PANE, FIRST IN THE RAIL. New GET /api/me answers
+  owner|google|guest|pin — and it HAD to be given something to read:
+  the uid is a one-way sha256, so how you signed in was unrecoverable.
+  A .ident marker (kind + email or name, never a PIN) is now written
+  at mint time in the Google callback and /api/welcome; guests already
+  had .guest, whose mtime yields the remaining hours for free. Old
+  profiles report "pin" — google and pin were always indistinguishable,
+  so nothing is lost. POST /api/logout clears the cookie (hidden for
+  the cookieless desktop owner).
+- FORGET ME NOW MEANS IT (per Patrick: the droplet-destroy treatment).
+  It cleared MEMORIES ONLY before while promising everything. Three
+  locks: pick the scopes (memories / chats / personal settings), prove
+  it's you (owner PIN when owner access is configured), then type
+  FORGET ME in caps. Scoped POST /api/forget does the work; the owner's
+  prefs are key-stripped, never deleted (turbo, contribute and the
+  update channel are machine config, not "about the user"), and a full
+  three-scope forget on a walled profile takes the .ident marker with
+  it — the review caught that /api/me still greeted you by name after
+  "Erase forever".
+- THE COMMUNITY PANE STOPPED LYING. The tooltip has promised "nothing
+  runs while you are using it" since it shipped; NOTHING enforced it.
+  Now: an AC gate (psutil battery, and None — a desktop — counts as
+  plugged in), an idle gate (ioreg HIDIdleTime, 120s, and unmeasurable
+  means the gate opens), and a duty cycle that rests the complement of
+  the lend share after each job. It is a share of TIME, labelled as
+  such: MLX and Ollama expose no instantaneous GPU throttle, so a "max
+  GPU %" slider would have been a fake control. The hub needs no
+  change — a resting worker ages out of the 45s liveness window on its
+  own. A ledger (contrib_ledger.json, its own file: prefs.json is
+  rewritten wholesale by the settings UI and would race the worker)
+  counts jobs, seconds and characters, and REPLACES "Contributing to N
+  users" — which read the LOCAL machine's user count, ~always 1, and
+  had lied politely for months. "Users helped" is still not knowable
+  worker-side (the job payload carries no requester) so it is not
+  shown; the gauntlet now forbids the old line's return.
+- MODELS ROSTER (option B, per Patrick): one mono line per mind —
+  status, size, and what it's FOR, read from ADV_USE, the same dict
+  the Advanced picker uses, so the two can never drift. Manage adds
+  tick-to-install, the Minimal/Recommended/Maximum cards (the exact
+  plans first-run already offers) and per-row removal. Removal is the
+  only genuinely new destructive surface: admin-gated, refuses a model
+  that is mid-download (there is no cancel machinery and rmtree under
+  a live writer resurrects partial state), stops the MLX engine under
+  _engine_lock before deleting EXACTLY the label's own HF cache dir
+  pair derived from MLX_REPOS — never a glob, never the shared hub/
+  parent — and asks the Ollama daemon rather than touching ~/.ollama,
+  whose blobs are content-addressed and shared across tags. A non-zero
+  `ollama rm` now raises instead of reporting success.
+- UPDATES WEARS ITS VERSION: the number centred in the display face,
+  "Released on August 22, 2026" under it, and the release notes card —
+  the GitHub release body was already travelling in the update-check
+  response and was simply thrown away. Every release we cut from here
+  gets a human bullet list, so the card fills itself.
+- YOUR NAME: the first field in Personality, saved with the persona
+  and injected ONCE into the system-prompt assembly every model reads,
+  stated to outrank a remembered name (MEMORY_PROMPT extracts one too).
+  The prefs read there was hoisted so the name costs no extra disk hit.
+- THE DOOR NOBODY HAD LOCKED. The adversarial review found the real
+  bug of this round, and it predates it: THE OWNER HAS NO COOKIE —
+  they are authenticated by the mere ABSENCE of proxy headers — so
+  SameSite protects them from nothing, and any page in any browser
+  could POST to 127.0.0.1 and erase chats or delete multi-GB weights.
+  Verified live: a text/plain form-smuggled POST was accepted. Writes
+  now demand a same-origin Origin (browsers attach one to every
+  cross-site POST, forms included), refuse the three form content
+  types, and refuse a Host that isn't localhost (DNS rebinding).
+  Native callers — curl, turbo.sh, the fleet workers, the gauntlet —
+  send no Origin and a JSON content type, so nothing legitimate
+  noticed. FOUR live probes are now gauntlet checks.
+- ALSO FROM THE REVIEW: the contribute loop carries a GENERATION
+  token — the stop Event alone could not retire a loop stuck mid-job
+  (contrib_apply gives up after 3s and then CLEARS the flag for the
+  new thread, and the old one sails on), so flipping a toggle during a
+  job left two loops polling the same hub. A valid-JSON non-object
+  body used to reach .get() and 500 three handlers. #up-detail was on
+  BOTH veils, so the update dialog's "Downloading…" landed in the
+  hidden new-models card — the FOURTH time the duplicate-id trap has
+  been paid for in this file. And a bare `#fleet-box input` rule
+  stretched the new checkboxes to full width.
+- KNOWN AND ACCEPTED: a second live session can autosave its stale
+  chat list back after a forget. Single-window desktop is the norm and
+  tunnel users have their own profiles; cross-session invalidation
+  would cost more machinery than the case is worth. Say it out loud
+  rather than pretend.
+- Gauntlet 108/108 (+9: descriptions/Account/scoped forget, honest
+  ledger + real gates, roster + manage, updates face, the name, four
+  CSRF probes, generation token, marker removal, honest removal).

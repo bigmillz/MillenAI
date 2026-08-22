@@ -426,6 +426,93 @@ check("seamless dark title bar",
       and "NSAppearanceNameDarkAqua" in _MILLENAI_SRC
       and "fullSizeContentView" not in _MILLENAI_SRC.replace(
           "NO fullSizeContentView", ""))
+# 6b257 settings round 2 (per Patrick's concept picks): every pane
+# opens with a one-breath description, Account leads the rail with
+# /api/me behind it, and Forget Me is scoped + triple-locked
+check("settings: descriptions + Account pane + scoped forget",
+      page.count('class="tdesc"') == 6
+      and 'data-pane="p-account"' in page
+      and '"/api/me"' in _MILLENAI_SRC
+      and '"/api/logout"' in _MILLENAI_SRC
+      and '"/api/forget"' in _MILLENAI_SRC
+      and "FORGET ME" in page)
+# 6b257: the Community pane tells the truth — a ledger this Mac
+# measured (its own file: prefs.json rewrites would race the worker
+# thread), a TIME share that rests between jobs (no honest GPU-percent
+# knob exists, so none is offered), and gates that finally make the
+# idle-only tooltip promise real (AC via psutil, HIDIdleTime via
+# ioreg). The politely-lying user-count line must never return.
+check("community: honest ledger + real gates",
+      'id="contrib-stats"' in page and 'id="contrib-seg"' in page
+      and "contrib_ledger.json" in _MILLENAI_SRC
+      and "_on_ac_power" in _MILLENAI_SRC
+      and "HIDIdleTime" in _MILLENAI_SRC
+      and "Contributing to " not in page)
+# 6b257: the Models roster — status/size/purpose per mind from data
+# the resolvers already compute (ADV_USE is the one description dict,
+# so the picker and the roster can never drift); Manage reuses the
+# first-run plans, and the only new destructive surface is
+# admin-gated and refuses mid-download removals
+check("models roster + manage flow",
+      'id="roster"' in page and "paintRoster" in page
+      and '"/api/model/remove"' in _MILLENAI_SRC
+      and '"still downloading"' in _MILLENAI_SRC
+      and _MILLENAI_SRC.count("/api/model/remove") >= 2)
+# 6b257: the Updates pane wears the version, the release date, and
+# the release notes (the gh release body now rides /api/update/check)
+check("updates: version, date, notes",
+      'id="up-version"' in page and 'id="up-reldate"' in page
+      and '"notes": (rel.get("body")' in _MILLENAI_SRC)
+# 6b257: the name field — placeholder-first, saved with persona,
+# injected once into the system-prompt assembly every model reads
+check("your name reaches every model",
+      'id="user-name"' in page
+      and "Your name (or nickname)" in page
+      and "The user's name is " in _MILLENAI_SRC)
+# 6b257: THE OWNER HAS NO COOKIE — they are authenticated by the mere
+# absence of proxy headers, so SameSite protects them from nothing and
+# any web page could POST to 127.0.0.1 and erase their chats or delete
+# multi-GB weights. Writes now demand a same-origin Origin (browsers
+# attach one to every cross-site POST), refuse the three form content
+# types, and refuse a rebinding Host. Native callers — curl, the fleet
+# workers, this gauntlet — send no Origin and sail through.
+s, h, b = req("/api/forget", "POST", {"scopes": []}, cookie=K,
+              headers={"Content-Type": "text/plain"})
+check("CSRF: form content type refused", s == 403)
+s, h, b = req("/api/forget", "POST", {"scopes": []}, cookie=K,
+              headers={"Origin": "http://evil.example"})
+check("CSRF: foreign Origin refused", s == 403)
+s, h, b = req("/api/forget", "POST", {"scopes": []}, cookie=K,
+              headers={"Host": "evil.example"})
+check("CSRF: rebinding Host refused", s == 403)
+s, h, b = req("/api/forget", "POST", {"scopes": []}, cookie=K,
+              headers={"Origin": BASE})
+check("CSRF: same-origin write allowed", s == 200)
+s, h, b = req("/api/logout", "POST", cookie=K)
+check("logout clears the cookie", s == 200
+      and "max-age=0" in (h.get("Set-Cookie", "").lower()))
+# a valid-JSON non-object body used to reach .get() and 500 the handler
+s, h, b = req("/api/forget", "POST", [1, 2, 3], cookie=K)
+check("non-dict JSON body survives", s == 200)
+# 6b257: the contribute loop carries a generation token — the stop
+# Event alone could not retire a loop stuck mid-job (contrib_apply
+# gives up after 3s and CLEARS the flag for the new thread, and the
+# old one sails on), so flipping a Settings toggle during a job left
+# two loops polling the hub
+check("contribute loop retires by generation",
+      "_contrib_gen" in _MILLENAI_SRC
+      and "gen == _contrib_gen[0]" in _MILLENAI_SRC)
+# 6b257: erase means erase — a walled profile's .ident marker holds
+# the very PII the pane promises to forget (the Google email), so a
+# full three-scope forget takes the directory with it
+check("full forget removes the profile marker",
+      'shutil.rmtree(base, ignore_errors=True)' in _MILLENAI_SRC)
+# 6b257: removal must not lie — a non-zero `ollama rm` used to report
+# success while the weights stayed, and the MLX path must take the
+# same _engine_lock every other process-table mutation takes
+check("model removal is honest and locked",
+      '"ollama rm failed"' in _MILLENAI_SRC
+      and _MILLENAI_SRC.count("with _engine_lock:") >= 4)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)
