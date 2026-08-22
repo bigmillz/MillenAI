@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 254               # integer compared against the GitHub release tag
+APP_BUILD = 255               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -780,7 +780,8 @@ def _anthropic_stream(c: dict, messages: list, emit) -> bool:
     return got
 
 
-def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
+def cloud_text(c: dict, messages: list, timeout: int = 60,
+               max_tokens: int = 4096) -> str:
     """One buffered completion from a SPECIFIC provider conf — the
     council/merge offload path (6b219). Empty string = didn't work."""
     try:
@@ -788,7 +789,7 @@ def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
             sys_txt = "\n\n".join(m["content"] for m in messages
                                    if m["role"] == "system")
             payload = json.dumps({
-                "model": c["model"], "max_tokens": 4096,
+                "model": c["model"], "max_tokens": max_tokens,
                 "system": sys_txt,
                 "messages": [m for m in messages
                              if m["role"] != "system"]}).encode()
@@ -802,7 +803,16 @@ def cloud_text(c: dict, messages: list, timeout: int = 60) -> str:
                 d = json.loads(r.read().decode("utf-8", "replace"))
             out = "".join(b.get("text", "")
                           for b in d.get("content", []))
+            # A THINKING MODEL CAN SPEND THE WHOLE BUDGET THINKING
+            # (6b255, found live). claude-sonnet-5 emits a `thinking`
+            # block before its text, and max_tokens covers BOTH — so a
+            # turn that reasons hard hits the cap mid-thought and
+            # returns no text block at all. That is OUR budget running
+            # out, not a broken provider: resting the key for it took a
+            # healthy Claude off the bench for ten minutes.
             if not out.strip():
+                if d.get("stop_reason") == "max_tokens":
+                    return ""
                 cloud_glitch(c, "returned nothing")
             return out
         body = {"model": c["model"], "messages": messages,
@@ -5271,34 +5281,71 @@ def ssh_run_long(conf: dict, cmd: str, emit_status=None,
     and polls its status + tail until it settles. Falls back to a plain
     long-timeout run where systemd-run is absent."""
     unit = "concorde-job-%s" % secrets.token_hex(3)
-    launch = ("systemd-run --unit=%s --collect --property=Type=oneshot "
-              "/bin/bash -lc %s" % (unit, _shq(cmd)))
+    # --no-block IS LOAD-BEARING (6b255, found live): systemd-run WAITS
+    # for a Type=oneshot unit to finish, so without it the launch call
+    # blocks for the entire job, times out at 30s, and the old code then
+    # "fell back" to running the command a SECOND time — blocking —
+    # while the first copy was still going. On an apt upgrade the twin
+    # hit the dpkg lock the original held and reported failure on a job
+    # that had actually succeeded; on anything non-idempotent it would
+    # have done the work twice for real.
+    # THE JOB RECORDS ITS OWN EXIT CODE (6b255, found live). --collect
+    # garbage-collects the unit the instant it exits, so reading
+    # ExecMainStatus afterwards returns systemd's DEFAULT of 0 and every
+    # failure reported success. A status file the job writes itself is
+    # immune to the unit's lifecycle entirely.
+    rcf, outf = "/tmp/%s.rc" % unit, "/tmp/%s.out" % unit
+    # A SUBSHELL, not a brace group (6b255, found live): { …; } runs in
+    # the CURRENT shell, so a command ending in `exit 33` killed the
+    # wrapper before it could record the code and the job looked killed
+    # rather than failed. ( … ) contains the exit.
+    wrapped = "( %s ) > %s 2>&1; echo $? > %s" % (cmd, outf, rcf)
+    launch = ("systemd-run --no-block --unit=%s --collect "
+              "--property=Type=oneshot /bin/bash -lc %s"
+              % (unit, _shq(wrapped)))
     rc, out = ssh_run(conf, launch, timeout=30)
-    if rc != 0 or "systemd-run" in out and "not found" in out.lower():
-        # no systemd-run — do it in one long blocking call instead
-        return ssh_run(conf, cmd, timeout=int(minutes * 60))
+    if rc != 0 or ("systemd-run" in out and "not found" in out.lower()):
+        # Before falling back, ASK THE BOX whether the unit exists. A
+        # launch that merely timed out may still have started the job,
+        # and re-running it would be the double execution above.
+        _r, _seen = ssh_run(
+            conf, "systemctl cat %s >/dev/null 2>&1 && echo __LIVE__ || "
+            "systemctl is-active %s 2>/dev/null" % (unit, unit), timeout=15)
+        started = ("__LIVE__" in _seen
+                   or _seen.strip() in ("active", "activating"))
+        if not started:
+            # genuinely no unit — one long blocking call is the honest
+            # fallback (a box without systemd-run, or a launch that
+            # really did fail)
+            return ssh_run(conf, cmd, timeout=int(minutes * 60))
     deadline = time.time() + minutes * 60
-    poll = ("systemctl is-active %s 2>/dev/null; echo __RC__ "
-            "$(systemctl show -p ExecMainStatus --value %s 2>/dev/null); "
-            "journalctl -u %s --no-pager -n 4 2>/dev/null | tail -n 4"
-            % (unit, unit, unit))
+    poll = ("if [ -f %s ]; then echo __DONE__ $(cat %s); "
+            "else systemctl is-active %s 2>/dev/null; fi" % (rcf, rcf, unit))
     while time.time() < deadline:
         time.sleep(12)
         rc2, st = ssh_run(conf, poll, timeout=20)
-        active = st.splitlines()[0].strip() if st else ""
-        if active in ("inactive", "failed", "dead", ""):
-            code = 0
-            m = re.search(r"__RC__\s+(\d+)", st)
-            if m:
-                code = int(m.group(1))
+        first = st.splitlines()[0].strip() if st else ""
+        m = re.search(r"__DONE__\s+(\d+)", st or "")
+        if m:
+            code = int(m.group(1))
             _r, tail = ssh_run(
-                conf, "journalctl -u %s --no-pager -n 40 2>/dev/null; "
+                conf, "tail -c 4000 %s 2>/dev/null; rm -f %s %s; "
                 "systemctl reset-failed %s 2>/dev/null || true"
-                % (unit, unit), timeout=20)
+                % (outf, outf, rcf, unit), timeout=25)
             return code, tail
+        # the unit is gone AND never wrote a code: it was killed (OOM,
+        # a reboot, someone stopping it). Say so rather than calling it
+        # a success, which is what a default-0 read would have done.
+        if first in ("inactive", "failed", "dead"):
+            _r, tail = ssh_run(
+                conf, "tail -c 4000 %s 2>/dev/null; rm -f %s %s; "
+                "systemctl reset-failed %s 2>/dev/null || true"
+                % (outf, outf, rcf, unit), timeout=25)
+            return -1, (tail or "") + "\n(the job stopped without "
+            "recording an exit code — it may have been killed)"
         if emit_status:
             try:
-                emit_status("still running (" + active + ")")
+                emit_status("still running (" + (first or "starting") + ")")
             except Exception:
                 pass
     return -1, ("(long job still running after %d min — left it going on "
@@ -5436,10 +5483,14 @@ def remote_driver():
     return None
 
 
-def _agent_turn(driver, convo) -> str:
+def _agent_turn(driver, convo, budget: int = 8000) -> str:
+    """One planning turn. `budget` is max_tokens, which on a thinking
+    model has to cover the reasoning AND the answer — the caller raises
+    it on a retry rather than treating an empty turn as a dead key."""
     kind, who = driver
     if kind == "cloud":
-        return strip_think(cloud_text(who, convo, timeout=90))
+        return strip_think(cloud_text(who, convo, timeout=90,
+                                      max_tokens=budget))
     parts = []
     try:
         run_model(who, convo, parts.append)
@@ -5605,12 +5656,25 @@ def run_remote_agent(messages, conf, autonomy, emit, status, step,
         # abandon work in progress.
         text, act = "", {}
         for _try in range(4):
-            text = _agent_turn(driver, convo)
+            # more room to think on each retry: one cause of an empty
+            # turn is a thinking model spending the whole budget
+            text = _agent_turn(driver, convo, budget=8000 + 6000 * _try)
             act = _parse_action(text)
             if act or text.strip():
                 break
-            status("driver went quiet — retrying")
-            time.sleep(2.0 * (_try + 1))
+            # THE OTHER CAUSE IS A 429 (6b255, found live driving a real
+            # upgrade): cloud_text swallows a rate limit as "", and the
+            # old 1.5s-4.5s backoff gave up long before the window
+            # cleared — a healthy key looked dead mid-task. Back off for
+            # real, and RE-RESOLVE the driver so a provider that just
+            # got rested hands over to the next one on the bench.
+            status("driver is rate limited or quiet — backing off")
+            time.sleep((4, 12, 25, 40)[_try])
+            nd = remote_driver()
+            if nd:
+                driver = nd
+                driver_name = (nd[1].get("name", "cloud")
+                               if nd[0] == "cloud" else nd[1])
         if not act:
             if not text.strip():
                 emit("The driver model went quiet — a cloud hiccup, not a "

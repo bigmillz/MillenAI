@@ -256,6 +256,19 @@ if s == 200:
               for c in ("ls -la", "apt install -y nginx")) == 1
           and max(_RANK.index(_cls(c))
                   for c in ("ls -la", "reboot")) == 2)
+
+# 6b255: the long-job engine, hardened by a live agent-driven run.
+# Four bugs the run exposed, each guarded here because each one made a
+# SUCCESSFUL job look like a failure (or ran it twice):
+check("long-job engine: no double-run, honest exit codes",
+      "--no-block" in _MILLENAI_SRC          # systemd-run blocks on oneshot
+      and "__LIVE__" in _MILLENAI_SRC        # don't re-run an already-started job
+      and "( %s ) > %s 2>&1; echo $? > %s" in _MILLENAI_SRC  # subshell, not brace
+      and "__DONE__" in _MILLENAI_SRC)       # exit code from a file, not systemd
+check("thinking budget and rate-limit backoff",
+      'stop_reason") == "max_tokens"' in _MILLENAI_SRC
+      and "budget=8000 + 6000 * _try" in _MILLENAI_SRC
+      and "(4, 12, 25, 40)[_try]" in _MILLENAI_SRC)
 # 6b248: the Advanced council — menu row behind a divider, the picker
 # veil, per-model use-lines, and the compositor dropdown with guidance
 check("advanced council picker present",

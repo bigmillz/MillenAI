@@ -3825,3 +3825,44 @@ Workspace.
   and not 12; the wrap line fires at 23 and 01 and not 12; Friday fires
   Friday and not Tuesday; the Marathon fires Nov 2 but not Nov 16.
 - Gauntlet 83/83.
+
+## 6 beta 255 (cont.) — the last unverified link, and the 4 bugs it found
+ANSWER: both protocols work. A live agent-driven run on the droplet
+surveyed the box, ran the upgrade as a LONG job, emitted the REBOOT
+action, waited, reconnected, verified health and reported — autonomously.
+Confirmed independently on the box: uptime 0 min, fresh boot stamp,
+is-system-running=running, 0 failed units, 0 pending upgrades, 0
+leftover temp files.
+
+But the FIRST run stalled, and chasing it found four real bugs — every
+one of which made a SUCCESSFUL job look like a failure:
+1. systemd-run WAITS on a Type=oneshot unit. Without --no-block the
+   launch call blocked for the whole job, timed out at 30s, and the
+   "systemd-run unavailable" fallback then ran the command a SECOND
+   time, blocking, while the first copy was still going. On apt the
+   twin hit the dpkg lock the original held and reported failure on an
+   upgrade that had actually succeeded. On anything non-idempotent it
+   would have done the work twice for real. Proven with a counter file:
+   body ran twice before, exactly once after.
+2. The fallback now ASKS THE BOX whether the unit exists before
+   re-running. A launch that merely timed out has still started the job.
+3. --collect garbage-collects the unit the instant it exits, so
+   ExecMainStatus read back as systemd's DEFAULT of 0 and every failure
+   reported success. (The earlier "exit 42 OK" was the blocking
+   fallback working, masking this.) The job now writes its own exit
+   code to a file, immune to the unit lifecycle.
+4. `{ cmd ; }` is a brace group in the CURRENT shell, so a command
+   ending in `exit 33` killed the wrapper before it could record the
+   code. A subshell `( cmd )` contains the exit. Verified: exit 33 -> 33,
+   grep-no-match -> 1, success -> 0, single-quoted cmd -> 0.
+- THE STALL ITSELF was two separate things. claude-sonnet-5 emits a
+  `thinking` block and max_tokens covers reasoning AND answer, so a turn
+  that thinks hard can return NO text block — cloud_text saw "", called
+  it "returned nothing", and RESTED A HEALTHY KEY for ten minutes. It
+  now returns "" quietly when stop_reason is max_tokens (our budget, not
+  their fault), the agent starts at 8000 and escalates 6000 per retry.
+  The rest was plain 429s from hammering one provider; backoff went from
+  1.5-4.5s (useless against a rate limit) to 4/12/25/40s, and the driver
+  is RE-RESOLVED between retries so a rested provider hands off to the
+  next on the bench.
+- Gauntlet 85/85.
