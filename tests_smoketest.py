@@ -142,6 +142,27 @@ check("three-tab glide in thirds", "width:calc(33.334% - 2px)" in page
       and "translateX(200%)" in page)
 check("funnels tab present", 'data-m="funnel"' in page
       and 'id="fn-goal"' in page and 'id="fn-stages"' in page)
+# 6b253: the funnel lane gets DECISIONS, not questions — 190 rotating
+# across 10 themed groups plus 10 "stuck" prompts surfaced persistently
+# (the escape hatch for a decision that's on no list)
+check("funnel decision chips + persistent stuck chip",
+      "const FUNNEL_SETS=[" in page and "const FUNNEL_STUCK=[" in page
+      and "startFunnel" in page and 'id="fnl-stuck"' in page
+      and ".sugg.stuck{" in page
+      and page.count("FUNNEL_SETS") >= 2)
+# tender decisions shift the funnel from narrowing to SUPPORTING, and
+# it keys off the GOAL TEXT so a typed decision gets the same care as a
+# clicked chip
+check("funnel care mode for tender decisions",
+      "_TENDER_RX" in _MILLENAI_SRC and "FUNNEL_CARE" in _MILLENAI_SRC
+      and "def funnel_sys_for" in _MILLENAI_SRC
+      and _MILLENAI_SRC.count("funnel_sys_for(goal)") == 2
+      and "FUNNEL_SYS}," not in _MILLENAI_SRC)
+# the picker used to scroll sideways: 1fr columns won't shrink below
+# max-content, and .tn is nowrap. minmax(0,1fr) is the fix.
+check("task picker: no horizontal scroll",
+      "grid-template-columns:repeat(2,minmax(0,1fr))" in page
+      and "#task-card{width:940px" in page)
 check("sidebar defaults to 300px", "width:300px;min-width:300px" in page)
 # 6.0b206: rich answers — flow diagrams, code cards, highlighter
 check("flow diagram renderer", "flowDiagram" in page and "wireFlow" in page
@@ -251,6 +272,13 @@ check("voice chat parked, and stale flag cleared",
       and 'localStorage.setItem("millen.voice","0")' in page)
 check("arena removed", "arena" not in page.lower())
 check("blend progress bar css", ".blendprog" in page)
+# 6b253: ONE progress aesthetic everywhere — thin, SHARP-cornered, and
+# a fill that breathes. The old sideways shimmer is retired; assert its
+# keyframe is gone so a bar can't quietly go back to sweeping.
+check("progress bars: sharp + breathing, no shimmer",
+      "@keyframes barBreathe" in page
+      and "skyshimmer" not in page
+      and "animation:barBreathe" in page)
 check("serene entrance css", "heroIn 2.6s" in page and "shockOut" not in page)
 # 5.2 surface (agents tab pulled again in 6b209 — two tabs is correct)
 check("tab selector with Code lane", 'data-m="code"' in page

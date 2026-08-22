@@ -3655,3 +3655,92 @@ Workspace.
   correctly refuses (hit this when Patrick rebuilt the box — needed a
   manual ssh-keygen -R). That refusal is a feature, not a bug.
 - Gauntlet 76/76.
+
+## 6 beta 253 (pending) — one progress aesthetic, Claude-compacting-style
+- Per Patrick: mimic Claude's compacting bar — thin, sharp, subtle
+  pulsing glow. SIX bar families existed, all different (10px rounded,
+  9px rounded, 5px bordered, 18px pill, two 3px). Now one look:
+  2px inline / 3px panel, border-radius 0, hairline track at
+  rgba(255,255,255,.07), flat #ecedf2 fill.
+- THE SHIMMER IS RETIRED. The old bars swept a multi-stop gradient
+  sideways (@keyframes skyshimmer), which reads as busy. Replaced with
+  @keyframes barBreathe — a box-shadow glow rising and falling IN PLACE.
+  Alive but calm, and it doesn't fight the text next to it. The orphaned
+  skyshimmer keyframe was deleted, not left as dead CSS.
+- METERS ARE THE ONE EXCEPTION, deliberately: the sidebar telemetry
+  reads a LIVE VALUE, not progress toward a finish, so it gets the same
+  thin/sharp treatment but a STEADY glow. Only bars that are actually
+  working animate — otherwise the motion means nothing.
+- FOUND WHILE PATCHING: .blendprog had TWO full track+fill rules; the
+  second silently overrode the first, so its box-shadow glow had never
+  rendered. Collapsed to one.
+- Gauntlet 77/77 (new check asserts barBreathe exists AND skyshimmer is
+  gone, so a bar can't quietly go back to sweeping).
+
+## 6 beta 253 (cont.) — funnel decisions + the picker's sideways scroll
+- THE FUNNEL LANE GETS DECISIONS, not questions (Patrick's 200-prompt
+  set). 190 across 10 themed groups rotate one chip each — Daily, Home,
+  Career, Money, Travel, Health, Relationships, Learning, Tech, Life
+  Direction — trimmed to ONE row like the other lanes.
+- THE STUCK GROUP IS PERSISTENT, not rotated (per Patrick's note): one
+  of the 10 escape-hatch prompts is ALWAYS the last chip and always
+  survives the trim, the way "⋯" does in the Code lane. Styled dashed
+  and quieter with flex:0 0 auto, so it reads as a different KIND of
+  affordance — "none of these" rather than an eleventh decision — and
+  never steals width from the real ones.
+- Clicking a funnel chip fills #fn-goal (emoji stripped) and fires
+  #fn-go, so the chip IS the decision — nothing left to type.
+- TENDER DECISIONS SHIFT THE FUNNEL FROM NARROWING TO SUPPORTING
+  (Patrick flagged 105/109/113/125). Implemented SERVER-SIDE off the
+  GOAL TEXT rather than as a tag on the canned chips, so someone who
+  TYPES "should I leave my marriage" gets the same care as someone who
+  clicked a suggestion — the tagged-chip version would have missed
+  every real user in that moment. _TENDER_RX covers ending a
+  relationship, seeing a clinician, mental health, substances,
+  diagnoses and bereavement; FUNNEL_CARE tells the model to acknowledge
+  the weight in one clause, frame options as ways to think rather than
+  verdicts, always allow "gather more information / take time", refuse
+  to diagnose, and keep the person's dignity. funnel_sys_for(goal) is
+  the ONE place that decides, used by both call sites.
+  Detector verified 27/27: fires on all four flagged items plus typed
+  variants; stays quiet on dinner, laptops, rent, jobs, sleep, exercise
+  and "should I end this subscription".
+- THE TASK PICKER SCROLLED SIDEWAYS and the cause was a classic: a grid
+  item's default min-width is auto = max-content, so a long task name
+  with white-space:nowrap forced its column wider than its share.
+  grid-template-columns:repeat(2,minmax(0,1fr)) lets the column shrink
+  so the ellipsis does its job. Card widened 720 -> 940px too. Verified
+  at 1440px: 53 rows, two full columns, scrollWidth == clientWidth,
+  exactly one name still ellipsised.
+- Gauntlet 80/80.
+
+## 6 beta 253 (cont.) — the funnel lane gets decisions, not questions
+- Patrick's 200-prompt set, verbatim, in 10 themed groups (Daily, Home,
+  Career, Money, Travel, Health, Relationships, Learning 15, Tech 15,
+  Life Direction) + a 10-strong "Situational & Stuck" pool. Verified
+  the group sizes against his list: 20/20/20/20/20/20/20/15/15/20/10.
+- ONE PER GROUP, SHUFFLED — never five dinner decisions in a row —
+  then trimmed to a single row, same measure-and-trim as the Code lane.
+- THE STUCK CHIP IS PERSISTENT (his note: surface it rather than
+  rotate it). It's the escape hatch for a decision that's on no list,
+  or that the person can't phrase yet, so it always survives the trim —
+  and if IT wraps, decisions get dropped until it fits back up. Styled
+  as a different KIND of offer: dashed, dimmer, flex:0 so it never
+  stretches to fill the row like a real decision does.
+- TENDER DECISIONS SHIFT FROM NARROWING TO SUPPORTING (his note on
+  #105/#109/#113/#125). Detected from the GOAL TEXT, not from a tagged
+  chip — so someone who TYPES "should I leave my marriage" gets the
+  same care as someone who clicked a suggestion. That was the whole
+  reason not to tag chips.
+  FUNNEL_CARE tells the model to open by acknowledging the weight in
+  one clause, frame options as ways to think rather than verdicts,
+  offer "gather more information / take time / talk to someone
+  qualified" as a real option, never diagnose, and keep the person's
+  dignity. funnel_sys_for() is the ONE place it's applied, wired at
+  both funnel entry points.
+- Detection measured: 12/12 tender phrasings caught (incl. typed ones
+  and "should I go back on my antidepressants"), 14/14 cold decisions
+  left alone — including "stress test this server", which is why the
+  pattern is `stress(?!\s*test)`: the Code lane shares this module.
+- Gauntlet 80/80. (Deduped: I'd added a second copy of two funnel
+  checks that already existed from before the session interruption.)

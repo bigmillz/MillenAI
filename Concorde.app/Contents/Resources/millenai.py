@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 252               # integer compared against the GitHub release tag
+APP_BUILD = 253               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -6028,6 +6028,59 @@ FUNNEL_SYS = (
     "and make every option a real, specific thing — a named choice, not "
     "a category. Respect the user's stated requirements absolutely.")
 
+# SOME DECISIONS ARE NOT RESTAURANT PICKS (6b253, per Patrick's note on
+# the funnel set): health, the end of a relationship, cutting back on
+# drinking, whether to see a doctor. A funnel that treats those like
+# choosing a laptop reads cold, and cold is the one thing that makes a
+# person close the tab. Detected from the GOAL TEXT rather than from a
+# tagged chip, so someone who TYPES "should I leave my marriage" gets
+# the same care as someone who clicked a suggestion.
+_TENDER_RX = re.compile(
+    r"\b(end|leave|break\s*up|divorc\w*|separat\w*)\b[^.]{0,40}"
+    r"\b(relationship|marriage|partner|him|her|them|wife|husband|"
+    r"boyfriend|girlfriend|engagement)\b|"
+    # both word orders: "should I SEE a specialist" and "which
+    # SPECIALIST should I see" — the noun alone is enough, since a
+    # clinician's title rarely appears in a non-medical decision
+    r"\b(doctors?|therapists?|specialists?|psychiatrists?|"
+    r"counsell?ors?|physio\w*|dermatologists?|cardiologists?|"
+    r"oncologists?)\b|"
+    r"\b(depress\w*|anxiet\w*|anxious|suicid\w*|self.?harm|grief|"
+    r"grieving|mental\s+health|burn(ed|t)?\s*out|panic\s+attack|"
+    # "stress" but never "stress test" — that is a server task, and the
+    # Code lane shares this module
+    r"stress(?!\s*test)|overwhelm\w*|therap\w*|"
+    r"antidepressant\w*|medications?|\bmeds\b)\b|"
+    r"\b(drinking|alcohol|sober|sobriety|smoking|vaping|addict\w*|"
+    r"relapse)\b|"
+    r"\b(diagnos\w*|symptom|chronic\s+pain|cancer|surgery|miscarr\w*)\b|"
+    r"\b(dying|hospice|funeral|passed\s+away)\b",
+    re.I)
+
+FUNNEL_CARE = (
+    "\n\nTHIS DECISION IS A TENDER ONE — it touches the person's health, "
+    "their body, or someone they love. Shift from narrowing to "
+    "SUPPORTING:\n"
+    "- Open by acknowledging the weight of it in ONE short clause. Never "
+    "gush, never perform sympathy, and never open with a heading.\n"
+    "- Options are still concrete, but frame them as ways to think about "
+    "it or next steps to take — never as verdicts on what they should "
+    "feel or do about a person.\n"
+    "- Include an option that is about gathering more information, "
+    "taking time, or talking to someone qualified, where that honestly "
+    "fits. Not every decision should be forced to a conclusion today.\n"
+    "- For anything medical, be clear you are not a clinician and that "
+    "a real one is the right call. Do not diagnose, and do not "
+    "speculate about what a symptom means.\n"
+    "- Keep the person's dignity in every word. They are deciding, not "
+    "being processed.")
+
+
+def funnel_sys_for(goal: str) -> str:
+    """The funnel's system prompt, softened when the decision deserves
+    it (6b253). One place, so every funnel entry point agrees."""
+    return FUNNEL_SYS + (FUNNEL_CARE if _TENDER_RX.search(goal or "") else "")
+
 
 def funnel_stage(goal, reqs, opts, stage, total, picks, want_img=False):
     """One stage: a question plus `opts` options, as structured data."""
@@ -6046,7 +6099,7 @@ def funnel_stage(goal, reqs, opts, stage, total, picks, want_img=False):
     label = next((l for l in ("Gemma 4 26B", "Gemma 4 12B", "Qwen 3.6 35B MoE",
                               "Llama 3.1 8B")
                   if model_cached(l) and model_fits_memory(l)), "")
-    msgs = [{"role": "system", "content": FUNNEL_SYS},
+    msgs = [{"role": "system", "content": funnel_sys_for(goal)},
             {"role": "user", "content": ask}]
     raw = ""
     if load_prefs(None).get("turbo") and cloud_conf():
@@ -7456,7 +7509,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             stage = len(picks) + 1
             if stage > total:
                 # the funnel is spent — summarise the path taken
-                msgs = [{"role": "system", "content": FUNNEL_SYS},
+                msgs = [{"role": "system", "content": funnel_sys_for(goal)},
                         {"role": "user", "content":
                          "DECISION: %s\nREQUIREMENTS: %s\nThe user chose, "
                          "in order: %s\n\nIn under 120 words, state the "
@@ -8853,13 +8906,11 @@ body.resizing{cursor:col-resize;user-select:none}
 #dlstrip{display:flex;align-items:center;gap:8px;margin:2px 2px 4px;
   cursor:pointer}
 #dlstrip[hidden]{display:none}
-#dlstrip .dltrack{flex:1;height:5px;border-radius:3px;overflow:hidden;
-  background:rgba(255,255,255,.09);
-  border:1px solid rgba(255,255,255,.14)}
-#dlstrip .dlfill{height:100%;width:0;border-radius:3px;
-  background:linear-gradient(90deg,#f0f1f4,#c6cad3,#e6e8ec,#a9aeb9,#f0f1f4);
-  background-size:220% 100%;transition:width .6s ease}
-body:not(.perf) #dlstrip .dlfill{animation:skyshimmer 3.2s linear infinite}
+#dlstrip .dltrack{flex:1;height:2px;border-radius:0;overflow:hidden;
+  background:rgba(255,255,255,.07)}
+#dlstrip .dlfill{height:100%;width:0;border-radius:0;background:#ecedf2;
+  transition:width .6s cubic-bezier(.4,0,.2,1)}
+body:not(.perf) #dlstrip .dlfill{animation:barBreathe 2.4s ease-in-out infinite}
 #dlstrip .dllbl{font-family:var(--mono);font-size:9.5px;
   letter-spacing:.12em;color:var(--faint);white-space:nowrap}
 #dlstrip:hover .dllbl{color:var(--dim)}
@@ -9057,7 +9108,7 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
   backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);
   display:flex;align-items:center;justify-content:center}
 #task-veil[hidden]{display:none}
-#task-card{width:720px;max-width:calc(100vw - 40px);
+#task-card{width:940px;max-width:calc(100vw - 40px);
   height:min(560px,calc(100vh - 80px));
   background:var(--panel2);border:1px solid var(--line);border-radius:14px;
   box-shadow:0 24px 80px rgba(0,0,0,.55);overflow:hidden;
@@ -9082,10 +9133,16 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
   border:1px solid var(--line);border-radius:9px;padding:8px 11px;
   font-size:12.5px;outline:none}
 #task-q:focus{border-color:rgba(143,157,255,.6)}
-#task-list{flex:1;overflow-y:auto;padding:10px 12px 14px;
-  display:grid;grid-template-columns:1fr 1fr;gap:7px;align-content:start}
+/* minmax(0,1fr), NOT 1fr (6b253): a grid item's default min-width is
+   auto = max-content, so a long task name with white-space:nowrap
+   forced its column wider than its share and the whole list scrolled
+   sideways. minmax(0,…) lets the column actually shrink so the
+   ellipsis does its job. */
+#task-list{flex:1;overflow-y:auto;overflow-x:hidden;padding:10px 12px 14px;
+  display:grid;grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:7px;align-content:start}
 .trow{display:flex;align-items:center;gap:9px;padding:10px 11px;
-  border-radius:10px;cursor:pointer;text-align:left;
+  min-width:0;border-radius:10px;cursor:pointer;text-align:left;
   background:rgba(255,255,255,.03);border:1px solid var(--line);
   color:var(--text);font-size:12.5px;transition:all .13s}
 .trow:hover{background:var(--accent-dim);border-color:rgba(255,255,255,.3)}
@@ -9256,13 +9313,34 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
   font-size:10.5px;color:var(--dim);margin-bottom:3px;min-height:18px;
 }
 .meter-label b{color:var(--text);font-weight:500}
-.meter{height:3px;border-radius:2px;background:rgba(255,255,255,.10);
+/* THE PROGRESS AESTHETIC (6b253, per Patrick — Claude's compacting bar):
+   thin, SHARP-cornered, and a fill that BREATHES rather than shimmers.
+   The shimmer swept a gradient sideways, which reads as busy; a soft
+   glow rising and falling in place reads as alive but calm. One look
+   everywhere — download strip, setup panel, answer worktree, sidebar
+   meters, backdrop loader — so progress always looks like progress. */
+@keyframes barBreathe{
+  0%,100%{box-shadow:0 0 5px rgba(236,238,244,.28),
+                     0 0 1px rgba(236,238,244,.50)}
+  50%    {box-shadow:0 0 13px rgba(236,238,244,.62),
+                     0 0 3px rgba(236,238,244,.90)}
+}
+/* the track a bar runs in: a hairline of dark, never a container */
+.pbar-track{border-radius:0;overflow:hidden;
+  background:rgba(255,255,255,.07)}
+.pbar-fill{height:100%;width:0;border-radius:0;background:#ecedf2;
+  transition:width .5s cubic-bezier(.4,0,.2,1)}
+body:not(.perf) .pbar-fill{animation:barBreathe 2.4s ease-in-out infinite}
+.meter{height:2px;border-radius:0;background:rgba(255,255,255,.07);
   overflow:hidden}
-.meter .mfill{height:100%;width:0;border-radius:2px;
-  background:linear-gradient(90deg,var(--accent),var(--accent-hot));
-  box-shadow:0 0 10px var(--accent-dim);
+.meter .mfill{height:100%;width:0;border-radius:0;
+  background:var(--accent-hot);
   transition:width .6s cubic-bezier(.4,0,.2,1),background .4s}
-.meter .mfill.hot{background:linear-gradient(90deg,var(--accent-hot),#e26d5a)}
+.meter .mfill.hot{background:#e26d5a}
+/* meters read a LIVE value, not progress to a finish — they glow
+   steadily rather than breathing, so the animated bars stay the ones
+   that are actually working */
+.meter .mfill{box-shadow:0 0 7px rgba(236,238,244,.22)}
 @keyframes blink{50%{opacity:.25}}
 /* performance mode: telemetry goes dark AND stops polling (the GPU probe
    and meter repaints are the expensive part) */
@@ -9315,19 +9393,11 @@ body.gen #skyline,body.gen #stars{filter:brightness(.7)}
 /* never over an answer: a mid-session backdrop download must not paint
    its bar across streaming text (seen live) */
 body.gen #skyload{display:none!important}
-#skyload .track{height:18px;border-radius:10px;overflow:hidden;
-  background:rgba(255,255,255,.09);
-  border:1px solid rgba(255,255,255,.25);
-  box-shadow:0 6px 30px -10px rgba(0,0,0,.7),
-             inset 0 1px 3px rgba(0,0,0,.35)}
-#skyload .fill{height:100%;width:0;border-radius:10px;
-  background:linear-gradient(90deg,#f0f1f4,#c6cad3,#e6e8ec,#a9aeb9,#f0f1f4);
-  background-size:220% 100%;
-  box-shadow:0 0 22px rgba(255,255,255,.4);
-  transition:width .5s ease}
-body:not(.perf) #skyload .fill{animation:skyshimmer 3.2s linear infinite}
-@keyframes skyshimmer{from{background-position:0% 0}
-                      to{background-position:220% 0}}
+#skyload .track{height:3px;border-radius:0;overflow:hidden;
+  background:rgba(255,255,255,.10)}
+#skyload .fill{height:100%;width:0;border-radius:0;background:#ecedf2;
+  transition:width .5s cubic-bezier(.4,0,.2,1)}
+body:not(.perf) #skyload .fill{animation:barBreathe 2.4s ease-in-out infinite}
 #skyload .lbl{margin-top:13px;font-size:13px;letter-spacing:.24em;
   text-transform:uppercase;color:#dfe3ee;font-family:var(--mono);
   text-shadow:0 2px 14px rgba(0,0,0,.7)}
@@ -9599,12 +9669,11 @@ body:not(.perf) .autoseg[data-a="full"].on .ai{animation:flameP 1.5s ease infini
   background:rgba(6,7,10,.5);border:1px solid rgba(255,255,255,.09);
   -webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px);
   font-family:var(--sans)}
-.wtbar{height:3px;border-radius:2px;background:rgba(255,255,255,.09);
+.wtbar{height:2px;border-radius:0;background:rgba(255,255,255,.07);
   overflow:hidden;margin-bottom:10px}
-.wtbar i{display:block;height:100%;border-radius:2px;
-  background:linear-gradient(90deg,#f0f1f4,#c6cad3,#e6e8ec,#b4b9c3,#dfe2e7);
-  background-size:220% 100%;transition:width .45s ease}
-body:not(.perf) .wtbar i{animation:skyshimmer 3s linear infinite}
+.wtbar i{display:block;height:100%;border-radius:0;background:#ecedf2;
+  transition:width .45s cubic-bezier(.4,0,.2,1)}
+body:not(.perf) .wtbar i{animation:barBreathe 2.4s ease-in-out infinite}
 /* the living pinwheel (5.2): Claude has its flower — ours spins the
    identity gradient beside whatever is in motion */
 .wthead{display:flex;align-items:center;gap:9px;margin-bottom:10px}
@@ -9820,17 +9889,14 @@ body:not(.perf) .wtrow.run .wtdot{animation:blink 1s ease-in-out infinite}
 
 /* the blend progress bar — replaces live draft output entirely */
 .blendprog{margin:10px 0 16px;max-width:520px}
-.blendprog .track{height:4px;border-radius:2px;overflow:hidden;
-  background:rgba(255,255,255,.10)}
-.blendprog .fill{height:100%;width:0;border-radius:2px;
-  background:linear-gradient(90deg,var(--accent),var(--accent-hot));
-  box-shadow:0 0 12px var(--accent-dim)}
+
 .blendprog .lbl{font-family:var(--mono);font-size:13px;letter-spacing:.12em;
   text-transform:uppercase;color:var(--dim);margin-bottom:9px}
-.blendprog .track{height:9px;border-radius:5px;overflow:hidden;
-  background:rgba(255,255,255,.12)}
-.blendprog .fill{height:100%;width:0;border-radius:5px;background:#d6d8de;
-  transition:width .5s ease}
+.blendprog .track{height:3px;border-radius:0;overflow:hidden;
+  background:rgba(255,255,255,.07)}
+.blendprog .fill{height:100%;width:0;border-radius:0;background:#ecedf2;
+  transition:width .5s cubic-bezier(.4,0,.2,1)}
+body:not(.perf) .blendprog .fill{animation:barBreathe 2.4s ease-in-out infinite}
 
 .draft{
   border-left:2px solid var(--line);margin:8px 0 0;padding:2px 0 2px 12px;
@@ -10101,6 +10167,13 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   pointer-events:auto;
 }
 #suggest[hidden]{display:none}
+/* the funnel's persistent escape hatch (6b253): dashed and quieter, so
+   it reads as a different KIND of thing than the decisions beside it —
+   "none of these" rather than an eleventh option. It never grows to
+   fill the row, so the real decisions keep the space. */
+.sugg.stuck{border-style:dashed;color:var(--faint);
+  background:rgba(255,255,255,.02);flex:0 0 auto}
+.sugg.stuck:hover{color:var(--text);border-style:solid}
 .sugg{
   /* the emoji fonts are named explicitly: Space Grotesk carries no
      glyphs for them and the ZWJ sequences fell through to tofu */
@@ -10120,6 +10193,17 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   border-color:rgba(255,255,255,.2);color:var(--text)}
 .sugg:focus-visible{outline:2px solid rgba(255,255,255,.35);
   outline-offset:2px}
+/* THE ESCAPE HATCH (6b253, per Patrick's note on the funnel set): the
+   Situational & Stuck line is surfaced PERSISTENTLY rather than left to
+   rotation — it's the way in for anyone whose real decision isn't on
+   the list, or who can't phrase it yet. Dashed and quieter so it reads
+   as a different KIND of offer, not another decision competing with
+   the real ones, and it never grows to fill the row. */
+.sugg.fnl.stuck{flex:0 0 auto;color:var(--faint);
+  background:none;border-style:dashed;
+  border-color:rgba(255,255,255,.16)}
+.sugg.fnl.stuck:hover{color:var(--text);background:rgba(255,255,255,.05);
+  border-color:rgba(255,255,255,.3)}
 @keyframes suggIn{from{opacity:0;transform:translateY(4px)}
   to{opacity:1;transform:none}}
 @media (prefers-reduced-motion:reduce){.sugg{animation:none}}
@@ -10640,9 +10724,11 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   background:linear-gradient(90deg,var(--accent),var(--teal));
   transition:width .6s ease;
 }
-.big-bar{height:10px;background:var(--line-soft);border-radius:6px;overflow:hidden;margin:6px 0 10px}
-.big-bar i{display:block;height:100%;width:0;border-radius:6px;
-  background:linear-gradient(90deg,#8e8e8e,#ececec);transition:width .5s ease}
+.big-bar{height:3px;background:rgba(255,255,255,.07);border-radius:0;
+  overflow:hidden;margin:10px 0 12px}
+.big-bar i{display:block;height:100%;width:0;border-radius:0;
+  background:#ecedf2;transition:width .5s cubic-bezier(.4,0,.2,1)}
+body:not(.perf) .big-bar i{animation:barBreathe 2.4s ease-in-out infinite}
 .big-stat{display:flex;justify-content:space-between;font-family:var(--mono);
   font-size:11px;color:var(--dim)}
 .big-speed{font-family:var(--mono);font-size:11px;color:var(--teal);margin-top:6px}
@@ -13443,6 +13529,35 @@ const SUGG_SETS=[
 ["💬 How do I make friends as an adult?","🎁 What do I get someone who has everything?","💌 Help me write a birthday message","🗨️ How do I start a conversation with anyone?","💔 How do I get over a breakup?","👨‍👩‍👧 How do I deal with difficult family?","🥂 What do I say in a wedding toast?","🙅 How do I say no without feeling guilty?","💐 Date ideas that aren't dinner and a movie","😬 How do I recover from an awkward moment?","📱 Should I text them back?","🧑‍🤝‍🧑 How do I keep long-distance friendships alive?","🗣️ How do I apologize properly?","🎉 How do I throw a party people enjoy?","👶 What do new parents actually need?","🙃 How do I handle a bad boss?","💍 How much should I spend on a gift?","🤐 How do I stop oversharing?","🫂 What do I say when someone's grieving?","🎊 Good questions to ask at a dinner party"],
 ["🤔 Explain something complicated in simple terms","🎲 Tell me something I don't know","🧠 What are the most common logical fallacies?","🕰️ What was daily life like 200 years ago?","🗿 Historical mysteries nobody has solved","💭 Why do we dream?","😂 Why do we laugh?","🐈 Why do cats do that?","🔮 What will life look like in 50 years?","⚖️ Is free will real?","🌏 Why are there so many languages?","📜 The most important inventions ever made","🧿 Where do superstitions come from?","🎰 What are the real odds of winning the lottery?","🧑‍⚖️ Laws that make absolutely no sense","🐜 How many ants are there on Earth?","🤖 How does AI actually work?","🌎 What if everyone jumped at the same time?","🗺️ Why are borders shaped the way they are?","❓ Ask me a question that makes me think"]];
 
+/* ---------------------------------------------- funnel decisions (6b253) */
+// Open decisions with REAL tradeoffs — the kind where narrowing
+// questions earn their keep, rather than lookups wearing a decision
+// costume. Ten themed groups rotate one chip each.
+const FUNNEL_SETS=[
+["🍳 What should I make for dinner?","📋 What should I do first tomorrow?","🌅 How should I spend this morning?","🛋️ What should I do with a free evening?","📺 What should I watch tonight?","🎧 What should I listen to right now?","📖 What should I read next?","🎮 What should I play next?","🍱 What should I bring for lunch this week?","☕ Where should I work from today?","🧹 What should I clean first?","📱 What should I do instead of scrolling?","💤 What time should I actually go to bed?","🏃 What workout should I do today?","🛒 What should I put on the grocery list?","📅 What should I cancel this week?","🎒 What should I bring with me today?","🍽️ Where should we eat tonight?","🧺 What should I do with this Sunday?","⏰ What should I do with this random free hour?"],
+["🏙️ Where should I live?","🏠 Should I rent or buy?","📦 Should I move or stay put?","🛏️ How should I lay out this room?","🎨 What color should I paint this?","🪑 What furniture should I buy first?","🏘️ Which neighborhood fits me best?","🐕 Should I get a pet?","🪴 What plants should I get?","🔨 Should I fix it or replace it?","🧰 What should I do with this space?","🚗 Should I keep a car in the city?","🗄️ What should I get rid of?","🏡 Should I renovate or just move?","🛠️ DIY it or hire someone?","🧊 What appliance should I upgrade first?","🔐 Should I renew this lease?","🏢 Apartment or house?","🌇 City, suburb, or somewhere quiet?","📐 What should I do with this awkward corner?"],
+["💼 Should I take this job?","🚪 Should I quit my job?","💰 How should I ask for a raise?","🔀 Should I change careers?","🎯 What should I focus on this quarter?","🏗️ What should I build next?","📈 Should I go freelance or stay employed?","🧑‍💻 What skill should I learn for work?","🗣️ How should I handle this with my boss?","🏢 Should I go back to the office?","⏳ What should I delegate?","📝 Which project should I kill?","🎓 Should I go back to school?","🚀 Should I start my own thing?","🤝 Should I take this client?","📧 How should I respond to this?","🧭 What should my next career move be?","💸 Should I take less money for a better job?","🕐 Should I go part-time?","🏆 What should I put on my resume?"],
+["💵 What should I do with this money?","📊 Where should I put my savings?","💳 Which debt should I pay off first?","🏦 Should I invest or pay down debt?","🧾 How should I budget this month?","🛍️ Is this worth buying?","📉 Should I sell or hold?","🎁 How much should I spend on this gift?","🚙 Should I buy new or used?","🔁 Which subscriptions should I cut?","🏖️ How much should I spend on this trip?","🧮 Should I finance it or save for it?","💼 Should I take the salary or the equity?","🏥 Which insurance plan should I pick?","📆 Should I buy it now or wait?","💎 Splurge or save on this one?","🎰 What's actually worth paying for?","🏘️ How much rent can I really afford?","📤 Should I lend this money?","🥇 What should I prioritize financially this year?"],
+["✈️ Where should I travel next?","🗓️ When should I take my time off?","🌍 One big trip or a few small ones?","🧳 What should I pack?","🏨 Where should I stay?","🚆 Should I fly or drive?","🗺️ How many days should I spend here?","👥 Should I travel solo or with people?","🏝️ Beach, mountains, or city?","📍 What should I actually see while I'm there?","🎟️ Which of these should I book ahead?","🍜 Where should I eat on this trip?","🚗 Should I rent a car or use transit?","🏕️ Hotel or something more interesting?","🌡️ What's the best time of year to go?","💺 Is the upgrade worth it?","🧭 Should I plan it or wing it?","🎒 What should I cut from this itinerary?","🛂 Where can I actually go right now?","🏔️ Where should I go to disconnect?"],
+["🏋️ What kind of exercise should I actually do?","🥗 How should I change how I eat?","😴 How should I fix my sleep?","🧠 What should I do about my stress?","🩺 Should I see a doctor about this?","🚭 What habit should I quit first?","💪 Gym, home, or outside?","🧘 What should I try for my anxiety?","🍺 Should I cut back on drinking?","⏱️ Morning or evening workouts?","🦵 What should I do about this nagging pain?","🥤 What should I cut out of my diet?","🧑‍⚕️ Which specialist should I see?","📵 How should I handle my screen time?","🏃 What should I train for?","🧴 What's worth it in my routine?","🛌 How should I structure my day for energy?","🥦 What should I actually eat more of?","🚶 How should I move more without a gym?","🧑‍🤝‍🧑 Should I get a trainer or figure it out myself?"],
+["💬 How should I handle this conversation?","🎁 What should I get them?","💐 What should we do for our anniversary?","🙅 Should I say yes or no to this?","💔 Should I end this relationship?","📱 Should I reach out to them?","👨‍👩‍👧 How should I handle this family situation?","🎉 What kind of party should I throw?","🥂 What should I say in this toast?","🤐 Should I bring this up or let it go?","🧑‍🤝‍🧑 How should I make friends here?","🏡 Where should we host the holidays?","💌 How should I apologize?","🎂 How should I celebrate this birthday?","🗓️ Who should I make time for this month?","🍷 Should I go out or stay in?","💍 How should I plan this proposal?","🚪 Should I set a boundary here?","🤔 Should I tell them the truth?","🫂 How should I support someone going through it?"],
+["🎸 What instrument should I learn?","🗣️ What language should I learn?","💻 What should I learn to code first?","🎨 What creative thing should I try?","📚 What should I study this year?","🎓 Is this course worth taking?","🧑‍🍳 What skill would change my life most?","♟️ What hobby should I pick up?","🏊 What should I finally learn as an adult?","📝 What should I write about?","🎥 What should I make?","🧩 What should I get better at?","📖 Fiction or nonfiction this month?","🕰️ How should I use my learning time?","🎤 What should I do to get out of my comfort zone?"],
+["💻 Which laptop should I get?","📱 Should I upgrade my phone?","🎧 What headphones should I get?","🔊 How should I set up my audio?","🖥️ How should I set up my desk?","📸 What camera should I get?","☁️ How should I back up my stuff?","🔐 Which password manager should I use?","📺 What TV should I buy?","⌚ Is a smartwatch worth it?","🎮 Which console should I get?","🛜 Should I upgrade my internet?","🧑‍💻 Mac, PC, or Linux?","🔋 Repair it or replace it?","📂 How should I organize my files?"],
+["🧭 What should I do with the next year?","🎯 What should my goal be?","🔄 What should I change about my routine?","🌱 What should I start doing?","🛑 What should I stop doing?","⚖️ How should I spend my time differently?","🏔️ What's actually worth pursuing right now?","💭 What should I do about this feeling that something's off?","📌 What should I commit to?","🚦 Should I push through or pivot?","🗓️ What should this year be about?","🎲 Should I take the risk?","🧳 Should I make a big change or a small one?","🕊️ What should I let go of?","🏗️ What should I build my life around?","🔍 What should I say no to more often?","⏳ What am I putting off that I shouldn't?","🌊 Should I follow the plan or the opportunity?","🎪 What should I do just because I want to?","🧘 How should I define enough?"],
+];
+// THE ESCAPE HATCH, surfaced PERSISTENTLY rather than in rotation: for
+// anyone whose actual decision isn't on any list, and for anyone who
+// can't yet phrase what they're stuck on. One of these is always the
+// last chip, the way "⋯" always survives in the Code lane.
+const FUNNEL_STUCK=["🤷 I can't decide — help me pick.","⚖️ Help me weigh these two options.","🚧 I'm stuck between three things.","🔀 Which of these matters most?","❓ What am I not considering here?","🧊 Help me decide without overthinking it.","🎯 What would you do in my position?","📊 Break this decision down for me.","⏱️ I need to decide by tomorrow.","🪙 Just help me commit to something."];
+// clicking a funnel chip fills the goal and starts the funnel — the
+// chip IS the decision, so there is nothing left to type
+function startFunnel(text){
+  const g=$("#fn-goal"); if(!g)return;
+  g.value=text.replace(/^[^\w"'(]+\s*/,"").trim();
+  const go=$("#fn-go"); if(go)go.click();
+}
+
 function paintSuggest(){
   const box=$("#suggest"); if(!box)return;
   // THE CODE TAB GETS SERVER TASKS (6b250, per Patrick), not dinner
@@ -13485,6 +13600,45 @@ function paintSuggest(){
       el.addEventListener("click",()=>startTask(el.dataset.task)));
     const mb=$("#task-more");
     if(mb)mb.addEventListener("click",openTaskPicker);
+    return;
+  }
+  // THE FUNNEL LANE gets decisions, not questions (6b253) — one from
+  // each themed group, shuffled, plus a PERSISTENT "stuck" chip that
+  // always survives the trim. That chip is the escape hatch for anyone
+  // whose real decision isn't on the list, or who can't phrase it yet.
+  if(uiMode==="funnel"){
+    const fp=FUNNEL_SETS.map(s=>s[Math.floor(Math.random()*s.length)]);
+    for(let i=fp.length-1;i>0;i--){
+      const j=Math.floor(Math.random()*(i+1));
+      [fp[i],fp[j]]=[fp[j],fp[i]];
+    }
+    const stuck=FUNNEL_STUCK[Math.floor(Math.random()*FUNNEL_STUCK.length)];
+    box.innerHTML=fp.map(q=>'<button class="sugg fnl" type="button">'
+      +esc(q)+'</button>').join("")
+      +'<button class="sugg fnl stuck" type="button" id="fnl-stuck">'
+      +esc(stuck)+'</button>';
+    box.hidden=false;
+    const ftrim=()=>{
+      const kids=[...box.children];
+      if(!kids.length)return;
+      const top0=Math.round(kids[0].getBoundingClientRect().top);
+      kids.forEach(k=>{
+        if(k.id!=="fnl-stuck"
+           &&Math.round(k.getBoundingClientRect().top)!==top0)k.remove();
+      });
+      // if the stuck chip itself wrapped, drop decisions until it fits
+      const sc=$("#fnl-stuck");
+      let guard=0;
+      while(sc&&Math.round(sc.getBoundingClientRect().top)!==top0
+            &&box.querySelectorAll(".sugg.fnl:not(.stuck)").length>1
+            &&guard++<12){
+        box.querySelector(".sugg.fnl:not(.stuck)").remove();
+      }
+    };
+    requestAnimationFrame(ftrim);
+    setTimeout(ftrim,60);         // hidden documents never run rAF
+    box.querySelectorAll(".sugg.fnl").forEach(el=>
+      el.addEventListener("click",()=>startFunnel(el.textContent)));
     return;
   }
   // one from each area, shuffled — never five dinner questions together
