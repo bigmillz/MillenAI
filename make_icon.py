@@ -1,11 +1,14 @@
-"""Concorde app icon (6.1: touching full-bleed greyscale bars).
+"""ConcordeAI app icon (6b257: the star joins the family).
 
 The artwork fills the FULL Apple icon grid — an 824x824 squircle on
 the 1024 canvas (margins 100, corner radius ~185); anything bigger
 gets shrunk by the OS and reads SMALLER in the Dock (learned in 5.2).
-Inside: four parallel 45-degree capsules in the lower-right triangular
-half, purple sweeping to teal, on quiet charcoal. Drawn 2x and
-downsampled because PIL draws without antialiasing.
+Inside: greyscale 45-degree stripes bleeding through the lower-right
+half on quiet charcoal — identical construction to ConcordeVPN's icon
+(shared brand family; its make_icon.py is this file plus a lock) —
+with an eight-point compass star in the upper-left pocket where the
+VPN wears its padlock, same grey, same pocket (per Patrick). Drawn 2x
+and downsampled because PIL draws without antialiasing.
 """
 import os
 import subprocess
@@ -77,6 +80,51 @@ def bars_layer():
     return lay.resize((S, S), Image.LANCZOS)
 
 
+def star_layer():
+    """An eight-point compass star FITTED into the charcoal upper-left
+    pocket — the same grey and the same pocket as ConcordeVPN's lock
+    (per Patrick: "same grey as the lock, same grey behind the icon").
+    Needle spikes: N/S/E/W long, diagonals short, each a slender kite
+    widest ~28% out from the hub; a small four-point twinkle is
+    KNOCKED OUT of the hub so the centre reads as a star, not a blob,
+    at Dock sizes. Drawn 2x and downsampled like everything else."""
+    import math
+
+    from PIL import ImageChops
+    X = 2
+    lay = Image.new("RGBA", (S * X, S * X), (0, 0, 0, 0))
+    d = ImageDraw.Draw(lay)
+    c = (158, 163, 172, 255)        # the lock's grey, verbatim
+    cx, cy = 320, 330               # the VPN lock's pocket centre
+    R1, R2 = 190.0, 120.0           # long needles / diagonals
+    HW, BW = 18.0, 0.28             # needle half-width, widest at 28%
+    for k in range(8):
+        ang = k * math.pi / 4
+        R = R1 if k % 2 == 0 else R2
+        ux, uy = math.cos(ang), math.sin(ang)
+        px_, py_ = -uy, ux
+        tip = ((cx + ux * R) * X, (cy + uy * R) * X)
+        b1 = ((cx + ux * R * BW + px_ * HW) * X,
+              (cy + uy * R * BW + py_ * HW) * X)
+        b2 = ((cx + ux * R * BW - px_ * HW) * X,
+              (cy + uy * R * BW - py_ * HW) * X)
+        d.polygon([tip, b1, (cx * X, cy * X), b2], fill=c)
+    # the twinkle cutout: a four-point star (tips N/S/E/W, concave
+    # waist on the diagonals) subtracted from the alpha
+    hole = Image.new("L", lay.size, 0)
+    hd = ImageDraw.Draw(hole)
+    r_o, r_i = 42.0, 13.0
+    pts = []
+    for k in range(8):
+        ang = k * math.pi / 4
+        r = r_o if k % 2 == 0 else r_i
+        pts.append(((cx + math.cos(ang) * r) * X,
+                    (cy + math.sin(ang) * r) * X))
+    hd.polygon(pts, fill=255)
+    lay.putalpha(ImageChops.subtract(lay.split()[3], hole))
+    return lay.resize((S, S), Image.LANCZOS)
+
+
 def build():
     mask = squircle_mask()
 
@@ -103,6 +151,9 @@ def build():
     art = ImageChops.add(art, glow.point(lambda v: int(v * 0.30)))
 
     art.paste(mark.convert("RGB"), (mx, my), mark.split()[3])
+
+    star = star_layer()
+    art.paste(star.convert("RGB"), (0, 0), star.split()[3])
 
     out = Image.new("RGBA", (S, S), (0, 0, 0, 0))
     out.paste(art, (0, 0), mask)

@@ -1,10 +1,11 @@
-# MillenAI — developer notes
+# ConcordeAI — developer notes
 
 A local-only LLM desktop app for macOS. Everything runs on the user's machine:
 models, transcription, speech, memory. Nothing is sent anywhere except
 optional DuckDuckGo lookups and the GitHub update check.
 
-Current: **1.1.0** (build 26) · repo `bigmillz/MillenAI`
+Current: repo `bigmillz/concordeai` — version and build live in
+`millenai.py` (`APP_VERSION`/`APP_BUILD`), the only place either is stored.
 
 ---
 
@@ -13,7 +14,7 @@ Current: **1.1.0** (build 26) · repo `bigmillz/MillenAI`
 | File | What it is |
 |---|---|
 | `millenai.py` | The whole app — HTTP backend, model routing, and the UI as one embedded HTML string (~3,400 lines) |
-| `build_macos_app.sh` | Wraps `millenai.py` into `MillenAI.app` |
+| `build_macos_app.sh` | Wraps `millenai.py` into `ConcordeAI.app` |
 | `build_dmg.sh` | Builds the app, then a styled DMG with custom artwork and Finder layout |
 | `release.sh` | Bumps version → builds → commits → pushes → publishes a GitHub Release |
 | `MillenAI.icns` | App/volume icon |
@@ -3888,3 +3889,229 @@ one of which made a SUCCESSFUL job look like a failure:
 - The local checkout is still `My Drive/Downloads/files` and the main
   file is still millenai.py — only the remote changed. Older NOTES
   entries and memory files saying "MillenAI" mean this same project.
+
+## Renamed: Concorde -> ConcordeAI; repo -> bigmillz/concordeai (2026-08-22)
+- THE BRAND GREW ITS AI, AND THE AI IS BOLD (per Patrick). APP_NAME is
+  "ConcordeAI"; the three lockups (sidebar .vghost, Settings
+  #set-brand, wizard #wiz-brand) hand-split the mark as
+  Concorde<b>AI</b> inside the styled outer <b> — nested, because the
+  gauntlet's tab guard forbids a span holding a bare AI (a CSS comment
+  SPELLING that forbidden literal shipped in the page and tripped the
+  guard itself; reworded). One shared rule bolds all three (.vghost
+  b b etc.); Michroma is single-weight, the 700 is synthesized. The
+  sign-in and gate pages carry the same split h1. Everything
+  load-bearing keeps MillenAI: app_dir, bundle id, executable
+  (_SWAP_SCRIPT pgreps it), cookies, millen.* localStorage.
+- ARTIFACTS RENAMED, IDENTITIES PINNED: ConcordeAI.app (CFBundleName/
+  DisplayName only), "ConcordeAI x.y.z.dmg", ConcordeAI-*-Windows.zip
+  (in-zip folder and .bat renamed too), ConcordeAI-*-x64.msi (WiX
+  Product/shortcuts renamed; UpgradeCode, INSTALLDIR and HKCU keys stay
+  MillenAI so upgrades land in place; Inno gets an explicit
+  AppId=MillenAI for the same reason). The DMG background draws
+  CONCORDEAI: tracking still derives from the measured 8-letter ink
+  width, total ink is computed rather than assumed, and the AI pair
+  gets a same-color stroke — PIL's synthetic bold.
+- REPO RENAMED bigmillz/concorde -> bigmillz/concordeai (gh repo
+  rename; origin repointed itself). UPDATE_REPO and go-live.sh
+  repointed. VERIFIED: the old API URL 301s, and /api/update/check
+  against the renamed repo resolves v256 — pre-rename installs keep
+  updating through the redirect, same as the MillenAI rename before it.
+- AUTO UPDATE CHECK HARDENED (per Patrick: leaving the app open must
+  not mean falling behind). The hourly checkUpdate() poll already
+  shipped; what it lacked was guards. Now: IS_LOCAL only (the install
+  POST 403s for tunnel visitors, whose dialog then hung at
+  "Downloading…" forever), hidden windows skip the tick (the
+  pollEngines idiom) and settle up on visibilitychange, and the server
+  answers pollers from a 15-min cache — failures never cached (a DNS
+  blip must not read as "no update"), cache keyed to the beta pref,
+  and the Settings button sends ?force=1 for a real hit.
+- FUNNEL: A TYPED ANSWER IS AN ANSWER (per Patrick — typing "a new
+  apartment" at stage 1 fell to /api/chat and produced a wall of
+  generic prose, stranding the funnel). The card-click body is now a
+  shared fnAnswer(label); send() routes funnel-lane text into it, or
+  starts a funnel with it on the lane's blank slate. Review caught two
+  regressions in the first cut, both fixed and re-verified: 1. a
+  funnel abandoned by switching chats stayed armed and a later typed
+  answer advanced it into whichever chat was on screen — fnState is
+  now tagged with its chat and cleared on loadChat/new/delete; 2. in a
+  FINISHED funnel chat, typed follow-ups were hijacked into a nonsense
+  new funnel — they now fall through to /api/chat, where the finished
+  funnel is the subject (6b238). A stage error abandons the funnel
+  instead of dead-ending the composer; typed picks are collapsed to
+  one line so _FUNNEL_PICK_RX can read them back.
+- SAY IT ONCE, AGAIN (per Patrick: "once the query is done ... it's
+  redundant"): reloaded answers prepended a loose srcRow above the
+  prose while live answers fold chips into the disclosure (6b242).
+  addMsg now folds them into the same collapsed box (srcBox, "N
+  sources" with the chevron) — no path renders a bare chips row.
+- Gauntlet 89/89 (85 -> 89: four new checks — bold-AI lockup, guarded
+  auto-update, funnel typed answers, sources-fold — and the brand
+  check now also forbids bare "Concorde" outside the split lockup).
+
+## 6 beta 257 (pending) — the platform line that nobody ever saw
+- THE about-name ID IS RETIRED. It existed THREE times (both veil
+  titles + the Settings rail lockup — the duplicate-id trap this log
+  has recorded three separate times), and the pre-rail About code
+  still wrote to it: the platform line ("ConcordeAI Apple Silicon")
+  landed on the FIRST match — the new-models veil title — where
+  announceModels' own properly-scoped rewrite papered over it. Dead
+  UI for many builds; surfaced by an adversarial review of the rename
+  diff and confirmed pre-existing via git history, not a rename
+  regression.
+- The fix is deletion (the 6b245 lesson): the rail already reports
+  the machine in #set-spec (chip / memory / accel), so the platform
+  write is gone; the veil titles carry distinct ids (new-title /
+  up-title sharing one title rule), the rail lockup is just
+  #set-brand b, and the stale pre-rail rules died with the id — no
+  rule or query names it anywhere now.
+- VERIFIED over the wire: the served page has zero occurrences of the
+  old id in any form, both veils still title correctly, and the
+  Concorde<b>AI</b> lockup is untouched. One run tripped on an
+  unrelated transient (ConnectionResetError reading a 403 body in the
+  remote-lockdown probe; clean on re-run).
+- Gauntlet 90/90 (+1: about-name id retired, veil titles distinct).
+
+## 6 beta 257 (cont.) — the stream got manners, and an Answer now button
+- SPINNER-FIRST (per Patrick: "get rid of that pulsing grey
+  rectangle"). The caret is retired — a stream opens on the quiet
+  statusline pinwheel, and the whole machinery card (bar, steps) holds
+  back for the run's first 5 seconds behind a .warm class that
+  paintSteps lifts; a quick answer never shows its workings, a slow
+  one fades the card in. A sibling rule hides the boot spinner the
+  moment the card is showing, and collapseSteps clears .warm so a
+  sub-5s answer still gets its fold.
+- SMOOTH BAR + TIME LEFT (per Patrick). The honest-progress math
+  (6b226) is unchanged and became the TARGET; what the bar SHOWS is a
+  time-based tween easing toward it, so a landed milestone pulls the
+  bar over ~a second instead of teleporting. The real fix was found by
+  measuring WHY the CSS transition never ran: paintSteps rewrote
+  box.innerHTML every 600ms, recreating the <i> each time — there is
+  now an in-place fast path (same rows -> only .wtbar i width + the
+  eta text change) on a 200ms clock, so the width transition finally
+  animates. Under the bar: "~40s left" in italic grey — this run's
+  pace blended 55/45 with a per-tier EMA in millen.speeds (new
+  localStorage key), shown only past 5s with >=3s left; hurried and
+  aborted runs don't feed the EMA (they lie about the tier).
+- ANSWER NOW (per Patrick: "take a clue from Gemini"). /api/chat
+  ships an unguessable X-Hurry id and parks an Event in _hurry_jobs;
+  POST /api/chat/hurry sets it (not admin-gated — the id is the
+  authorization, the APPROVE-jid trust model). run_council checks it:
+  skips not-yet-started local models (the first always commits),
+  joins the running one in 0.5s slices, shortens the cloud join to
+  5s, skips peer review and reflection, and hands the merge to
+  fast_cloud_ladder() when 2+ real drafts exist — the fastest pen,
+  which is what the button promised. Registry popped in the handler's
+  finally (mint verified to sit BEFORE the owning try, so the pop can
+  never NameError). Client: an "Answer now" ghost button beside the
+  time-left line, armed only once a REAL draft arrived (liveDrafts
+  counts non-"(no answer" chips), delegated from the chat container
+  like the chevron; on click it greys to "Hurrying it along…".
+- SEAMLESS DARK TITLE BAR (per Patrick: "like we did for the vpn
+  app"). The cooperative recipe ported back from ConcordeVPN — which
+  credits this file's cocoa pattern, so the trick has now crossed the
+  fence twice: transparent titlebar, hidden title, DarkAqua, window
+  background matched to the page, and NO fullSizeContentView (content
+  under the bar kills window drag and summons WebKit's scroll-pocket
+  tint — their live findings, inherited here for free). The wipe's
+  _resolidify now paints #0a0a0c instead of 0x212121 — with a
+  transparent bar that color IS the bar — and re-runs the chrome
+  pass; one extra 0.8s pass catches pywebview's post-init chrome
+  touch.
+- VERIFIED over the wire: caret absent from the page, warm/tween/eta
+  markers served, /api/chat answers with a live X-Hurry header, and
+  a bogus hid gets {"ok": false}.
+- Gauntlet 94/94 (+4: spinner-first, smooth bar + time-left, Answer
+  now, seamless title bar).
+
+## 6 beta 257 (cont.) — settings round two, and the door nobody had locked
+- SIX PANES, SIX DESCRIPTIONS (per Patrick's concept picks): every
+  pane opens with one quiet .tdesc line in one voice. Written in the
+  template as "MillenAI" so brand() rewrites them — the tokens must
+  never be hard-coded to the brand.
+- ACCOUNT PANE, FIRST IN THE RAIL. New GET /api/me answers
+  owner|google|guest|pin — and it HAD to be given something to read:
+  the uid is a one-way sha256, so how you signed in was unrecoverable.
+  A .ident marker (kind + email or name, never a PIN) is now written
+  at mint time in the Google callback and /api/welcome; guests already
+  had .guest, whose mtime yields the remaining hours for free. Old
+  profiles report "pin" — google and pin were always indistinguishable,
+  so nothing is lost. POST /api/logout clears the cookie (hidden for
+  the cookieless desktop owner).
+- FORGET ME NOW MEANS IT (per Patrick: the droplet-destroy treatment).
+  It cleared MEMORIES ONLY before while promising everything. Three
+  locks: pick the scopes (memories / chats / personal settings), prove
+  it's you (owner PIN when owner access is configured), then type
+  FORGET ME in caps. Scoped POST /api/forget does the work; the owner's
+  prefs are key-stripped, never deleted (turbo, contribute and the
+  update channel are machine config, not "about the user"), and a full
+  three-scope forget on a walled profile takes the .ident marker with
+  it — the review caught that /api/me still greeted you by name after
+  "Erase forever".
+- THE COMMUNITY PANE STOPPED LYING. The tooltip has promised "nothing
+  runs while you are using it" since it shipped; NOTHING enforced it.
+  Now: an AC gate (psutil battery, and None — a desktop — counts as
+  plugged in), an idle gate (ioreg HIDIdleTime, 120s, and unmeasurable
+  means the gate opens), and a duty cycle that rests the complement of
+  the lend share after each job. It is a share of TIME, labelled as
+  such: MLX and Ollama expose no instantaneous GPU throttle, so a "max
+  GPU %" slider would have been a fake control. The hub needs no
+  change — a resting worker ages out of the 45s liveness window on its
+  own. A ledger (contrib_ledger.json, its own file: prefs.json is
+  rewritten wholesale by the settings UI and would race the worker)
+  counts jobs, seconds and characters, and REPLACES "Contributing to N
+  users" — which read the LOCAL machine's user count, ~always 1, and
+  had lied politely for months. "Users helped" is still not knowable
+  worker-side (the job payload carries no requester) so it is not
+  shown; the gauntlet now forbids the old line's return.
+- MODELS ROSTER (option B, per Patrick): one mono line per mind —
+  status, size, and what it's FOR, read from ADV_USE, the same dict
+  the Advanced picker uses, so the two can never drift. Manage adds
+  tick-to-install, the Minimal/Recommended/Maximum cards (the exact
+  plans first-run already offers) and per-row removal. Removal is the
+  only genuinely new destructive surface: admin-gated, refuses a model
+  that is mid-download (there is no cancel machinery and rmtree under
+  a live writer resurrects partial state), stops the MLX engine under
+  _engine_lock before deleting EXACTLY the label's own HF cache dir
+  pair derived from MLX_REPOS — never a glob, never the shared hub/
+  parent — and asks the Ollama daemon rather than touching ~/.ollama,
+  whose blobs are content-addressed and shared across tags. A non-zero
+  `ollama rm` now raises instead of reporting success.
+- UPDATES WEARS ITS VERSION: the number centred in the display face,
+  "Released on August 22, 2026" under it, and the release notes card —
+  the GitHub release body was already travelling in the update-check
+  response and was simply thrown away. Every release we cut from here
+  gets a human bullet list, so the card fills itself.
+- YOUR NAME: the first field in Personality, saved with the persona
+  and injected ONCE into the system-prompt assembly every model reads,
+  stated to outrank a remembered name (MEMORY_PROMPT extracts one too).
+  The prefs read there was hoisted so the name costs no extra disk hit.
+- THE DOOR NOBODY HAD LOCKED. The adversarial review found the real
+  bug of this round, and it predates it: THE OWNER HAS NO COOKIE —
+  they are authenticated by the mere ABSENCE of proxy headers — so
+  SameSite protects them from nothing, and any page in any browser
+  could POST to 127.0.0.1 and erase chats or delete multi-GB weights.
+  Verified live: a text/plain form-smuggled POST was accepted. Writes
+  now demand a same-origin Origin (browsers attach one to every
+  cross-site POST, forms included), refuse the three form content
+  types, and refuse a Host that isn't localhost (DNS rebinding).
+  Native callers — curl, turbo.sh, the fleet workers, the gauntlet —
+  send no Origin and a JSON content type, so nothing legitimate
+  noticed. FOUR live probes are now gauntlet checks.
+- ALSO FROM THE REVIEW: the contribute loop carries a GENERATION
+  token — the stop Event alone could not retire a loop stuck mid-job
+  (contrib_apply gives up after 3s and then CLEARS the flag for the
+  new thread, and the old one sails on), so flipping a toggle during a
+  job left two loops polling the same hub. A valid-JSON non-object
+  body used to reach .get() and 500 three handlers. #up-detail was on
+  BOTH veils, so the update dialog's "Downloading…" landed in the
+  hidden new-models card — the FOURTH time the duplicate-id trap has
+  been paid for in this file. And a bare `#fleet-box input` rule
+  stretched the new checkboxes to full width.
+- KNOWN AND ACCEPTED: a second live session can autosave its stale
+  chat list back after a forget. Single-window desktop is the norm and
+  tunnel users have their own profiles; cross-session invalidation
+  would cost more machinery than the case is worth. Say it out loud
+  rather than pretend.
+- Gauntlet 108/108 (+9: descriptions/Account/scoped forget, honest
+  ledger + real gates, roster + manage, updates face, the name, four
+  CSRF probes, generation token, marker removal, honest removal).

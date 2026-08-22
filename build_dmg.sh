@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Packages Concorde into a styled, shareable disk image: $VOL.dmg
+# Packages ConcordeAI into a styled, shareable disk image: $VOL.dmg
 # Finder shows a custom starfield background with a drag-to-install arrow.
 set -e
 cd "$(dirname "$0")"
@@ -7,7 +7,7 @@ cd "$(dirname "$0")"
 ./build_macos_app.sh
 
 VER="$(python3 -c "import re;print(re.search(r'APP_VERSION = \"([^\"]+)\"', open('millenai.py').read()).group(1))")"
-VOL="Concorde $VER"
+VOL="ConcordeAI $VER"
 # DISPLAY form only — one trailing .0 falls away, matching short_version()
 # in the app (6.0.0 -> 6.0, 6.1.1 stays). The volume and the filename keep
 # the raw version, because those are artifacts, not labels.
@@ -18,7 +18,7 @@ VENV="$HOME/Library/Application Support/MillenAI/venv"
 
 STAGE="$(mktemp -d)/MillenAI"
 mkdir -p "$STAGE/.background"
-cp -R Concorde.app "$STAGE/"
+cp -R ConcordeAI.app "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
 # --- background art (1320x800 @144dpi -> 660x400 pts, retina-sharp)
@@ -128,18 +128,29 @@ overlay.paste(grad, (int(wx), int(wy)), mask)
 
 # The wordmark. Michroma is a webfont the app pulls from Google and PIL
 # only has the system faces, so Helvetica stands in — sized to the SAME
-# cap height and tracked out to the SAME ink width. The letterforms
-# differ; the lockup's proportions do not.
+# cap height and tracked at the SAME rhythm. The letterforms differ;
+# the lockup's proportions do not. 6b257: the mark grew an AI, and the
+# AI is BOLD — the last two letters get a same-color stroke, the way
+# the app's synthetic 700 thickens single-weight Michroma. Tracking
+# still derives from the measured 8-letter ink width (6.7982 WH was
+# taken off "CONCORDE"), so the rhythm is unchanged and the two new
+# letters simply extend the mark; total ink is computed, not assumed.
 probe = font("/System/Library/Fonts/Helvetica.ttc", 100)
-bb = od.textbbox((0, 0), "CONCORDE", font=probe)
+bb = od.textbbox((0, 0), "CONCORDEAI", font=probe)
 FS = int(round(100 * CAP / (bb[3] - bb[1])))
 wm = font("/System/Library/Fonts/Helvetica.ttc", FS)
-track = (WORD_W - sum(od.textlength(ch, font=wm) for ch in "CONCORDE")) / 7.0
-cx, base = (W - WORD_W) / 2, wy + WH + GAP
+track = (WORD_W - sum(od.textlength(ch, font=wm)
+                      for ch in "CONCORDE")) / 7.0
+BOLD = max(1, int(round(FS * 0.035)))
+INK = (sum(od.textlength(ch, font=wm) for ch in "CONCORDEAI")
+       + track * 9.0 + BOLD * 2)
+cx, base = (W - INK) / 2, wy + WH + GAP
 topy = base - od.textbbox((0, 0), "C", font=wm)[1]
-for ch in "CONCORDE":
-    od.text((cx, topy), ch, font=wm, fill=(255, 255, 255, 255))
-    cx += od.textlength(ch, font=wm) + track
+for i, ch in enumerate("CONCORDEAI"):
+    sw = BOLD if i >= 8 else 0
+    od.text((cx, topy), ch, font=wm, fill=(255, 255, 255, 255),
+            stroke_width=sw, stroke_fill=(255, 255, 255, 255))
+    cx += od.textlength(ch, font=wm) + track + (sw * 2 if sw else 0)
 
 # the version sits quietly under the mark, not welded into it
 sub = font("/System/Library/Fonts/Helvetica.ttc", 30)
@@ -148,7 +159,7 @@ centered(base + CAP + 30, sys.argv[2], sub, (150, 156, 168, 235))
 # install help. macOS 15+ removed the right-click→Open bypass, so an
 # unnotarized app MUST be allowed from System Settings the first time.
 small = font("/System/Library/Fonts/Menlo.ttc", 21)
-centered(668, "1. drag Concorde into Applications, then open it once",
+centered(668, "1. drag ConcordeAI into Applications, then open it once",
          small, (124, 130, 142, 235))
 centered(704, "2. macOS will block it — that is expected for a free app",
          small, (124, 130, 142, 235))
@@ -204,7 +215,7 @@ tell application "Finder"
     set icon size of vo to 128
     set text size of vo to 13
     set background picture of vo to file ".background:bg.png"
-    set position of item "Concorde.app" of container window to {165, 210}
+    set position of item "ConcordeAI.app" of container window to {165, 210}
     set position of item "Applications" of container window to {495, 210}
     update without registering applications
     delay 1

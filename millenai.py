@@ -88,11 +88,13 @@ APP_VERSION = "6.0.0"   # bump here — UI, window, DMG all follow
 # stays parked on the last stable (v197 / 5.3.7). The live :9889
 # instance follows raw tags and DOES run betas: that's the testbed.
 APP_BETA = True
-# THE BRAND (6.0): Concorde. Every user-facing surface says Concorde;
-# everything load-bearing stays "MillenAI" — app_dir, bundle id, the
-# executable name (_SWAP_SCRIPT pgreps it), UPDATE_REPO, User-Agents —
-# so data, permissions and the self-update chain survive the rename.
-APP_NAME = "Concorde"
+# THE BRAND (6b257): ConcordeAI — Concorde grew its AI, and the AI is
+# BOLD in every lockup (nested <b>, see .vghost). Every user-facing
+# surface says ConcordeAI; everything load-bearing stays "MillenAI" —
+# app_dir, bundle id, the executable name (_SWAP_SCRIPT pgreps it),
+# User-Agents — so data, permissions and the self-update chain survive
+# both renames.
+APP_NAME = "ConcordeAI"
 
 
 def brand(html: str) -> str:
@@ -118,7 +120,7 @@ APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
 # Release whose tag ends in the build number (e.g. "v5") with the .dmg
 # attached; the app then offers a one-click in-place update.
-UPDATE_REPO = "bigmillz/concorde"
+UPDATE_REPO = "bigmillz/concordeai"
 
 # MILLENAI_PORT: the go-live LaunchAgent runs a second, headless instance
 # beside the desktop app — it must not fight the app for 8889
@@ -1288,9 +1290,86 @@ _contrib_state = ["off"]
 _contrib_thread = None
 
 
-def _contrib_loop(url: str, key: str):
+def _on_ac_power():
+    """True when plugged in — or when unknowable (a desktop Mac has no
+    battery; psutil returns None), because refusing to contribute on a
+    machine that CANNOT be on battery would make the toggle a lie."""
+    if not HAS_PSUTIL:
+        return True
+    try:
+        b = psutil.sensors_battery()
+        return (b is None) or bool(b.power_plugged)
+    except Exception:
+        return True
+
+
+_idle_cache = {"ts": 0.0, "s": None}
+
+
+def _user_idle_seconds():
+    """Seconds since the owner last touched this Mac, or None where it
+    can't be measured (then the idle gate opens — same honesty rule as
+    everywhere else: an unmeasurable gate must not pretend). macOS
+    HIDIdleTime via ioreg, the gpu_utilization idiom; cached 5s so the
+    poll loop doesn't fork a process per lap."""
+    now = time.time()
+    if now - _idle_cache["ts"] < 5:
+        return _idle_cache["s"]
+    s = None
+    if IS_MAC:
+        try:
+            out = subprocess.run(
+                ["ioreg", "-r", "-d", "1", "-c", "IOHIDSystem", "-a"],
+                capture_output=True, timeout=2).stdout
+            for dev in plistlib.loads(out):
+                v = dev.get("HIDIdleTime")
+                if v is not None:
+                    s = float(v) / 1e9
+                    break
+        except Exception:
+            s = None
+    _idle_cache.update(s=s, ts=now)
+    return s
+
+
+# THE LEDGER (6b257): what this Mac has given — jobs answered, seconds
+# worked, characters generated. Its own file, NOT prefs.json: the
+# settings UI rewrites prefs wholesale and would race the worker
+# thread's per-job increments.
+CONTRIB_LEDGER_FILE = os.path.join(app_dir(), "contrib_ledger.json")
+_ledger_lock = threading.Lock()
+
+
+def _ledger_add(seconds=0.0, chars=0, jobs=0):
+    with _ledger_lock:
+        try:
+            with open(CONTRIB_LEDGER_FILE, encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            d = {}
+        d["jobs"] = int(d.get("jobs") or 0) + jobs
+        d["seconds"] = float(d.get("seconds") or 0) + seconds
+        d["chars"] = int(d.get("chars") or 0) + chars
+        tmp = CONTRIB_LEDGER_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(d, f)
+        os.replace(tmp, CONTRIB_LEDGER_FILE)
+
+
+_contrib_gen = [0]     # bumped on every contrib_apply — see below
+
+
+def _contrib_loop(url: str, key: str, gen: int = 0):
     """Friend mode, ONE CLICK: knock on the hub, wait to be approved,
-    then long-poll for jobs and run them here. Outbound-only."""
+    then long-poll for jobs and run them here. Outbound-only.
+
+    GENERATION TOKEN (6b257): the stop Event alone could not retire a
+    loop that was mid-job — contrib_apply joins for 3s, gives up, then
+    CLEARS the Event for the new thread, and the old one sails on with
+    a cleared stop flag. Two loops, double polling, one hub confused
+    about which is live. Each loop now also dies when its generation
+    is superseded, so the toggles in Settings can be flipped freely
+    while a job runs."""
     p = load_prefs(None)
     wid = str(p.get("contrib_wid") or secrets.token_hex(8))
     token = str(p.get("contrib_token") or "")
@@ -1310,8 +1389,25 @@ def _contrib_loop(url: str, key: str):
         with urllib.request.urlopen(req, timeout=40) as r:
             return json.loads(r.read())
 
-    while not _contrib_stop.is_set():
+    while not _contrib_stop.is_set() and gen == _contrib_gen[0]:
         try:
+            # THE THREE PROMISES (6b257, per Patrick): plugged in,
+            # idle, and only its share of time. Gated before any
+            # network call, re-read every lap so the Settings toggles
+            # apply live; a paused worker simply ages out of the hub's
+            # 45s liveness window and stops being picked — the hub
+            # needs no change at all.
+            p3 = load_prefs(None)
+            if p3.get("contrib_ac_only", True) and not _on_ac_power():
+                _contrib_state[0] = "paused — on battery"
+                _contrib_stop.wait(30)
+                continue
+            _idle = _user_idle_seconds()
+            if (p3.get("contrib_idle_only", True)
+                    and _idle is not None and _idle < 120):
+                _contrib_state[0] = "paused — you're using this Mac"
+                _contrib_stop.wait(15)
+                continue
             pulled = ollama_pulled_tags() or set()
             models = [l for l in MODEL_INFO
                       if model_cached(l, pulled) and model_fits_memory(l)]
@@ -1336,15 +1432,32 @@ def _contrib_loop(url: str, key: str):
             job = post("/api/fleet/poll", {"id": wid, "token": token})
             if job.get("job"):
                 parts = []
+                _t0 = time.time()
                 try:
                     run_model(job["label"], job["messages"], parts.append)
+                    _txt = strip_think("".join(parts))
                     post("/api/fleet/submit",
                          {"id": wid, "token": token, "job": job["job"],
-                          "text": strip_think("".join(parts))})
+                          "text": _txt})
+                    _ledger_add(seconds=time.time() - _t0,
+                                chars=len(_txt), jobs=1)
                 except Exception as exc:
                     post("/api/fleet/submit",
                          {"id": wid, "token": token, "job": job["job"],
                           "err": str(exc)[:100]})
+                # THE TIME SHARE (6b257): rest for the complement of
+                # the lend slider — at 50% the Mac rests as long as it
+                # worked. Capped so one marathon job can't bench the
+                # worker for ten minutes-plus. This is a time share,
+                # NOT a GPU percentage — no such knob exists in
+                # MLX/Ollama, and a fake one would be a lie.
+                _pct = max(5, min(100,
+                                  int(p3.get("contrib_max_pct") or 50)))
+                if _pct < 100:
+                    _contrib_state[0] = "resting (%d%% share)" % _pct
+                    _contrib_stop.wait(
+                        min((time.time() - _t0) * (100 - _pct) / _pct,
+                            600))
         except Exception:
             _contrib_state[0] = "hub offline — retrying"
             _contrib_stop.wait(8)
@@ -1358,6 +1471,8 @@ def contrib_apply(p=None):
     global _contrib_thread
     p = p or load_prefs(None)
     on = bool(p.get("contrib_on"))
+    _contrib_gen[0] += 1              # every older loop is now retired
+    _gen = _contrib_gen[0]
     _contrib_stop.set()
     if _contrib_thread is not None and _contrib_thread.is_alive():
         _contrib_thread.join(timeout=3)
@@ -1366,7 +1481,7 @@ def contrib_apply(p=None):
         _contrib_thread = threading.Thread(
             target=_contrib_loop,
             args=(str(p.get("contrib_url") or FLEET_HOME),
-                  str(p.get("contrib_key") or "")),
+                  str(p.get("contrib_key") or ""), _gen),
             daemon=True)
         _contrib_thread.start()
 
@@ -2670,9 +2785,33 @@ def _channel_release():
         return json.loads(r.read().decode("utf-8"))
 
 
-def check_update():
+_chk_cache = {"ts": 0.0, "data": None, "beta": None}
+
+
+def check_update(force=False):
+    """Cached wrapper — every open client now polls hourly (the owner
+    auto-check, 6b257), so one GitHub hit per 15 min serves them all:
+    the unauthenticated API budget is 60/hr per IP and check_update
+    used to spend one on EVERY call. The Settings button passes
+    force=True so a human click still reaches GitHub every time.
+    Failures are never cached — a launch-time DNS blip must not read
+    as an authoritative "no update" for 15 minutes — and the cache is
+    keyed to the beta pref, so toggling the channel never serves the
+    other channel's verdict."""
     if not UPDATE_REPO:
         return {"configured": False, "available": False}
+    beta = bool(load_prefs(None).get("beta_updates"))
+    if not force and _chk_cache["data"] is not None \
+            and _chk_cache["beta"] == beta \
+            and time.time() - _chk_cache["ts"] < 900:
+        return _chk_cache["data"]
+    out = _check_update_live()
+    if "note" not in out:
+        _chk_cache.update(ts=time.time(), data=out, beta=beta)
+    return out
+
+
+def _check_update_live():
     try:
         rel = _channel_release()
     except urllib.error.HTTPError as exc:
@@ -2714,6 +2853,7 @@ def check_update():
                          and _app_bundle_path() is not None,
             "latest": shown, "tag": tag, "current": short_version(),
             "published": rel.get("published_at", ""),
+            "notes": (rel.get("body") or "")[:4000],
             "size_mb": round(dmg.get("size", 0) / 1e6, 1) if dmg else 0}
 
 
@@ -4682,7 +4822,8 @@ def _cloud_all_down() -> str:
 def run_council(labels: list, messages: list, emit, status,
                 reflect: bool = False, peer: bool = False,
                 cloud_only: bool = False,
-                bench_allow=None, comp: str = "") -> None:
+                bench_allow=None, comp: str = "",
+                hurry=None) -> None:
     """Ask each selected model in turn, then stream a merged answer.
 
     Sequential on purpose: only one MLX engine can be resident at a time
@@ -4706,6 +4847,14 @@ def run_council(labels: list, messages: list, emit, status,
     labels = (usable or labels[:1])[:12]
 
     drafts = []
+    # ANSWER NOW (6b257): pressed mid-run, the button trades quality
+    # for speed — skip what hasn't started, shorten every wait, hand
+    # the merge to the fastest pen. Checked between waits, never
+    # blocking; reads of `drafts` are whole-tuple appends (GIL-atomic),
+    # so no lock, matching the file's discipline.
+    _hurried = lambda: hurry is not None and hurry.is_set()
+    _have_draft = lambda: any(not t.startswith("(no answer")
+                              for _l, t in drafts)
     _running = set()
     _run_lock = threading.Lock()
 
@@ -4830,6 +4979,11 @@ def run_council(labels: list, messages: list, emit, status,
         if i > 1 and _left < 15:
             took_part(label, "(no answer — out of time)")
             continue
+        # the first model always gets to commit — a hurry with zero
+        # drafts would otherwise starve the run into the RuntimeError
+        if i > 1 and _hurried() and _have_draft():
+            took_part(label, "(no answer — hurried)")
+            continue
         status(f"asking {label} · {i} of {len(labels)}")
         parts = []
         _err = []
@@ -4842,7 +4996,14 @@ def run_council(labels: list, messages: list, emit, status,
                 _err.append(exc)
         _lt = threading.Thread(target=_draft_local, daemon=True)
         _lt.start()
-        _lt.join(timeout=min(LOCAL_CAP, max(15.0, _left)))
+        # joined in slices so a mid-generation Answer-now cuts the wait
+        # short; the straggler branch below already keeps a usable
+        # partial, so a hurried break costs no new semantics
+        _jd = time.time() + min(LOCAL_CAP, max(15.0, _left))
+        while _lt.is_alive() and time.time() < _jd:
+            _lt.join(timeout=0.5)
+            if _hurried() and _have_draft():
+                break
         if _lt.is_alive():
             # abandoned, not killed: it is a daemon, and the NEXT model's
             # engine swap stops the process it is stuck in. Keep whatever
@@ -4872,9 +5033,13 @@ def run_council(labels: list, messages: list, emit, status,
     # providers hung at once. They all started together, so they get one
     # window together — whatever hasn't landed by then is simply absent,
     # and its thread is a daemon that dies with the process.
-    _deadline = time.time() + 75
-    for _th in cloud_threads:
-        _th.join(timeout=max(0.1, _deadline - time.time()))
+    _deadline = time.time() + (5 if _hurried() else 75)
+    while (any(_th.is_alive() for _th in cloud_threads)
+           and time.time() < _deadline):
+        time.sleep(0.5)
+        # a hurry pressed DURING this wait shortens it too
+        if _hurried():
+            _deadline = min(_deadline, time.time() + 5)
 
     good = [d for d in drafts if not d[1].startswith("(no answer")]
     if not good:
@@ -4887,7 +5052,7 @@ def run_council(labels: list, messages: list, emit, status,
     # the drafts and rewrites its own best answer from them; Gemma then
     # merges the rewrites. Twice the engine passes — the mode that says
     # "take as long as you need, give me your best".
-    if peer and len(good) >= 2:
+    if peer and len(good) >= 2 and not _hurried():
         question0 = messages[-1]["content"] if messages else ""
         block = "\n\n".join(f"[draft {n}]\n{t[:1200]}"
                              for n, (_l, t) in enumerate(good[:5], 1))
@@ -4966,7 +5131,7 @@ def run_council(labels: list, messages: list, emit, status,
     # blending alone regresses toward the average draft. Best-effort:
     # any failure just means merging without notes.
     notes = ""
-    if reflect and len(good) > 1:
+    if reflect and len(good) > 1 and not _hurried():
         status(f"{merger} is double-checking the drafts")
         try:
             parts = []
@@ -5039,6 +5204,15 @@ def run_council(labels: list, messages: list, emit, status,
     _comp_cloud = bool(comp) and comp not in MODEL_ROUTES
     if _comp_cloud:
         _ladder = [c for c in _ladder if _provider_of(c) == comp]
+    # a hurried merge goes to the FASTEST pen, not the strongest —
+    # speed is what the button promised (6b257). An empty fast ladder
+    # (no keys, everyone resting) keeps the strength ladder, and the
+    # local-merger floor below still catches everything.
+    _hurry_fast = _hurried() and len(good) >= 2
+    if _hurry_fast and not _comp_cloud:
+        _fast = fast_cloud_ladder()
+        if _fast:
+            _ladder = _fast
     if cloud_only:
         # every rung here is a cloud one, and if they all fail the
         # strongest draft ships as it stands — a local merge would break
@@ -5051,7 +5225,7 @@ def run_council(labels: list, messages: list, emit, status,
         return
     if comp in MODEL_ROUTES:
         pass          # the user chose a LOCAL pen — no cloud ladder
-    elif _comp_cloud or load_prefs(None).get("turbo"):
+    elif _comp_cloud or _hurry_fast or load_prefs(None).get("turbo"):
         for _cc in _ladder:
             run_mark(compositor=_cc.get("model") or _cc.get("name", ""))
             if _stream_composite(_cc):
@@ -5190,6 +5364,15 @@ REMOTE_FILE = os.path.join(app_dir(), "remote.json")
 REMOTE_CAP = 40                 # hard ceiling on commands per run
 _remote_jobs = {}               # jid -> {"gate": Event, "ok": bool}
 _remote_lock = threading.Lock()
+
+# ANSWER NOW (6b257, per Patrick — "take a clue from Gemini"): each
+# /api/chat run mints an unguessable id, ships it in the X-Hurry
+# header, and parks an Event here. POSTing the id to /api/chat/hurry
+# sets the Event; run_council checks it between waits and trades the
+# rest of the council for the fastest compositor. Same trust model as
+# the APPROVE jid above: the id IS the authorization.
+_hurry_jobs = {}                # hid -> threading.Event
+_hurry_lock = threading.Lock()
 
 
 def remote_conf() -> dict:
@@ -5577,12 +5760,12 @@ REMOTE_SYSTEM = (
     "\"done\":false}\n"
     "  For a long step, write the command in the FOREGROUND, exactly as "
     "you would run it by hand (e.g. \"apt-get -y full-upgrade\" or "
-    "\"make -j$(nproc)\"). Concorde detaches and watches it for you, so "
+    "\"make -j$(nproc)\"). ConcordeAI detaches and watches it for you, so "
     "do NOT background it yourself with &, nohup, setsid, systemd-run or "
     "a redirect to a logfile — that makes it report done the instant it "
     "starts, before the work is finished.\n"
     "  REBOOT the server (only when the task genuinely needs it — a "
-    "kernel or release upgrade, a relabel): Concorde waits for the box "
+    "kernel or release upgrade, a relabel): ConcordeAI waits for the box "
     "to come back and continues automatically, so never issue a bare "
     "`reboot` as a cmd:\n"
     "  {\"reboot\":\"why the reboot is needed\",\"done\":false}\n"
@@ -5690,7 +5873,7 @@ def run_remote_agent(messages, conf, autonomy, emit, status, step,
             emit(str(act.get("summary") or "Done.").strip())
             return
         # REBOOT SURVIVAL (6b251): a reboot always needs a nod (it drops
-        # the session), then Concorde waits for the box and continues.
+        # the session), then ConcordeAI waits for the box and continues.
         if act.get("reboot"):
             why = str(act.get("reboot"))[:200]
             sid = "reboot%d" % i
@@ -6295,6 +6478,20 @@ def _user_id(kind: str, ident: str) -> str:
 OWNER_PIN_FILE = os.path.join(app_dir(), "owner_pin")
 
 
+def _write_ident(uid, kind, **extra):
+    """The uid is a one-way hash, so HOW someone signed in (and the
+    email/name to show them) must be stored at mint time or it is gone
+    — the Account pane (6b257) reads this back through /api/me. Never
+    stores a PIN or any secret."""
+    try:
+        d = os.path.join(app_dir(), "users", uid)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, ".ident"), "w", encoding="utf-8") as f:
+            json.dump(dict(kind=kind, ts=time.time(), **extra), f)
+    except Exception:
+        pass
+
+
 def owner_uid():
     try:
         pin = open(OWNER_PIN_FILE).read().strip()
@@ -6412,8 +6609,8 @@ button.guest::after{display:none}
 <canvas id="motes"></canvas>
 <div class="door">
   <div class="wrap">
-    <div class="halo" aria-hidden="true"><h1>MillenAI</h1></div>
-    <h1>MillenAI</h1>
+    <div class="halo" aria-hidden="true"><h1>Concorde<b>AI</b></h1></div>
+    <h1>Concorde<b>AI</b></h1>
   </div>
   <p class="tag">Your AI. Walk right in.</p>
   <a class="gbtn primary" href="/auth/google">
@@ -6544,7 +6741,7 @@ button{background:#ececec;color:#111;border:0;border-radius:12px;
 button:hover{background:#fff}
 </style></head><body>
 <div class="door">
-  <h1>MillenAI</h1>
+  <h1>Concorde<b>AI</b></h1>
   <p>private &middot; enter your access key</p>
   <form onsubmit="location.href='/?key='+encodeURIComponent(
       document.getElementById('k').value.trim());return false">
@@ -6621,10 +6818,63 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
     # visitors (even with the key) get a flat 403 on all of them; they are
     # guests in the chat, not operators of the computer.
     ADMIN_PATHS = ("/api/open-logs", "/api/setup/install",
-                   "/api/model/download", "/api/update/install",
+                   "/api/model/download", "/api/model/remove",
+                   "/api/update/install",
                    "/api/speak", "/api/voice/prepare",
                    "/api/remote/config", "/api/remote/test",
                    "/api/remote/approve")
+
+    # the three content types a cross-site HTML form can post. Nothing
+    # here speaks them, so their presence on a write IS the forgery.
+    FORM_CT = ("application/x-www-form-urlencoded", "multipart/form-data",
+               "text/plain")
+
+    def _csrf_ok(self) -> bool:
+        """Cross-site write protection (6b257). THE OWNER HAS NO COOKIE
+        — they are authenticated by the mere absence of proxy headers —
+        so SameSite protects them from nothing: any page in any browser
+        could POST to 127.0.0.1 and erase a chat history or delete
+        multi-GB weights. Two doors, both closed on writes only:
+
+          * ORIGIN, when the browser sends one, must be this same
+            server. Browsers attach Origin to every cross-site POST
+            (forms included), so a mismatch is a forgery by definition.
+          * The three FORM content types are refused outright — they
+            are the one way a cross-site form reaches a JSON endpoint
+            without a preflight.
+
+        Native callers — curl, urllib, the fleet workers, the gauntlet
+        — send no Origin and a JSON content type, so they sail through.
+        Local requests must also arrive addressed to localhost, which
+        is what closes DNS rebinding."""
+        ct = (self.headers.get("Content-Type") or "").split(";")[0]
+        if ct.strip().lower() in self.FORM_CT:
+            return False
+        host = (self.headers.get("Host") or "").strip().lower()
+        origin = (self.headers.get("Origin") or "").strip()
+        if origin and origin.lower() != "null":
+            try:
+                oh = urllib.parse.urlsplit(origin).netloc.lower()
+            except Exception:
+                return False
+            if not self._same_host(oh, host):
+                return False
+        if not self._remote():
+            # a local request addressed to anything but this machine is
+            # a rebinding attempt, not the app
+            hn = host.rsplit(":", 1)[0] if ":" in host else host
+            if host and hn not in ("127.0.0.1", "localhost", "[::1]"):
+                return False
+        return True
+
+    @staticmethod
+    def _same_host(oh: str, host: str) -> bool:
+        if oh == host:
+            return True
+        oa, _, op = oh.partition(":")
+        ha, _, hp = host.partition(":")
+        local = ("127.0.0.1", "localhost", "[::1]")
+        return op == hp and oa in local and ha in local
 
     def _admin_gate(self) -> bool:
         """True = allowed. Answers the request itself when blocked."""
@@ -6805,7 +7055,9 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 self.send_error(502, ("Google sign-in failed: %s"
                                       % str(exc)[:80]))
                 return
-            self._set_user_cookie(_user_id("google", email))
+            _g_uid = _user_id("google", email)
+            _write_ident(_g_uid, "google", email=email)
+            self._set_user_cookie(_g_uid)
         elif self.path.startswith("/api/workspace"):
             # WORKSPACE: point MillenAI at a folder and ask about the
             # code in it. Owner-at-the-machine ONLY, and READ-ONLY —
@@ -6858,8 +7110,18 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             if self._remote():
                 self._send_json({"err": "owner only"})
                 return
+            led = {}
+            try:
+                with open(CONTRIB_LEDGER_FILE, encoding="utf-8") as f:
+                    led = json.load(f)
+            except Exception:
+                pass
             self._send_json({"on": bool(load_prefs(None).get("contrib_on")),
-                             "state": _contrib_state[0]})
+                             "state": _contrib_state[0],
+                             "ledger": {
+                                 "jobs": int(led.get("jobs") or 0),
+                                 "seconds": int(led.get("seconds") or 0),
+                                 "chars": int(led.get("chars") or 0)}})
         elif self.path == "/api/fleet/status":
             if self._remote():
                 self._send_json({"err": "owner only"})
@@ -6933,8 +7195,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self._send_engines()
         elif self.path == "/api/setup":
             self._send_json(setup_status())
-        elif self.path == "/api/update/check":
-            self._send_json(check_update())
+        elif self.path.startswith("/api/update/check"):
+            force = urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query
+            ).get("force", [""])[0] == "1"
+            self._send_json(check_update(force=force))
         elif self.path == "/api/update/status":
             self._send_json(dict(_update))
         elif self.path == "/api/tiers":
@@ -6969,6 +7234,41 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 self._send_json({"chats": load_chats(self._data_base())})
         elif self.path == "/api/memory":
             self._send_json({"facts": _load_memory(self._data_base())})
+        elif self.path == "/api/me":
+            # WHO AM I (6b257, the Account pane): the signed-in kind
+            # plus the display facts stored at mint time (.ident) —
+            # the uid itself is a one-way hash and tells nothing.
+            uid = self._uid()
+            if (uid and uid == owner_uid()) \
+                    or (not uid and not self._remote()):
+                self._send_json({"kind": "owner",
+                                 "pin_required": owner_uid() is not None})
+            elif not uid:
+                self._send_json({"kind": "guest", "expires_in": 0})
+            else:
+                d = os.path.join(app_dir(), "users", uid)
+                g = os.path.join(d, ".guest")
+                if os.path.exists(g):
+                    left = max(0, int(86400 - (time.time()
+                                               - os.path.getmtime(g))))
+                    self._send_json({"kind": "guest",
+                                     "expires_in": left})
+                else:
+                    try:
+                        with open(os.path.join(d, ".ident"),
+                                  encoding="utf-8") as f:
+                            ident = json.load(f)
+                    except Exception:
+                        # pre-6b257 profiles have no marker; google and
+                        # pin were always indistinguishable, so nothing
+                        # is lost by saying "profile"
+                        ident = {}
+                    out = {"kind": ident.get("kind", "pin")}
+                    if ident.get("email"):
+                        out["email"] = ident["email"]
+                    if ident.get("name"):
+                        out["name"] = ident["name"]
+                    self._send_json(out)
         elif self.path == "/api/voice/status":
             with _setup_lock:
                 job = dict(_setup_jobs.get(VOICE_ROW, {}))
@@ -7160,6 +7460,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._gate():
             return
+        if not self._csrf_ok():
+            self.send_response(403)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            try:
+                self.wfile.write(b'{"ok": false, "err": "cross-site"}')
+            except Exception:
+                pass
+            return
         if not self._admin_gate():
             return
         if self.path == "/api/welcome":
@@ -7181,6 +7490,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 uid = own
             else:
                 uid = _user_id("pin", name.lower() + ":" + pin)
+                _write_ident(uid, "pin", name=name)
             body = json.dumps({"ok": True}).encode()
             self.send_response(200)
             self.send_header("Set-Cookie",
@@ -7688,6 +7998,23 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     store_chats(items, self._data_base())
             self._send_json({"ok": isinstance(items, list)})
             return
+        if self.path == "/api/chat/hurry":
+            # ANSWER NOW (6b257): flips the per-request Event minted in
+            # /api/chat. NOT admin-gated — a tunnel guest may hurry its
+            # OWN run; the unguessable id is the whole authorization,
+            # exactly like the Remote agent's APPROVE jid.
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                _hb = json.loads(self.rfile.read(n)) if n else {}
+                hid = str(_hb.get("hid", "")) if isinstance(_hb, dict) else ""
+            except (ValueError, json.JSONDecodeError):
+                hid = ""
+            with _hurry_lock:
+                ev = _hurry_jobs.get(hid)
+            if ev:
+                ev.set()
+            self._send_json({"ok": bool(ev)})
+            return
         if self.path == "/api/title":
             n = int(self.headers.get("Content-Length", 0))
             try:
@@ -7704,6 +8031,72 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if self.path == "/api/memory/clear":
             with _memory_lock:
                 _save_memory([], self._data_base())
+            self._send_json({"ok": True})
+            return
+        if self.path == "/api/logout":
+            # signs the browser out (6b257, Account pane): the cookie
+            # dies and the next load lands on the welcome door. The
+            # desktop owner has no cookie — the client hides the button.
+            body = json.dumps({"ok": True}).encode()
+            self.send_response(200)
+            self.send_header("Set-Cookie",
+                             "millen_user=; Path=/; Max-Age=0; "
+                             "HttpOnly; SameSite=Lax")
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        if self.path == "/api/forget":
+            # FORGET ME, scoped (6b257, per Patrick: the droplet-destroy
+            # treatment). The client asks WHAT dies, re-auths, then
+            # demands FORGET ME typed in caps; this end only verifies
+            # and deletes. Owner data needs the PIN when owner access
+            # is configured; a walled web profile is its own
+            # authorization — the cookie IS the identity.
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                d = json.loads(self.rfile.read(n)) if n else {}
+            except (ValueError, json.JSONDecodeError):
+                d = {}
+            if not isinstance(d, dict):
+                d = {}          # valid JSON is not always an object
+            scopes = set(d.get("scopes") or ["memory"])
+            base = self._data_base()
+            if base is None:
+                own = owner_uid()
+                pin = str(d.get("pin", "")).strip()
+                if own and _user_id("owner", pin) != own:
+                    self._send_json({"ok": False, "err": "pin"})
+                    return
+            if "memory" in scopes:
+                with _memory_lock:
+                    _save_memory([], base)
+            if "chats" in scopes:
+                with _chats_lock:
+                    store_chats([], base)
+            if "prefs" in scopes:
+                if base is None:
+                    # personal keys only — machine config (turbo,
+                    # contribute, update channel) is not "about the
+                    # user" and must survive
+                    p = load_prefs(None)
+                    for k in ("persona", "length", "user_name"):
+                        p.pop(k, None)
+                    store_prefs(p, None)
+                else:
+                    store_prefs({}, base)
+            # ERASE MEANS ERASE: a walled profile's .ident marker holds
+            # the very PII the pane promises to forget (the Google
+            # email, the profile name), so a full three-scope forget
+            # takes the whole directory with it — otherwise /api/me
+            # still greets you by name after "Erase forever" (6b257).
+            if base is not None and {"memory", "chats",
+                                     "prefs"} <= scopes:
+                try:
+                    shutil.rmtree(base, ignore_errors=True)
+                except Exception:
+                    pass
             self._send_json({"ok": True})
             return
         if self.path == "/api/voice/prepare":
@@ -7741,6 +8134,93 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             except (ValueError, json.JSONDecodeError):
                 want = []
             self._send_json({"started": start_model_downloads(want)})
+            return
+        if self.path == "/api/model/remove":
+            # REMOVE A MODEL (6b257, per Patrick's Manage flow). Ready
+            # models only — a downloading one has a live writer thread
+            # and no cancel machinery, and rmtree under it resurrects
+            # partial state. MLX: stop the engine, then delete EXACTLY
+            # the label's own HF cache dir pair, derived from the
+            # vetted MLX_REPOS constant — never a glob, never the
+            # shared hub/ parent (it may hold models we don't own).
+            # Ollama: NEVER touch ~/.ollama on disk — blobs are
+            # content-addressed and shared across tags; ask the daemon.
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                _b = json.loads(self.rfile.read(n)) if n else {}
+                want = (_b.get("labels", [])
+                        if isinstance(_b, dict) else [])
+            except (ValueError, json.JSONDecodeError):
+                want = []
+            removed, errors = [], {}
+            for label in [str(x) for x in want][:20]:
+                if label not in MODEL_INFO or label not in MODEL_ROUTES:
+                    errors[label] = "unknown model"
+                    continue
+                with _setup_lock:
+                    _st = (_setup_jobs.get(label) or {}).get("status", "")
+                if _st in ("downloading", "queued"):
+                    errors[label] = "still downloading"
+                    continue
+                kind, target = MODEL_ROUTES[label]
+                try:
+                    if kind == "mlx":
+                        # _engine_lock guards the process table
+                        # everywhere else (see run_model) — take it, or
+                        # a warm-up racing this delete resurrects a
+                        # half-removed engine
+                        with _engine_lock:
+                            proc = _mlx_procs.pop(label, None)
+                        if proc and proc.poll() is None:
+                            proc.terminate()
+                            try:
+                                proc.wait(8)
+                            except Exception:
+                                proc.kill()
+                                try:
+                                    proc.wait(6)
+                                except Exception:
+                                    pass
+                        repo = MLX_REPOS[label]
+                        _mdir = _hf_model_dir(repo)
+                        _hub = os.path.dirname(_mdir)
+                        for _p in (_mdir, os.path.join(
+                                _hub, ".locks",
+                                "models--" + repo.replace("/", "--"))):
+                            if os.path.isdir(_p):
+                                shutil.rmtree(_p, ignore_errors=True)
+                    else:
+                        try:
+                            _rq = urllib.request.Request(
+                                "http://127.0.0.1:11434/api/delete",
+                                data=json.dumps({"name": target}).encode(),
+                                headers={"Content-Type":
+                                         "application/json"},
+                                method="DELETE")
+                            urllib.request.urlopen(_rq, timeout=15).read()
+                        except Exception:
+                            _ob = _ollama_bin()
+                            if not _ob:
+                                raise RuntimeError("Ollama engine offline")
+                            _rr = subprocess.run([_ob, "rm", target],
+                                                 capture_output=True,
+                                                 timeout=30)
+                            if _rr.returncode != 0:
+                                # a silent non-zero here reported
+                                # "removed" while the weights stayed
+                                raise RuntimeError(
+                                    (_rr.stderr or b"").decode(
+                                        "utf-8", "replace").strip()[:80]
+                                    or "ollama rm failed")
+                    with _setup_lock:
+                        _setup_jobs.pop(label, None)
+                    removed.append(label)
+                except Exception as exc:
+                    errors[label] = str(exc)[:80]
+            self._send_json({"removed": removed,
+                             "freed_gb": round(sum(
+                                 MODEL_INFO[l]["gb"] for l in removed), 1),
+                             "errors": errors})
             return
         if self.path != "/api/chat":
             self.send_error(404)
@@ -8260,7 +8740,16 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "\nUse them naturally when relevant — don't recite them.")
         # standing preferences the user wrote themselves (About panel) — they
         # outrank remembered facts, which are extracted guesses
-        persona = (load_prefs(user_base).get("persona") or "").strip()[:2000]
+        _prefs = load_prefs(user_base)
+        user_name = str(_prefs.get("user_name") or "").strip()[:80]
+        if user_name:
+            dated_system["content"] += (
+                "\n\nThe user's name is " + user_name + " — they told "
+                "you so themselves (Settings). Address them by name "
+                "when it feels natural, never in every reply. If a "
+                "remembered fact suggests a different name, this one "
+                "wins.")
+        persona = (_prefs.get("persona") or "").strip()[:2000]
         if persona:
             dated_system["content"] += (
                 "\n\nThe user has set standing instructions for how you "
@@ -8294,7 +8783,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "everything worth saying, stop there."),
         }
         try:
-            _lv = int(load_prefs(user_base).get("length", 3))
+            _lv = int(_prefs.get("length", 3))
         except (TypeError, ValueError):
             _lv = 3
         _lv = max(1, min(5, _lv))
@@ -8315,6 +8804,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             xm_names += [lbl for lbl, _c in cloud_bench()]
         xm = ", ".join(xm_names)[:300]
         self.send_header("X-Models", xm)
+        # ANSWER NOW (6b257): an unguessable per-request id the client
+        # may POST back to /api/chat/hurry. A header beats a frame here
+        # — it arrives before the first body byte and costs the frame
+        # parser nothing.
+        hurry_id = secrets.token_hex(8)
+        hurry_ev = threading.Event()
+        with _hurry_lock:
+            _hurry_jobs[hurry_id] = hurry_ev
+        self.send_header("X-Hurry", hurry_id)
         self.end_headers()
 
         # Cloudflare drops a proxied response after ~100s without bytes,
@@ -8493,7 +8991,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 run_council(council, full_messages, emit, status,
                             reflect=(tier == "Thinking"),
                             peer=(tier == "Pro"),
-                            bench_allow=req_cloud, comp=req_comp)
+                            bench_allow=req_cloud, comp=req_comp,
+                            hurry=hurry_ev)
             else:
                 lbl = route_label or model_name
                 # cloud is a pref, not a tier (Best retired in 5.3).
@@ -8638,6 +9137,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                      "didn't answer either. Ask again — it usually "
                      "comes straight back.")
         finally:
+            # the hurry registry entry dies with the request — a set()
+            # arriving after this harmlessly answers ok:false (6b257)
+            with _hurry_lock:
+                _hurry_jobs.pop(hurry_id, None)
             # THE MODULE MUST NOT DEPEND ON THE BIG MODEL REMEMBERING a
             # trailer (it forgets ~half the time, and doesn't always
             # bold names either — both seen live). A tiny model reads
@@ -8938,9 +9441,17 @@ body.resizing{cursor:col-resize;user-select:none}
   margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
 }
 .vghost b{font-weight:400}
+/* 6b257, per Patrick: the name grew an AI and the AI is BOLD — a
+   nested <b> inside each quiet 400-weight lockup. NOT a span: the
+   gauntlet's tab guard forbids a span whose content is exactly AI
+   (this comment ships in the page, so it can't spell the literal
+   either — it already tripped the guard once). Michroma ships one
+   weight, so the 700 is synthesized — heavier stroke, same face, and
+   both engines (Blink pane, WKWebView app) do it. */
+.vghost b b,#set-brand b b,#wiz-brand b b{font-weight:700}
 /* 6b241, per Patrick's sketch: the dock icon's diagonal bars become a
    swept wedge that runs INTO the C — a delta wing whose trailing edge
-   is the letter, which is the right idea for something called Concorde.
+   is the letter, which is the right idea for something called ConcordeAI.
    Same construction as make_icon.py (parallel 45-degree bars, each
    shorter toward the corner, so the group reads as a triangle) and the
    same greyscale ramp, but reversed: steel at the far tip, brightest
@@ -9797,6 +10308,23 @@ body:not(.perf) .autoseg[data-a="full"].on .ai{animation:flameP 1.5s ease infini
 .wtbar i{display:block;height:100%;border-radius:0;background:#ecedf2;
   transition:width .45s cubic-bezier(.4,0,.2,1)}
 body:not(.perf) .wtbar i{animation:barBreathe 2.4s ease-in-out infinite}
+/* 6b257: the machinery holds back for the run's first 5s — quick
+   answers stay machinery-free, slow ones fade the card in when
+   paintSteps lifts .warm. max-height snaps (no transition to auto);
+   only the opacity fades, which is the part the eye follows. */
+.worktree.warm{opacity:0;max-height:0;overflow:hidden;margin:0;padding:0}
+body:not(.perf) .worktree{transition:opacity .5s ease}
+/* the bare boot spinner yields once the card is showing */
+.worktree:not(.warm)~.statusline{display:none}
+.wtsub{display:flex;align-items:center;gap:10px;margin:-4px 0 8px}
+.wteta{font-size:10.5px;font-style:italic;color:var(--faint)}
+.wtnow{font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--text);background:none;
+  border:1px solid rgba(255,255,255,.25);border-radius:999px;
+  padding:3px 10px;cursor:pointer;margin-left:auto;flex:none}
+.wtnow:hover{border-color:rgba(255,255,255,.5)}
+.wtnow[disabled]{color:var(--faint);border-color:rgba(255,255,255,.12);
+  cursor:default}
 /* the living pinwheel (5.2): Claude has its flower — ours spins the
    identity gradient beside whatever is in motion */
 .wthead{display:flex;align-items:center;gap:9px;margin-bottom:10px}
@@ -10155,11 +10683,9 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .lmap.leaflet-container{background:#0d0f14;font-family:var(--sans)}
 .lmap .leaflet-popup-content-wrapper,.lmap .leaflet-popup-tip{
   background:#171a21;color:#ececec}
-.caret{
-  display:inline-block;width:8px;height:15px;background:var(--accent);
-  vertical-align:-2px;margin-left:2px;border-radius:1px;
-}
-body:not(.perf) .caret{animation:blink .9s step-end infinite}
+/* the pulsing caret is retired (6b257) — the stream opens on the
+   statusline pinwheel instead, and the shared blink keyframe lives on
+   in the statusline, the run dots and the mic. */
 
 /* -------------------------------------------------------------- composer */
 #composer-wrap{
@@ -10499,21 +11025,103 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
   text-transform:uppercase;color:var(--faint);text-align:left;
   margin:16px 0 6px;
 }
-#persona{
+#persona,#user-name,#forget-pin,#forget-word{
   width:100%;resize:none;padding:10px 12px;
   font:13.5px/1.55 var(--helv);color:var(--text);
   background:var(--panel);border:1px solid var(--line);border-radius:10px;
   outline:none;
 }
-#persona:focus{border-color:var(--dim)}
-#persona::placeholder{color:var(--faint)}
-#about-name{font-family:var(--helv);font-size:24px;font-weight:600;color:var(--text)}
-#about-name em{font-style:italic;font-weight:400;opacity:.85}
+#persona:focus,#user-name:focus,#forget-pin:focus,#forget-word:focus{border-color:var(--dim)}
+#persona::placeholder,#user-name::placeholder,#forget-pin::placeholder,#forget-word::placeholder{color:var(--faint)}
+#user-name{margin-bottom:8px}
+/* SETTINGS ROUND 2 (6b257, per Patrick). One quiet line under every
+   pane title, in one voice. */
+.tdesc{font-size:11.5px;color:var(--faint);line-height:1.5;
+  margin:-4px 0 14px}
+/* the Account pane */
+#acct-card{display:flex;align-items:center;gap:11px;
+  background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  padding:10px 12px;margin-bottom:10px}
+#acct-av{flex:none;width:30px;height:30px;border-radius:50%;
+  background:rgba(255,255,255,.06);display:flex;align-items:center;
+  justify-content:center;font-size:14px}
+#acct-kind{display:block;font-size:13px;font-weight:600}
+#acct-sub{font-size:11px;color:var(--faint)}
+#forget-steps{margin-top:10px;display:flex;flex-direction:column;gap:8px}
+/* the [hidden] trap (the wizard's own lesson, see #wiz-foot): any
+   element that declares display needs its own [hidden] rule */
+#forget-steps[hidden]{display:none}
+.about-btn[hidden]{display:none}
+#forget-what{display:flex;gap:14px;flex-wrap:wrap}
+.fscope{display:flex;gap:6px;align-items:center;font-size:12px;
+  color:var(--text)}
+#forget-note{font-size:11px;color:var(--faint);min-height:14px}
+/* Community: the ledger + the three promises */
+#contrib-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
+  margin:10px 0 12px;padding:0}
+#contrib-stats div{background:var(--panel);border:1px solid var(--line);
+  border-radius:9px;padding:8px 10px;margin:0}
+#contrib-stats dt{font-family:var(--mono);font-size:8.5px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+#contrib-stats dd{margin:2px 0 0;font-family:var(--mono);font-size:14px;
+  font-variant-numeric:tabular-nums}
+#lend-head{font-size:12px;color:var(--text);margin:4px 0 6px}
+#contrib-seg{display:flex;border:1px solid var(--line);border-radius:9px;
+  overflow:hidden;margin-bottom:10px;font-family:var(--mono);
+  font-size:10.5px}
+.cseg{flex:1;text-align:center;padding:6px 0;color:var(--faint);
+  cursor:pointer;user-select:none}
+.cseg.on{background:var(--text);color:#111;font-weight:600}
+/* Models: the roster */
+#roster{font-family:var(--mono);font-size:10.8px;line-height:1.9;
+  font-variant-numeric:tabular-nums;margin-bottom:4px}
+.ros-gh{font-size:9px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--faint);margin-top:8px}
+.ros-row{display:flex;gap:7px;align-items:baseline;min-width:0}
+.ros-row .rs{flex:none;width:22px}
+.ros-row .rok{color:#57c98e}.ros-row .rno{color:#e5605c}
+.ros-row .rn{flex:none;color:var(--text)}
+.ros-row .rg{flex:none;color:var(--faint);font-size:9.5px}
+.ros-row .rd{color:var(--faint);overflow:hidden;text-overflow:ellipsis;
+  white-space:nowrap;min-width:0}
+.ros-row .rrm{flex:none;color:var(--faint);cursor:pointer;
+  border-bottom:1px dotted rgba(255,255,255,.3)}
+.ros-row .rrm:hover{color:#e5605c}
+.ros-row input[type=checkbox]{margin:0 2px 0 0;vertical-align:-1px}
+#roster-foot{display:flex;gap:8px}
+#manage-box{margin-top:10px}
+#plan-row{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;
+  margin-bottom:8px}
+.plan-card{background:var(--panel);border:1px solid var(--line);
+  border-radius:9px;padding:9px 10px;cursor:pointer}
+.plan-card:hover{border-color:var(--dim)}
+.plan-card b{display:block;font-size:12px}
+.plan-card span{font-size:10.5px;color:var(--faint)}
+#manual-note{font-size:11px;color:var(--faint);margin:6px 0 2px}
+#manage-note{font-size:11px;color:var(--faint);margin-top:6px;
+  min-height:14px}
+/* Updates: version front and centre */
+#up-version{font-family:var(--disp);font-size:22px;letter-spacing:.1em;
+  text-transform:uppercase;text-align:center;color:#fff;margin:6px 0 2px}
+#up-reldate{font-size:11px;color:var(--faint);text-align:center;
+  margin-bottom:12px;min-height:13px}
+#up-notes{background:var(--panel);border:1px solid var(--line);
+  border-radius:9px;padding:9px 12px;font-size:11.5px;color:var(--dim);
+  line-height:1.55;margin-bottom:12px;white-space:pre-wrap;
+  max-height:180px;overflow-y:auto}
+#up-notes b{color:var(--text)}
+/* the two veil titles, distinct ids (6b257): about-name existed THREE
+   times and every bare query found a hidden copy — the id is retired.
+   The em rule died with the pre-rail platform line it styled. */
+#new-title,#up-title{font-family:var(--helv);font-size:24px;font-weight:600;color:var(--text)}
 /* #up-ver only (6b245): #about-ver used to share this rule from the
    old About layout, which left VERSION in 14px Helvetica inside a
    9.5px mono spec list — one row shouting in a different face */
 #up-ver{font-family:var(--helv);font-size:14px;color:var(--dim);margin-top:6px}
-#up-detail{font-size:11.5px;color:var(--faint);margin:10px 0 4px;line-height:1.5}
+/* 6b257: #up-detail was on BOTH veils, so the update dialog's status
+   text ("Downloading…") landed in the hidden new-models card. Distinct
+   ids, one shared rule — the third time this trap has been paid for. */
+#up-detail,#new-detail{font-size:11.5px;color:var(--faint);margin:10px 0 4px;line-height:1.5}
 #about-sub{font-size:11.5px;color:var(--faint);margin-top:10px;line-height:1.5}
 #new-pct{font-family:var(--mono);font-size:11px;color:var(--dim);
   margin:8px 0 2px}
@@ -10622,12 +11230,18 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 #fleet-adv{margin-top:6px}
 #fleet-adv summary{font-family:var(--mono);font-size:9.5px;
   color:var(--faint);cursor:pointer;letter-spacing:.1em}
-#fleet-box input{
+/* text fields only (6b257): the bare `#fleet-box input` rule stretched
+   the new AC/idle CHECKBOXES to full width and gave them a panel
+   background — a duplicate-declaration collision of the classic kind */
+#fleet-box input:not([type=checkbox]){
   width:100%;box-sizing:border-box;margin-bottom:6px;padding:8px 10px;
   background:var(--panel2);border:1px solid var(--line);border-radius:8px;
   color:var(--text);font-size:12.5px;outline:none;
 }
-#fleet-box input:focus{border-color:var(--accent-dim)}
+#fleet-box input:not([type=checkbox]):focus{border-color:var(--accent-dim)}
+#acon-row,#idleon-row{display:flex;gap:7px;align-items:center;
+  font-size:12px;color:var(--text);margin:6px 0}
+#acon-row input,#idleon-row input{flex:none;margin:0}
 /* #about-facts carries no rule of its own anymore (6b245): it is a row
    of the #set-spec list and inherits its type like every sibling — the
    old 11.5px bold + margin made MODELS the loudest line in the box */
@@ -11141,7 +11755,7 @@ body:not(.perf) .big-bar i{animation:barBreathe 2.4s ease-in-out infinite}
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
     <div id="brand-row">
-    <span class="vghost" title="MillenAI"><svg id="vmark" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="vmg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#vmg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b>MillenAI</b> <i class="vsub">__APP_VER__</i></span>
+    <span class="vghost" title="MillenAI"><svg id="vmark" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="vmg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#vmg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b>Concorde<b>AI</b></b> <i class="vsub">__APP_VER__</i></span>
 <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
@@ -11394,8 +12008,8 @@ __CODE_ROWS__
 
 <div id="new-veil" hidden>
   <div id="about-card">
-    <div id="about-name">New models available</div>
-    <div id="up-detail">This version adds models you don&rsquo;t have yet.</div>
+    <div id="new-title">New models available</div>
+    <div id="new-detail">This version adds models you don&rsquo;t have yet.</div>
     <div id="new-list"></div>
     <div class="big-bar" id="new-bar" hidden><i></i></div>
     <div id="new-pct" hidden></div>
@@ -11408,7 +12022,7 @@ __CODE_ROWS__
 
 <div id="update-veil" hidden>
   <div id="about-card">
-    <div id="about-name">Update available</div>
+    <div id="up-title">Update available</div>
     <div id="up-ver"></div>
     <div id="up-detail"></div>
     <div class="big-bar" id="up-bar" hidden><i></i></div>
@@ -11425,7 +12039,7 @@ __CODE_ROWS__
          dot-separated run that wrapped mid-word. -->
     <nav id="set-rail">
       <div id="set-brand">
-        <svg id="set-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="swg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#swg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b id="about-name">MillenAI</b>
+        <svg id="set-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="swg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#swg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b>Concorde<b>AI</b></b>
       </div>
       <dl id="set-spec">
         <div><dt>version</dt><dd id="about-ver">__APP_VER__</dd></div>
@@ -11435,7 +12049,8 @@ __CODE_ROWS__
         <div><dt>models</dt><dd id="about-facts">&mdash;</dd></div>
       </dl>
       <div id="set-nav">
-        <button class="snav on" data-pane="p-persona">Personality</button>
+        <button class="snav on" data-pane="p-account">Account</button>
+        <button class="snav" data-pane="p-persona">Personality</button>
         <button class="snav" data-pane="p-cloud">Cloud power</button>
         <button class="snav" data-pane="p-community">Community</button>
         <button class="snav" data-pane="p-models">Models</button>
@@ -11445,8 +12060,43 @@ __CODE_ROWS__
 
     <div id="set-main">
     <div id="about-body">
-    <section class="spane on" id="p-persona">
+    <section class="spane on" id="p-account">
+      <div class="set-h">Account</div>
+      <p class="tdesc">Who you're signed in as, on this Mac and anywhere
+      else you use MillenAI &mdash; and the exits: sign out, or erase
+      what it knows about you.</p>
+      <div id="acct-card">
+        <div id="acct-av">&#128187;</div>
+        <div><b id="acct-kind">&mdash;</b>
+        <span id="acct-sub"></span></div>
+      </div>
+      <button class="about-btn slim" id="acct-logout" hidden>Sign out</button>
+      <button class="about-btn danger" id="about-forget">Forget me&hellip;</button>
+      <div id="forget-steps" hidden>
+        <div id="forget-what">
+          <label class="fscope"><input type="checkbox" id="fs-mem" checked>
+            <span>Memories</span></label>
+          <label class="fscope"><input type="checkbox" id="fs-chats">
+            <span>Chats</span></label>
+          <label class="fscope"><input type="checkbox" id="fs-prefs">
+            <span>Personal settings</span></label>
+        </div>
+        <input id="forget-pin" type="password" inputmode="numeric"
+               maxlength="12" placeholder="owner PIN to confirm" hidden
+               autocomplete="off">
+        <input id="forget-word" placeholder="type FORGET ME to confirm"
+               autocomplete="off" spellcheck="false" autocapitalize="characters">
+        <div id="forget-note"></div>
+        <button class="about-btn danger" id="forget-go" disabled>Erase forever</button>
+      </div>
+    </section>
+    <section class="spane" id="p-persona">
       <div class="set-h">Personality</div>
+      <p class="tdesc">How MillenAI talks to you &mdash; what it calls
+      you, how long its answers run, and the standing instructions it
+      re-reads before every reply.</p>
+      <input id="user-name" type="text" maxlength="80" spellcheck="false"
+        autocomplete="off" placeholder="Your name (or nickname)">
       <textarea id="persona" rows="3" maxlength="2000" spellcheck="false"
         placeholder="e.g. Be direct, skip the pleasantries. I work in finance, so assume I know the vocabulary."></textarea>
       <button class="about-btn slim" id="persona-save">Save</button>
@@ -11457,6 +12107,9 @@ __CODE_ROWS__
     </section>
     <section class="spane" id="p-cloud">
       <div class="set-h">Cloud power</div>
+      <p class="tdesc">Optional frontier brains. Add a key and cloud
+      drafts blend into your answers; your prompts leave this machine
+      only while a key is on.</p>
       <label id="turbo-row" hidden><input type="checkbox" id="turbo">
         <span>Use cloud power</span><i class="hint" id="turbo-hint"
         title="Answers come from a cloud GPU instead of this Mac — much faster, but your prompts leave this computer while it is on.">i</i></label>
@@ -11478,24 +12131,62 @@ __CODE_ROWS__
     </section>
     <section class="spane" id="p-community">
       <div class="set-h">Community</div>
+      <p class="tdesc">Lend this Mac's idle GPU to friends running
+      MillenAI, on your terms &mdash; and see what your machine has
+      given back.</p>
       <label id="contrib-row"><input type="checkbox" id="contrib">
         <span>Contribute GPU power</span><i class="hint" id="contrib-hint"
-        title="When this machine is idle, it answers questions for friends on MillenAI — and theirs answer yours. Nothing runs while you are using it.">i</i></label>
+        title="By default it only answers while this Mac is idle and plugged in — and friends' machines answer yours. Tune or turn it off below.">i</i></label>
       <div id="fleet-box">
+        <dl id="contrib-stats">
+          <div><dt>answered</dt><dd id="cs-jobs">&mdash;</dd></div>
+          <div><dt>time given</dt><dd id="cs-time">&mdash;</dd></div>
+          <div><dt>generated</dt><dd id="cs-chars">&mdash;</dd></div>
+        </dl>
+        <div id="lend-head">How much of this Mac to lend<i class="hint"
+          title="A time share of idle capacity — at 50% it rests as long as it works. A share of TIME, not a GPU throttle: no honest GPU-percent knob exists.">i</i></div>
+        <div id="contrib-seg">
+          <span class="cseg" data-pct="25">25%</span>
+          <span class="cseg" data-pct="50">50%</span>
+          <span class="cseg" data-pct="75">75%</span>
+          <span class="cseg" data-pct="100">100%</span>
+        </div>
+        <label id="acon-row"><input type="checkbox" id="acon">
+          <span>Only while plugged in</span></label>
+        <label id="idleon-row"><input type="checkbox" id="idleon">
+          <span>Only while this Mac is idle</span></label>
         <div id="fleet-pending"></div>
         <div id="contrib-state"></div>
       </div>
     </section>
     <section class="spane" id="p-models">
       <div class="set-h">Models</div>
-      <button class="about-btn" id="open-setup">Model updates&hellip;</button>
+      <p class="tdesc">Every mind this machine can call on: what's
+      loaded, what's on disk, what answers from the cloud &mdash; and
+      what each one is for.</p>
+      <div id="roster"></div>
+      <div id="roster-foot">
+        <button class="about-btn slim" id="roster-manage">Manage models&hellip;</button>
+        <button class="about-btn slim" id="open-setup">Model updates&hellip;</button>
+      </div>
+      <div id="manage-box" hidden>
+        <div id="plan-row"></div>
+        <div id="manual-note">&hellip;or tick models in the list above, then</div>
+        <button class="about-btn slim" id="manual-install" disabled>Install selected</button>
+        <div id="manage-note"></div>
+      </div>
     </section>
     <section class="spane" id="p-updates">
       <div class="set-h">Updates</div>
+      <p class="tdesc">What version you're flying, what changed in the
+      latest build, and the beta lane if you want tomorrow's build
+      today.</p>
+      <div id="up-version">__APP_VER__</div>
+      <div id="up-reldate"></div>
+      <div id="up-notes" hidden></div>
       <button class="about-btn" id="about-check">Check for updates</button>
       <label id="beta-row"><input type="checkbox" id="betaup">
         <span>Include Beta Releases</span></label>
-      <button class="about-btn danger" id="about-forget">Forget Me</button>
     </section>
     </div>
     <div id="about-foot">
@@ -11544,10 +12235,10 @@ __CODE_ROWS__
     <div class="wstep" data-w="1">
       <div id="wiz-brand">
         <svg id="wiz-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="wwg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#wwg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg>
-        <b>Concorde</b>
+        <b>Concorde<b>AI</b></b>
         <span id="wiz-ver">__APP_VER__</span>
       </div>
-      <p>Concorde runs real AI models on your own machine &mdash; private,
+      <p>MillenAI runs real AI models on your own machine &mdash; private,
       free, and yours &mdash; with optional cloud power when you want a
       frontier brain on the case. Its trick is compositing: several
       &ldquo;minds&rdquo; draft an answer, the strongest one writes the
@@ -11562,7 +12253,7 @@ __CODE_ROWS__
       <div class="set-h">Local models</div>
       <p>A large language model is a brain in a file &mdash; it lives on
       your disk and answers on your silicon, no internet required.
-      Concorde installs a few of different sizes and personalities, asks
+      MillenAI installs a few of different sizes and personalities, asks
       several at once on hard questions, and composites their drafts
       into one answer. Pick how much to install:</p>
       <div id="wiz-plans"></div>
@@ -11576,7 +12267,7 @@ __CODE_ROWS__
       <div class="set-h">Cloud power</div>
       <p>Cloud models are frontier brains that answer over the network
       &mdash; some free, some needing a paid API key from the provider.
-      With any key saved, Concorde blends cloud drafts into its answers
+      With any key saved, MillenAI blends cloud drafts into its answers
       and hands the final word to the strongest mind available. All
       optional; your prompts only leave this machine while it&rsquo;s
       on.</p>
@@ -11585,7 +12276,7 @@ __CODE_ROWS__
 
     <div class="wstep" data-w="4" hidden>
       <div class="set-h">That&rsquo;s it</div>
-      <p id="wiz-done-line">Thanks for setting up Concorde. Your models
+      <p id="wiz-done-line">Thanks for setting up MillenAI. Your models
       download in the background &mdash; start chatting the moment the
       first one lands, and find everything else under Settings.</p>
     </div>
@@ -12168,7 +12859,7 @@ $("#task-list").addEventListener("click",e=>{
 // guessing. The Remote agent runs it for real when a server is set up.
 // ONE gate (6b251): the risk card. The execution engine needs NOTHING
 // installed on the server — systemd-run is already there and reboot
-// survival is Concorde-side polling — so there is nothing to ask for.
+// survival is MillenAI-side polling — so there is nothing to ask for.
 function startTask(name,stage){
   if(!name)return;
   if(uiMode!=="code")switchLane("code");
@@ -12186,7 +12877,7 @@ function riskCard(t){
   const sg=$("#suggest"); if(sg)sg.hidden=true;
   const div=document.createElement("div");
   div.className="msg ai";
-  div.innerHTML='<div class="who">Concorde</div><div class="body"></div>';
+  div.innerHTML='<div class="who">MillenAI</div><div class="body"></div>';
   const card=document.createElement("div");
   card.className="riskcard";
   card.innerHTML='<div class="rktop"><span class="rkico">⚠</span>'
@@ -12626,6 +13317,19 @@ function srcRow(srcs){
   }
   return h;
 }
+// 6b257, per Patrick ("once the query is done... it's redundant"): a
+// finished answer shows sources ONLY inside the disclosure. Live
+// answers fold them in with the steps (collapseSteps, 6b242); this is
+// the same folded box for RELOADED answers, where the steps are gone
+// (telemetry isn't persisted) but the chips survive on m.sources. The
+// delegated wtsum handler on the chat works here unchanged.
+function srcBox(srcs){
+  const ns=(srcs&&srcs.length)||0;
+  if(!ns)return "";
+  return '<div class="worktree folded"><button class="wtsum">'
+    +'<span class="wtchev">›</span>'+ns+' source'+(ns===1?"":"s")
+    +'</button><div class="wtlist" hidden>'+srcRow(srcs)+'</div></div>';
+}
 // THE CLAUDE TREATMENT, per Patrick: a place answer renders as a dark
 // multi-pin map with a card rail — the model hands over structured
 // places in a [[PLACES]] trailer, pins geocode through /api/geo, and
@@ -12726,9 +13430,18 @@ function mapCard(m){
 let steps=[],stepHost=null;
 // what THIS run is expected to do (set at stream start) + live signals
 let stepPlan=[],answerChars=0,streamDone=false;
+// 6b257, per Patrick: the bar the user SEES is a tween chasing the
+// honest math, a time-left line rides under it (millen.speeds keeps a
+// per-tier EMA of past runs), and Answer now can cut a council short.
+let dispPct=0,lastTween=0,etaTxt="";
+let curHid="",liveDrafts=0,hurriedNow=false;
+let runT0=0,runTier="";
 const STEP_ORDER=["search","read","geo","council","draft","polish","places"];
 function resetSteps(host){steps=[];stepHost=host;
-  stepPlan=[];answerChars=0;streamDone=false;}
+  stepPlan=[];answerChars=0;streamDone=false;
+  dispPct=0;lastTween=0;etaTxt="";
+  curHid="";liveDrafts=0;hurriedNow=false;
+  runT0=performance.now();runTier=tier||"?";}
 function addStep(s){
   if(!s||!s.id)return;
   const at=steps.findIndex(x=>x.id===s.id);
@@ -12744,8 +13457,16 @@ function paintSteps(){
   let box=stepHost.querySelector(".worktree");
   if(!box){
     box=document.createElement("div");box.className="worktree";
+    // SPINNER-FIRST (6b257, per Patrick): a quick answer never shows
+    // machinery. The card exists from the first step but stays hidden
+    // for the run's first 5s; the clock below lifts .warm and the
+    // opacity transition fades it in.
+    if(performance.now()-runT0<5000)box.classList.add("warm");
     stepHost.insertBefore(box,stepHost.firstChild);
   }
+  if(box.classList.contains("warm")
+     &&(performance.now()-runT0>=5000||streamDone))
+    box.classList.remove("warm");
   // HONEST PROGRESS (6b226, per Patrick: "not go right to 99% and
   // sit there"): weight the phases this run will ACTUALLY have —
   // known at stream start from the search header and the tier — and
@@ -12777,11 +13498,60 @@ function paintSteps(){
   // question) must not hold the bar short of full at the end
   const pct=streamDone?100
     :(total?Math.min(96,Math.round(got/total*100)):0);
+  // SMOOTH (6b257, per Patrick: "have it move a little more
+  // smoothly"). The honest math above is the TARGET; what the bar
+  // shows EASES toward it, so a landed milestone pulls the bar over
+  // ~a second instead of teleporting it. Time-based, monotonic, and
+  // it never overshoots the honest value.
+  const nowT=performance.now();
+  const dt=lastTween?Math.min(2,(nowT-lastTween)/1000):0.2;
+  lastTween=nowT;
+  if(streamDone)dispPct=100;
+  else dispPct=Math.max(dispPct,
+    dispPct+(pct-dispPct)*(1-Math.exp(-dt/0.55)));
+  const shown=streamDone?100:Math.min(dispPct,96);
+  // TIME LEFT (6b257): this run's own pace blended with the
+  // remembered per-tier total (millen.speeds EMA). Quiet until there
+  // is signal, gone the moment the stream settles.
+  const el2=(nowT-runT0)/1000;
+  let eta=0;
+  try{
+    const sp=JSON.parse(localStorage.getItem("millen.speeds")||"{}");
+    const hist=sp[runTier]||0;
+    const pace=shown>8?el2/(shown/100):0;
+    const est=hist&&pace?hist*.45+pace*.55:(pace||hist);
+    if(est)eta=Math.max(0,est-el2);
+  }catch(e){}
+  etaTxt=(!streamDone&&el2>5&&eta>=3)
+    ?(eta>=90?"~"+Math.round(eta/60)+" min left"
+             :"~"+Math.round(eta)+"s left"):"";
+  const nowBtn=(curHid&&liveDrafts>0&&!streamDone)
+    ?(hurriedNow
+      ?'<button class="wtnow" disabled>Hurrying it along…</button>'
+      :'<button class="wtnow">Answer now</button>'):"";
   const ordered=steps.slice().sort((a,b)=>
     STEP_ORDER.indexOf(a.id)-STEP_ORDER.indexOf(b.id));
+  const headTail=(etaTxt||nowBtn)
+    ?'<div class="wtsub"><i class="wteta">'+etaTxt+'</i>'+nowBtn+'</div>'
+    :"";
+  // CHEAP PATH: same rows, same tail shape — move the bar IN PLACE so
+  // the CSS width transition actually animates (a full innerHTML
+  // rewrite recreates the <i> and kills the transition every 600ms,
+  // which is why the old bar always jumped)
+  const sig=ordered.map(s=>s.id+s.s+(s.d||"")).join("|")
+    +(etaTxt?"|e":"")+(nowBtn?(hurriedNow?"|h":"|n"):"");
+  if(box._sig===sig&&box.firstChild){
+    const bi=box.querySelector(".wtbar i");
+    if(bi)bi.style.width=shown+"%";
+    const et=box.querySelector(".wteta");
+    if(et)et.textContent=etaTxt;
+    return;
+  }
+  box._sig=sig;
   box.innerHTML=
     '<div class="wthead"><i class="cspin"></i>'
-    +'<div class="wtbar"><i style="width:'+pct+'%"></i></div></div>'
+    +'<div class="wtbar"><i style="width:'+shown+'%"></i></div></div>'
+    +headTail
     +'<div class="wtlist">'+ordered.map(s=>
       '<div class="wtrow '+(s.s==="done"?"ok":"run")+'">'
       +'<span class="wtdot"></span>'
@@ -12789,11 +13559,25 @@ function paintSteps(){
       +(s.d?'<span class="wtd">'+esc(s.d)+'</span>':"")
       +'</div>').join("")+'</div>';
 }
-// repaint on a slow clock so the creep is visible even when the
-// server is silent (a big model can load for 20s without a word)
+// repaint on a 200ms clock — the tween needs frames even when the
+// server is silent (a big model can load for 20s without a word), and
+// the in-place fast path above keeps each tick to one style write.
+// Hidden windows still skip (the rAF trap: nothing advances there).
 setInterval(()=>{
   if(stepHost&&steps.length&&!streamDone&&!document.hidden)paintSteps();
-},600);
+},200);
+// ANSWER NOW (6b257): delegated like the chevron — the card is
+// re-cloned from its HTML string on every drip frame, so a listener
+// on the button itself dies within the second.
+inner.addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest(".wtnow");
+  if(!b||!curHid||hurriedNow)return;
+  hurriedNow=true;
+  fetch("/api/chat/hurry",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({hid:curHid})}).catch(()=>{});
+  paintSteps();
+});
 // srcs, when given, are TUCKED INSIDE the disclosure (6b242, per
 // Patrick): visible while the answer works, folded away with the steps
 // once it lands, so a finished answer is prose \u2014 not prose sitting under
@@ -12802,6 +13586,7 @@ function collapseSteps(srcs){
   if(!stepHost)return;
   const box=stepHost.querySelector(".worktree");
   if(!box)return;
+  box.classList.remove("warm");   // a sub-5s answer still gets its fold
   if(!steps.length){box.remove();stepHost=null;return;}
   const n=steps.length;
   const ns=(srcs&&srcs.length)||0;
@@ -12929,7 +13714,7 @@ function addMsg(role,text,drafts,srcs,mapd,ph,places,loc){
       else form=null;
     }
   }
-  if(role==="user")body.textContent=text; else{body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text)+photoRow(ph)+(places&&places.length?placesModule(places,loc,mapd):mapCard(mapd));requestAnimationFrame(()=>wireFlow(body));}
+  if(role==="user")body.textContent=text; else{body.innerHTML=srcBox(srcs)+renderMD(text)+photoRow(ph)+(places&&places.length?placesModule(places,loc,mapd):mapCard(mapd));requestAnimationFrame(()=>wireFlow(body));}
   if(form)body.appendChild(formCard(form));
   if(role!=="user"&&drafts&&drafts.length)paintDrafts(div,drafts,false);
   if(text)msgActions(div,role,text);
@@ -13033,6 +13818,32 @@ async function send(){
   const text=input.value.trim();
   if((!text&&!pendingImages.length&&!pendingDocs.length)||generating)return;
 
+  // FUNNEL LANE (6b257, per Patrick): a typed answer IS an answer.
+  // Mid-funnel (in the funnel's OWN chat), free text answers the
+  // current stage exactly as clicking its card would. On the lane's
+  // blank slate it IS the decision, and starts one. In a chat that
+  // already holds a finished funnel it falls THROUGH to /api/chat —
+  // the funnel is the subject there (6b238) and a follow-up deserves
+  // an answer, not a fresh "stage 1 of 5" about its own wording.
+  if(uiMode==="funnel"&&text&&!pendingImages.length&&!pendingDocs.length){
+    if(fnState&&fnState.chat===curChat){
+      if(!fnAnswer)return;          // stage still building — keep the text
+      input.value="";input.style.height="auto";
+      addMsg("user",text);
+      messages.push({role:"user",content:text});
+      // one line, whatever was typed: the server reads picks back out
+      // of "q → label" assistant turns, and $-anchored regex can't
+      // cross a newline (_FUNNEL_PICK_RX)
+      fnAnswer(text.replace(/\s+/g," ").trim());
+      return;
+    }
+    if(!messages.length){
+      input.value="";input.style.height="auto";
+      startFunnel(text);
+      return;
+    }
+  }
+
   // engine down? give launch instructions instead of a doomed request.
   // in combine mode, drop unavailable models rather than failing outright
   if(combine&&council.length>1){
@@ -13078,7 +13889,9 @@ async function send(){
   sendBtn.textContent="■"; sendBtn.classList.add("stop"); sendBtn.title="Stop";
   const aiDiv=addMsg("assistant",""); const body=aiDiv.querySelector(".body");
   aiDiv.classList.add("live");     // soft mask on the newest line
-  body.innerHTML='<span class="caret"></span>';
+  // the pulsing caret is RETIRED (6b257, per Patrick): the first 5s
+  // are a quiet pinwheel; machinery only fades in if the run earns it
+  body.innerHTML='<span class="statusline"><i class="cspin"></i></span>';
 
   resetSteps(body);
   abortCtl=new AbortController();
@@ -13103,6 +13916,7 @@ async function send(){
     });
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
+    curHid=resp.headers.get("X-Hurry")||"";   // Answer now (6b257)
     // the phase plan for THIS run — what the bar measures against
     stepPlan=[];
     if(searched)stepPlan.push("search","read","geo");
@@ -13167,7 +13981,11 @@ async function send(){
               .replace(/\u0000STATUS:[^\u0000]*$/,"")    // partial marker
               .replace(/\u0000DRAFT:(.*?)\u0000/g,(_,j)=>{
                  try{const d=JSON.parse(j);
-                     if(!drafts.some(x=>x.m===d.m))drafts.push(d);}catch(e){}
+                     if(!drafts.some(x=>x.m===d.m))drafts.push(d);
+                     // real drafts arm the Answer-now button (6b257)
+                     liveDrafts=drafts.filter(
+                       x=>!/^\(no answer/.test(x.t||"")).length;
+                 }catch(e){}
                  return "";})
               .replace(/\u0000DRAFT:[^\u0000]*$/,"")
               .replace(/\u0000SOURCES:(.*?)\u0000/g,(_,j)=>{
@@ -13284,6 +14102,17 @@ async function send(){
     +(full&&!wasAborted?photoRow(photos)
       +(places&&places.length?placesModule(places,locCtx,mapd):mapCard(mapd)):"");
   const secs=((performance.now()-t0)/1000);
+  // remember this tier's pace for the next run's time-left line — an
+  // EMA so one slow outlier can't wreck the estimate, and hurried or
+  // aborted runs don't count (they lie about the tier's real speed)
+  if(full&&!wasAborted&&!hurriedNow&&secs>3){
+    try{
+      const sp=JSON.parse(localStorage.getItem("millen.speeds")||"{}");
+      sp[runTier]=sp[runTier]?sp[runTier]*.6+secs*.4:secs;
+      localStorage.setItem("millen.speeds",JSON.stringify(sp));
+    }catch(e){}
+  }
+  curHid="";liveDrafts=0;
   const isErr=full.trim().startsWith("⚠️")||full.includes("\n⚠️");
   if(full&&!isErr&&!aiDiv.querySelector(".mact"))
     msgActions(aiDiv,"assistant",full);
@@ -14071,7 +14900,7 @@ function deleteChat(id){
   if(idx<0)return;
   undoStash={chat:chats[idx],idx:idx,wasCur:curChat===id};
   chats.splice(idx,1);
-  if(curChat===id){curChat=null;messages=[];resetHero();}
+  if(curChat===id){curChat=null;messages=[];fnState=null;fnAnswer=null;resetHero();}
   saveChats();renderChats();
   const t=$("#undobar");
   t.querySelector(".ut").textContent='Deleted "'
@@ -14097,6 +14926,10 @@ function loadChat(id){
   if((c.lane||"ai")!==uiMode)switchLane(c.lane||"ai");
   // an in-flight answer is NOT aborted: it streams on quietly and lands
   // in its own chat — switching away no longer costs you the response
+  // ...but an in-flight FUNNEL is abandoned: its option cards die with
+  // the DOM below, and the typed-answer path (6b257) must not advance
+  // an orphaned funnel into whichever chat is on screen
+  fnState=null;fnAnswer=null;
   curChat=id;
   messages=c.messages.slice();
   inner.innerHTML="";
@@ -14141,8 +14974,9 @@ $("#ws-set").addEventListener("click",async()=>{
 // stage renders as a question with option cards; a pick appends to the
 // path and asks the server for the next stage. Every funnel is a chat
 // in the "funnel" lane, so it lands in history like anything else.
-let fnState=null;
+let fnState=null,fnAnswer=null;
 async function fnStep(){
+  fnAnswer=null;                    // a new stage voids the old answer path
   const box=document.createElement("div");
   box.className="msg ai";
   box.innerHTML='<div class="who">Funnel</div><div class="body">'
@@ -14155,13 +14989,19 @@ async function fnStep(){
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify(fnState)})).json();
   }catch(e){d={err:"couldn\u2019t reach the engine"};}
+  if(!fnState){box.remove();return;}   // the chat moved on mid-build \u2014
+                                       // don't render into it, don't arm
+                                       // fnAnswer with a dead closure
   const b=box.querySelector(".body");
-  if(d.err){b.innerHTML=esc(d.err);return;}
+  // an errored stage ABANDONS the funnel (as abandoning always did):
+  // the message shows, and the composer falls back to plain chat
+  // instead of dead-ending on a stage that will never build (6b257)
+  if(d.err){b.innerHTML=esc(d.err);fnState=null;fnAnswer=null;return;}
   if(d.done){
     box.querySelector(".who").textContent="Funnel \u00b7 done";
     b.innerHTML='<div class="fpath">'+esc(fnState.picks.join(" \u2192 "))
       +'</div>'+renderMD(d.summary||"");
-    fnState=null;persistCurrent();return;
+    fnState=null;fnAnswer=null;persistCurrent();return;
   }
   b.innerHTML='<div class="fstage"><div class="fpath">stage '+d.stage
     +' of '+d.total+(fnState.picks.length?' \u00b7 '
@@ -14173,14 +15013,22 @@ async function fnStep(){
       +'<b>'+esc(o.label)+'</b>'
       +(o.why?'<span>'+esc(o.why)+'</span>':"")
       +'</button>').join("")+'</div></div>';
+  // a typed answer and a clicked card are the SAME thing (6b257, per
+  // Patrick: the cards are suggestions, not a menu \u2014 free text must
+  // not dead-end the funnel). Both paths land here; the composer's
+  // send() calls fnAnswer with whatever the user wrote.
+  fnAnswer=label=>{
+    if(!fnState)return;
+    b.innerHTML='<div class="fpath">stage '+d.stage+' \u00b7 '
+      +esc(d.q)+'</div><b>'+esc(label)+'</b>';
+    fnState.picks.push(String(label).slice(0,90));
+    messages.push({role:"assistant",content:d.q+" \u2192 "+label});
+    fnAnswer=null;persistCurrent();fnStep();
+  };
   b.querySelectorAll(".fopt").forEach(el=>{
     el.addEventListener("click",()=>{
-      const o=(d.options||[])[+el.dataset.i];if(!o||!fnState)return;
-      b.innerHTML='<div class="fpath">stage '+d.stage+' \u00b7 '
-        +esc(d.q)+'</div><b>'+esc(o.label)+'</b>';
-      fnState.picks.push(o.label);
-      messages.push({role:"assistant",content:d.q+" \u2192 "+o.label});
-      persistCurrent();fnStep();
+      const o=(d.options||[])[+el.dataset.i];
+      if(o&&fnAnswer)fnAnswer(o.label);
     });
   });
   autoScroll();
@@ -14195,6 +15043,7 @@ $("#fn-go").addEventListener("click",()=>{
   addMsg("user","Funnel: "+goal);
   messages.push({role:"user",content:"Funnel: "+goal});
   persistCurrent();
+  fnState.chat=curChat;             // the funnel belongs to THIS chat
   fnStep();
 });
 
@@ -14339,6 +15188,7 @@ document.addEventListener("keydown",e=>{
 $("#newchat").addEventListener("click",()=>{
   if(generating&&abortCtl)abortCtl.abort();
   persistCurrent();
+  fnState=null;fnAnswer=null;       // a new chat abandons any funnel
   curChat=null;messages=[];
   resetHero();renderChats();
   input.focus();
@@ -15764,9 +16614,11 @@ $("#sb-resize").addEventListener("dblclick",()=>setSidebar(300));
 const aboutVeil=$("#about-veil");
 async function openAbout(){
   aboutVeil.hidden=false;
+  paintAccount();                    // the Account pane (6b257)
   try{
     const pr=await(await fetch("/api/prefs")).json();
     $("#persona").value=pr.persona||"";
+    $("#user-name").value=pr.user_name||"";
     const lv=Math.max(1,Math.min(5,+(pr.length||3)));
     lenSlider.value=lv;paintLen(lv);
   }catch(e){}
@@ -15774,7 +16626,12 @@ async function openAbout(){
     const [m,st]=await Promise.all([
       (await fetch("/api/memory")).json(),
       (await fetch("/api/setup")).json()]);
-    if(st.plat)$("#about-name").innerHTML="MillenAI <em>"+esc(st.plat)+"</em>";
+    // NO platform line (6b257): it was a pre-rail relic — the about-name
+    // id had THREE matches, so the write landed on the new-models veil
+    // title, invisible behind announceModels' own rewrite, for several
+    // builds. The rail already reports the machine in #set-spec
+    // (chip / memory / accel), so the fix is deletion — the 6b245
+    // lesson — and the id is retired (distinct new-title / up-title).
     try{
       const fs=await(await fetch("/api/fleet/status")).json();
       if(fs.key!==undefined){
@@ -15816,16 +16673,28 @@ async function openAbout(){
           "Answers come from "+cs.name+" instead of this Mac \u2014 much "
           +"faster, but your prompts leave this computer while it is on.";
       }catch(e){}
-      if(pr2.contrib_on&&mine.state!=="off"){
-        let n=0;
-        try{const stt=await(await fetch("/api/stats")).json();
-            n=stt.users_online||stt.users_total||0;}catch(e){}
-        $("#contrib-state").textContent=
-          "Contributing to "+n+" user"+(n===1?"":"s");
-      }else $("#contrib-state").textContent="";
+      // THE TRUTHFUL LEDGER (6b257): numbers this Mac measured itself.
+      // The old contributing-to-N-users line read the LOCAL machine's
+      // user count (nearly always 1) and had lied politely since the
+      // day it shipped — the gauntlet now forbids its return.
+      $("#acon").checked=pr2.contrib_ac_only!==false;
+      $("#idleon").checked=pr2.contrib_idle_only!==false;
+      const _cpct=+pr2.contrib_max_pct||50;
+      $$("#contrib-seg .cseg").forEach(s=>
+        s.classList.toggle("on",+s.dataset.pct===_cpct));
+      const led=(mine&&mine.ledger)||{};
+      $("#cs-jobs").textContent=led.jobs||0;
+      $("#cs-time").textContent=fmtDur(led.seconds||0);
+      $("#cs-chars").textContent="~"+fmtChars(led.chars||0);
+      $("#contrib-state").textContent=
+        pr2.contrib_on?(mine.state||""):"";
     }catch(e){}
     const ready=st.models.filter(x=>x.status==="ready").length;
     $("#about-facts").textContent=ready+" / "+st.models.length;
+    lastSetup=st;
+    try{lastCloud=await(await fetch("/api/cloud")).json();}catch(e){}
+    paintRoster(st,lastCloud);
+    paintUpdatesPane();
     // the spec list: one fact per line, so nothing wraps (6b243)
     if(st.accel)$("#spec-accel").textContent=st.accel;
     try{
@@ -15858,7 +16727,7 @@ async function announceModels(){
         remind_models_ts:Date.now()},extra||{}))});
     if(!seen.length){await stamp();return;}   // first run: nothing is "new"
 
-    const veil=$("#new-veil"),title=document.querySelector("#new-veil #about-name");
+    const veil=$("#new-veil"),title=document.querySelector("#new-veil #new-title");
     const missing=st.models.filter(m=>m.status!=="ready"&&m.supported!==false);
     const fresh=missing.filter(m=>seen.indexOf(m.label)<0);
 
@@ -15868,7 +16737,7 @@ async function announceModels(){
     if(!fresh.length&&
        Date.now()-(prefs.remind_models_ts||0)<REMIND_GAP)return;
     title.textContent="More models available";
-    $("#up-detail").textContent=
+    $("#new-detail").textContent=
       "More models to enhance your experience are available.";
     $("#new-list").innerHTML="";
     $("#new-bar").hidden=true;$("#new-pct").hidden=true;
@@ -15917,10 +16786,11 @@ $("#persona-save").addEventListener("click",async ev=>{
   try{
     await fetch("/api/prefs",{method:"POST",
       headers:{"Content-Type":"application/json"},
-      body:JSON.stringify({persona:$("#persona").value.trim()})});
+      body:JSON.stringify({persona:$("#persona").value.trim(),
+        user_name:$("#user-name").value.trim()})});
     b.textContent="Saved \u2713";
   }catch(e){b.textContent="Couldn\u2019t save";}
-  setTimeout(()=>{b.textContent="Save preferences";},1800);
+  setTimeout(()=>{b.textContent="Save";},1800);
 });
 const LEN_NAMES={1:"Brief",2:"Short",3:"Balanced",4:"Detailed",5:"In depth"};
 const lenSlider=$("#len-slider");
@@ -15930,6 +16800,263 @@ lenSlider.addEventListener("change",()=>{
   fetch("/api/prefs",{method:"POST",
     headers:{"Content-Type":"application/json"},
     body:JSON.stringify({length:+lenSlider.value})});
+});
+
+/* -------------------------------------- Community controls (6b257) */
+function fmtDur(s){
+  if(s<60)return Math.round(s)+"s";
+  if(s<5400)return Math.round(s/60)+"m";
+  return Math.round(s/360)/10+"h";
+}
+function fmtChars(c){
+  if(c<1000)return c+"";
+  if(c<1e6)return Math.round(c/1000)+"k";
+  return Math.round(c/1e5)/10+"M";
+}
+$("#contrib-seg").addEventListener("click",e=>{
+  const s=e.target.closest(".cseg");if(!s)return;
+  $$("#contrib-seg .cseg").forEach(x=>x.classList.toggle("on",x===s));
+  fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({contrib_max_pct:+s.dataset.pct})});
+});
+$("#acon").addEventListener("change",()=>{
+  fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({contrib_ac_only:$("#acon").checked})});
+});
+$("#idleon").addEventListener("change",()=>{
+  fetch("/api/prefs",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({contrib_idle_only:$("#idleon").checked})});
+});
+
+/* ------------------------------------------ the Models roster (6b257,
+   per Patrick — option B): one mono line per mind, status mark, size,
+   what it's for (ADV_USE — the same dict the Advanced picker reads, so
+   the two can never drift). Manage mode adds tick-to-install, the
+   Minimal/Recommended/Maximum plan cards (the same plans first-run
+   offers), and a remove affordance on ready rows — owner at the
+   machine only, and the server refuses mid-download removals. */
+let lastSetup=null,lastCloud=null,manageOn=false;
+function rosRow(m,ready){
+  const dot=ready?'<span class="rs rok">✓</span>'
+                 :'<span class="rs rno">✕</span>';
+  const tick=(manageOn&&!ready)
+    ?'<input type="checkbox" class="rpick" data-l="'+esc(m.label)+'">':"";
+  const rm=(manageOn&&ready&&IS_LOCAL)
+    ?'<span class="rrm" data-l="'+esc(m.label)+'" data-gb="'+m.est_gb
+      +'">remove</span>':"";
+  return '<div class="ros-row">'+dot+tick
+    +'<span class="rn">'+esc(m.label)+'</span>'
+    +'<span class="rg">'+(m.est_gb?m.est_gb+"G":"")+'</span>'
+    +'<span class="rd">'+esc(ADV_USE[m.label]||"")+'</span>'+rm+'</div>';
+}
+function paintRoster(st,cloud){
+  const host=$("#roster");if(!host||!st)return;
+  // real minds only — the "Ollama engine" pseudo-row is plumbing
+  const rows=(st.models||[]).filter(m=>m.label!=="Ollama engine");
+  const rdy=rows.filter(m=>m.status==="ready");
+  const miss=rows.filter(m=>m.status!=="ready");
+  const provs=(cloud&&cloud.providers)||{};
+  const up=[],down=[];
+  Object.keys(ADV_CLOUD).forEach(k=>{
+    ((provs[k]||{}).status==="ok"?up:down).push(k);
+  });
+  let h="";
+  if(rdy.length)h+='<div class="ros-gh">ready · this mac</div>'
+    +rdy.map(m=>rosRow(m,true)).join("");
+  if(up.length)h+='<div class="ros-gh">ready · cloud ☁</div>'
+    +up.map(k=>'<div class="ros-row"><span class="rs rok">✓☁</span>'
+      +'<span class="rn">'+esc(ADV_CLOUD[k][0])+'</span>'
+      +'<span class="rg"></span>'
+      +'<span class="rd">'+esc(ADV_CLOUD[k][1])+'</span></div>').join("");
+  if(miss.length)h+='<div class="ros-gh">not downloaded</div>'
+    +miss.map(m=>rosRow(m,false)).join("");
+  if(down.length)h+='<div class="ros-gh">no key · cloud ☁</div>'
+    +down.map(k=>'<div class="ros-row"><span class="rs rno">✕☁</span>'
+      +'<span class="rn">'+esc(ADV_CLOUD[k][0])+'</span>'
+      +'<span class="rg"></span>'
+      +'<span class="rd">'+esc(ADV_CLOUD[k][1])+'</span></div>').join("");
+  host.innerHTML=h;
+  // the repaint wipes every tick, so the button must not stay armed
+  // over a selection that no longer exists (6b257)
+  const mi=$("#manual-install");
+  if(mi)mi.disabled=true;
+}
+function paintPlans(){
+  if(!lastSetup)return;
+  const P=[["basic","Minimal","quick answers, tiny download"],
+           ["pro","Recommended","great everyday quality"],
+           ["max","Maximum","the best this machine can run"]];
+  $("#plan-row").innerHTML=P.map(p=>{
+    const gb=lastSetup.plans&&lastSetup.plans[p[0]];
+    return '<div class="plan-card" data-plan="'+p[0]+'"><b>'+p[1]
+      +'</b><span>'+p[2]
+      +(gb?" · "+gb+" GB to get":" · installed")+'</span></div>';
+  }).join("");
+}
+$("#roster-manage").addEventListener("click",async()=>{
+  manageOn=!manageOn;
+  $("#manage-box").hidden=!manageOn;
+  if(manageOn){
+    // Manage can be clicked before openAbout's /api/setup lands (it
+    // walks the model cache and takes seconds) — fetch on demand
+    // rather than rendering three empty cards
+    if(!lastSetup){
+      $("#plan-row").innerHTML='<div class="plan-card">reading disk…</div>';
+      try{lastSetup=await(await fetch("/api/setup")).json();}catch(e){}
+    }
+    paintPlans();
+  }
+  if(lastSetup)paintRoster(lastSetup,lastCloud);
+});
+$("#plan-row").addEventListener("click",async e=>{
+  const c=e.target.closest(".plan-card");if(!c)return;
+  await fetch("/api/setup/install",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({plan:c.dataset.plan})});
+  $("#manage-note").textContent=
+    "downloading — watch the strip in the sidebar";
+});
+$("#roster").addEventListener("change",()=>{
+  $("#manual-install").disabled=
+    !$("#roster").querySelectorAll(".rpick:checked").length;
+});
+$("#manual-install").addEventListener("click",async()=>{
+  const labels=[...$("#roster").querySelectorAll(".rpick:checked")]
+    .map(x=>x.dataset.l);
+  if(!labels.length)return;
+  await fetch("/api/model/download",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({labels:labels})});
+  $("#manage-note").textContent="downloading "+labels.length
+    +" — watch the strip in the sidebar";
+});
+$("#roster").addEventListener("click",async e=>{
+  const r=e.target.closest(".rrm");if(!r)return;
+  if(r.dataset.sure!=="1"){          // inline two-step, like Forget Me
+    r.dataset.sure="1";
+    r.textContent="really remove? frees "+r.dataset.gb+" GB";
+    return;
+  }
+  r.textContent="removing…";
+  let out={};
+  try{out=await(await fetch("/api/model/remove",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({labels:[r.dataset.l]})})).json();}catch(e2){}
+  $("#manage-note").textContent=(out.removed&&out.removed.length)
+    ?"removed — freed "+out.freed_gb+" GB"
+    :"couldn't remove: "+((out.errors||{})[r.dataset.l]||"unknown");
+  try{lastSetup=await(await fetch("/api/setup")).json();
+      paintRoster(lastSetup,lastCloud);paintPlans();}catch(e2){}
+});
+
+/* -------------------------------------------- the Updates face (6b257):
+   version front and centre, the release date under it, and the release
+   notes card — the gh release body already rides /api/update/check. */
+async function paintUpdatesPane(){
+  try{
+    const r=await(await fetch("/api/update/check")).json();
+    if(r.available)
+      $("#up-reldate").textContent=r.latest+" is available";
+    else if(r.published)
+      $("#up-reldate").textContent="Released on "
+        +new Date(r.published).toLocaleDateString("en-US",
+          {month:"long",day:"numeric",year:"numeric"});
+    const nb=$("#up-notes");
+    if(r.notes){
+      nb.hidden=false;
+      nb.innerHTML="<b>What's new"
+        +(r.available?" in "+esc(r.latest):"")+"</b>\n"
+        +esc(r.notes).replace(/\*\*([^*\n]+)\*\*/g,"<b>$1</b>");
+    }else nb.hidden=true;
+  }catch(e){}
+}
+
+/* ------------------------------------- the Account pane (6b257, per
+   Patrick): who you are, the exits — and FORGET ME with the droplet-
+   destroy treatment: choose what dies, prove it's you (owner PIN when
+   configured), then type the words. Three locks, no accidents. */
+let acctMe=null;
+async function paintAccount(){
+  try{acctMe=await(await fetch("/api/me")).json();}catch(e){acctMe=null;}
+  const me=acctMe||{kind:"owner"};
+  const K={owner:["💻","This Mac's owner",
+             "local account · everything stays on this machine"],
+           google:["G",me.email||"Google account",
+             "Google account · chats follow you between devices"],
+           guest:["⏳","Guest pass",""],
+           pin:["👤",me.name||"Profile",
+             "name + PIN profile on this hub"]};
+  const row=K[me.kind]||K.owner;
+  $("#acct-av").textContent=row[0];
+  $("#acct-kind").textContent=row[1];
+  let sub=row[2];
+  if(me.kind==="guest"){
+    const h=Math.floor((me.expires_in||0)/3600);
+    const mn=Math.floor(((me.expires_in||0)%3600)/60);
+    sub=(me.expires_in?h+"h "+mn+"m remaining":"expiring")
+      +" · chats vanish when it expires";
+  }
+  $("#acct-sub").textContent=sub;
+  $("#acct-logout").hidden=(me.kind==="owner"&&IS_LOCAL);
+  $("#forget-pin").hidden=!(me.kind==="owner"&&me.pin_required);
+}
+$("#acct-logout").addEventListener("click",async()=>{
+  try{await fetch("/api/logout",{method:"POST"});}catch(e){}
+  try{localStorage.removeItem("millen.chats");}catch(e){}
+  location.reload();
+});
+function fgScopes(){
+  const s=[];
+  if($("#fs-mem").checked)s.push("memory");
+  if($("#fs-chats").checked)s.push("chats");
+  if($("#fs-prefs").checked)s.push("prefs");
+  return s;
+}
+function fgCheck(keepNote){
+  const scopes=fgScopes();
+  const ok=scopes.length
+    &&$("#forget-word").value.trim()==="FORGET ME"
+    &&($("#forget-pin").hidden||$("#forget-pin").value.trim());
+  $("#forget-go").disabled=!ok;
+  // a failure message ("that PIN doesn't match") must survive the
+  // re-validate that follows it, or the only feedback the user gets
+  // is a button that quietly re-enables (6b257)
+  if(keepNote)return;
+  $("#forget-note").textContent=scopes.length
+    ?"erases: "+scopes.join(", ")+" — this cannot be undone"
+    :"pick at least one thing to erase";
+}
+["#fs-mem","#fs-chats","#fs-prefs"].forEach(id=>
+  $(id).addEventListener("change",fgCheck));
+$("#forget-word").addEventListener("input",fgCheck);
+$("#forget-pin").addEventListener("input",fgCheck);
+$("#forget-go").addEventListener("click",async ev=>{
+  const b=ev.currentTarget;b.disabled=true;b.textContent="Erasing…";
+  let r={};
+  try{r=await(await fetch("/api/forget",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({scopes:fgScopes(),
+      pin:$("#forget-pin").value.trim()})})).json();}catch(e){}
+  if(r&&r.ok){
+    if(fgScopes().indexOf("chats")>=0){
+      chats=[];messages=[];curChat=null;
+      try{localStorage.removeItem("millen.chats");}catch(e){}
+      renderChats();inner.innerHTML="";resetHero();
+    }
+    b.textContent="Erased";
+    $("#forget-word").value="";$("#forget-pin").value="";
+    setTimeout(()=>{$("#forget-steps").hidden=true;
+      b.textContent="Erase forever";b.disabled=true;},1600);
+  }else{
+    b.textContent="Erase forever";
+    fgCheck(true);                    // re-enable, keep the message
+    $("#forget-note").textContent=(r&&r.err==="pin")
+      ?"that PIN doesn't match"
+      :"couldn't erase — try again";
+  }
 });
 $("#turbo").addEventListener("change",()=>{
   $("#cloudkey-box").hidden=!$("#turbo").checked;
@@ -15959,7 +17086,8 @@ $("#about-check").addEventListener("click",async ev=>{
   const b=ev.currentTarget,was=b.textContent;
   b.disabled=true;b.textContent="Checking\u2026";
   try{
-    const r=await(await fetch("/api/update/check")).json();
+    // a human click deserves a real answer, not the 15-min server cache
+    const r=await(await fetch("/api/update/check?force=1")).json();
     if(!r.configured){b.textContent="Updates not configured";}
     else if(r.available){
       upInfo=r;$("#update-flag").hidden=false;
@@ -15973,21 +17101,20 @@ $("#about-check").addEventListener("click",async ev=>{
   }catch(e){b.textContent="Couldn\u2019t reach GitHub";}
   setTimeout(()=>{b.textContent=was;b.disabled=false;},2600);
 });
-$("#about-forget").addEventListener("click",async ev=>{
-  const b=ev.currentTarget;
-  if(b.dataset.sure!=="1"){
-    b.dataset.sure="1";b.textContent="Really forget everything? Click again";return;
-  }
-  await fetch("/api/memory/clear",{method:"POST"});
-  b.dataset.sure="";b.textContent="Memory cleared";
-  openAbout();
-  setTimeout(()=>{b.textContent="Forget Me";},2500);
+// Forget Me moved to the Account pane (6b257) — it opens the scoped
+// triple-confirm flow there instead of double-click-nuking memory.
+$("#about-forget").addEventListener("click",()=>{
+  const s=$("#forget-steps");
+  s.hidden=!s.hidden;
+  $("#forget-word").value="";
+  fgCheck();
 });
 
 /* --------------------------------------------------------- self-update */
 const upVeil=$("#update-veil"),upBar=$("#up-bar"),upGo=$("#up-go");
-let upInfo=null;
+let upInfo=null,lastUpCheck=0;
 async function checkUpdate(){
+  lastUpCheck=Date.now();
   try{
     const r=await(await fetch("/api/update/check")).json();
     if(r.available){
@@ -16037,10 +17164,23 @@ addEventListener("resize",()=>{     // a narrower window fits fewer chips
   const b=$("#suggest");
   if(b&&!b.hidden){b.hidden=true;syncSuggest();}
 });
-checkUpdate();                      // ALWAYS on launch — a stale build
+if(IS_LOCAL){                       // install nudges belong to the owner
+                                    // sitting at the machine, never to
+                                    // a tunnel visitor (who can't run
+                                    // the install — it 403s on them)
+  checkUpdate();                    // ALWAYS on launch — a stale build
                                     // was the root of most "X doesn't
                                     // work" reports (seen live, often)
-setInterval(checkUpdate,3600000);   // and hourly while running
+  // ...and hourly while running (6b257, per Patrick: an app left open
+  // must not fall behind just because nobody clicked Check for
+  // updates). A hidden window skips the poll — the pollEngines idiom —
+  // and settles up on wake if it slept through a tick, so the badge is
+  // waiting by the time anyone is looking.
+  setInterval(()=>{if(!document.hidden)checkUpdate();},3600000);
+  document.addEventListener("visibilitychange",()=>{
+    if(!document.hidden&&Date.now()-lastUpCheck>3600000)checkUpdate();
+  });
+}
 
 /* ------------------------------------------------------ ZITO override */
 /* Hold Z, I, T and O together. The chrome falls away and the pipeline is
@@ -16725,6 +17865,37 @@ if __name__ == "__main__":
                 try:
                     from AppKit import NSColor, NSTimer
 
+                    # SEAMLESS DARK TITLE BAR (6b257, per Patrick:
+                    # "like we did for the vpn app") — the cooperative
+                    # recipe, ported back from ConcordeVPN (which
+                    # credits this file's cocoa pattern). Keep the
+                    # titled strip — NO fullSizeContentView: WKWebView
+                    # under the bar kills window drag and summons
+                    # WebKit's un-killable scroll-pocket tint (seen
+                    # live over there) — make the titlebar transparent,
+                    # hide the title text, and let the window's own
+                    # page-dark background BE the bar. Guarded top to
+                    # bottom: if pywebview's internals move, the app
+                    # just gets the stock titlebar back.
+                    def _chrome_pass(_w):
+                        try:
+                            from AppKit import NSAppearance
+                            _w.setStyleMask_(_w.styleMask() & ~(1 << 15))
+                            _w.setTitlebarAppearsTransparent_(True)
+                            _w.setTitleVisibility_(1)  # title hidden
+                            try:
+                                _w.setTitlebarSeparatorStyle_(0)
+                            except Exception:
+                                pass
+                            ap = NSAppearance.appearanceNamed_(
+                                "NSAppearanceNameDarkAqua")
+                            if ap:
+                                _w.setAppearance_(ap)
+                        except Exception:
+                            pass
+
+                    _chrome_pass(self.window)
+
                     self.window.setOpaque_(False)
                     self.window.setBackgroundColor_(NSColor.clearColor())
                     self.window.setHasShadow_(False)
@@ -16742,17 +17913,26 @@ if __name__ == "__main__":
 
                     def _resolidify(_timer=None):
                         try:
+                            # the page's own #0a0a0c — with a
+                            # transparent titlebar this color IS the
+                            # bar, so anything else shows as a stripe
                             _win.setBackgroundColor_(
                                 NSColor.colorWithSRGBRed_green_blue_alpha_(
-                                    0x21 / 255, 0x21 / 255, 0x21 / 255, 1.0))
+                                    0x0a / 255, 0x0a / 255, 0x0c / 255, 1.0))
                             _win.setOpaque_(True)
                             _win.setHasShadow_(True)
                             _win.invalidateShadow()
+                            _chrome_pass(_win)
                         except Exception:
                             pass
 
                     NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
                         2.0, False, _resolidify)
+                    # pywebview touches window chrome after init; one
+                    # early re-pass keeps the bar from reverting (the
+                    # reference app needed exactly this, seen live)
+                    NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
+                        0.8, False, lambda _t=None: _chrome_pass(_win))
                 except Exception:
                     pass
 

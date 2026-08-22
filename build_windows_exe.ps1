@@ -6,8 +6,8 @@
 #
 # Produces:
 #   dist\MillenAI\MillenAI.exe              the app (no Python needed to run)
-#   MillenAI-<ver>-Setup.exe                installer, if ISCC.exe is found
-#   MillenAI-<ver>-Windows-exe.zip          otherwise, a zip of the folder
+#   ConcordeAI-<ver>-Setup-<arch>.exe       installer, if ISCC.exe is found
+#   ConcordeAI-<ver>-Windows-exe-<arch>.zip otherwise, a zip of the folder
 #
 # PyInstaller bakes in whatever architecture built it, so the interpreter you
 # run this with decides who can run the result:
@@ -199,11 +199,15 @@ if ($iscc) {
   Write-Host "-> found Inno Setup, building the installer"
   $iss = @"
 [Setup]
-AppName=MillenAI
+AppName=ConcordeAI
+; identity stays pinned to the original name (Inno's default AppId was
+; the old AppName) so a ConcordeAI installer upgrades a MillenAI-era
+; install in place instead of installing beside it
+AppId=MillenAI
 AppVersion=$ver
 DefaultDirName={autopf}\MillenAI
-DefaultGroupName=MillenAI
-OutputBaseFilename=MillenAI-$ver-Setup-$suffix
+DefaultGroupName=ConcordeAI
+OutputBaseFilename=ConcordeAI-$ver-Setup-$suffix
 OutputDir=.
 Compression=lzma2
 SolidCompression=yes
@@ -216,21 +220,26 @@ PrivilegesRequired=lowest
 Source: "dist\MillenAI\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
-Name: "{group}\MillenAI"; Filename: "{app}\MillenAI.exe"
-Name: "{autodesktop}\MillenAI"; Filename: "{app}\MillenAI.exe"
+Name: "{group}\ConcordeAI"; Filename: "{app}\MillenAI.exe"
+Name: "{autodesktop}\ConcordeAI"; Filename: "{app}\MillenAI.exe"
 
 [Run]
-Filename: "{app}\MillenAI.exe"; Description: "Launch MillenAI"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\MillenAI.exe"; Description: "Launch ConcordeAI"; Flags: nowait postinstall skipifsilent
 "@
   Set-Content -Encoding UTF8 "MillenAI.iss" $iss
   & $iscc "MillenAI.iss"
   if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
   Write-Host ""
-  Write-Host "built MillenAI-$ver-Setup-$suffix.exe" -ForegroundColor Green
+  Write-Host "built ConcordeAI-$ver-Setup-$suffix.exe" -ForegroundColor Green
 } else {
-  $zip = "MillenAI-$ver-Windows-exe-$suffix.zip"
+  $zip = "ConcordeAI-$ver-Windows-exe-$suffix.zip"
   if (Test-Path $zip) { Remove-Item $zip }
-  Compress-Archive -Path "dist\MillenAI" -DestinationPath $zip
+  # the unzipped folder should carry the brand people downloaded, not
+  # the internal name — stage a renamed copy just for the archive
+  if (Test-Path "dist\ConcordeAI") { Remove-Item -Recurse -Force "dist\ConcordeAI" }
+  Copy-Item -Recurse "dist\MillenAI" "dist\ConcordeAI"
+  Compress-Archive -Path "dist\ConcordeAI" -DestinationPath $zip
+  Remove-Item -Recurse -Force "dist\ConcordeAI"
   Write-Host ""
   Write-Host "built $zip" -ForegroundColor Green
   Write-Host "(install Inno Setup 6 for a single-file installer instead:"

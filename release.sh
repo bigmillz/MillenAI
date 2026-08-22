@@ -1,5 +1,5 @@
 #!/bin/zsh
-# Publish a new MillenAI release to GitHub so existing installs self-update.
+# Publish a new ConcordeAI release to GitHub so existing installs self-update.
 #
 #   ./release.sh patch     bug fix        1.0.1 -> 1.0.2
 #   ./release.sh minor     new feature    1.0.1 -> 1.1.0
@@ -64,12 +64,12 @@ PY
 
 echo "→ building macOS"
 ./build_dmg.sh >/dev/null
-DMG="Concorde ${VERSION}.dmg"   # build_dmg.sh derives this from millenai.py
+DMG="ConcordeAI ${VERSION}.dmg"   # build_dmg.sh derives this from millenai.py
 [[ -f "$DMG" ]] || { echo "expected $DMG but it wasn't built"; exit 1; }
 
 echo "→ building Windows"
 ./build_windows.sh >/dev/null
-ZIP="Concorde-${VERSION}-Windows.zip"
+ZIP="ConcordeAI-${VERSION}-Windows.zip"
 [[ -f "$ZIP" ]] || { echo "expected $ZIP but it wasn't built"; exit 1; }
 
 echo "→ publishing v$BUILD"
@@ -84,7 +84,7 @@ grep -q "APP_BETA = True" millenai.py && { PRE=(--prerelease); SHOW="$SHOW beta"
 gh release create "v$BUILD" "$DMG" "$ZIP" \
   "${PRE[@]}" \
   --title "$SHOW" \
-  --notes "Concorde $VERSION.
+  --notes "ConcordeAI $VERSION.
 
 **macOS** — download the .dmg. Existing installs update themselves.
 
