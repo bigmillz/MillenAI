@@ -18,7 +18,7 @@
 # Idempotent: re-running repairs/updates the installation, never duplicates.
 set -euo pipefail
 
-REPO="bigmillz/MillenAI"
+REPO="bigmillz/concorde"
 LIVE="$HOME/Library/MillenAI-live"
 HOST="ai.millertechnology.net"
 SERVE_PORT=9889

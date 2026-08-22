@@ -3866,3 +3866,25 @@ one of which made a SUCCESSFUL job look like a failure:
   is RE-RESOLVED between retries so a rested provider hands off to the
   next on the bench.
 - Gauntlet 85/85.
+
+## Repo renamed: bigmillz/MillenAI -> bigmillz/concorde (2026-08-22)
+- Surfaced during the 6b255 push ("remote: This repository moved").
+  GitHub's redirect meant nothing broke loudly — which is exactly why a
+  stale reference could have sat unnoticed for months.
+- FOUR places repointed, and the important one was NOT the obvious one:
+  * millenai.py UPDATE_REPO — the IN-APP UPDATER. Every installed
+    desktop copy checks GitHub releases through this constant, so a
+    stale value here is the one that eventually strands users.
+  * go-live.sh REPO — how the hosted :9889 instance self-updates.
+  * git remote origin.
+  * ~/Library/MillenAI-live/repo's own origin (the live clone).
+  The GitHub Actions workflow needed nothing — it uses
+  $GITHUB_REPOSITORY and follows the rename by itself.
+- VERIFIED under the new name, not assumed: /releases/latest returns
+  v197 (correct — `latest` excludes prereleases, which is the beta-hold
+  behaviour), the prerelease list returns v255/254/253, git fetch is
+  0/0, the live updater ran clean and :9889 still serves beta 255, and
+  /api/update/check reports tag v255 with available:false.
+- The local checkout is still `My Drive/Downloads/files` and the main
+  file is still millenai.py — only the remote changed. Older NOTES
+  entries and memory files saying "MillenAI" mean this same project.

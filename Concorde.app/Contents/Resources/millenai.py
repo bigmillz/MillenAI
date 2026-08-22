@@ -112,13 +112,13 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 255               # integer compared against the GitHub release tag
+APP_BUILD = 256               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
 # Release whose tag ends in the build number (e.g. "v5") with the .dmg
 # attached; the app then offers a one-click in-place update.
-UPDATE_REPO = "bigmillz/MillenAI"
+UPDATE_REPO = "bigmillz/concorde"
 
 # MILLENAI_PORT: the go-live LaunchAgent runs a second, headless instance
 # beside the desktop app — it must not fight the app for 8889
