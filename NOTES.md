@@ -3557,3 +3557,39 @@ Workspace.
   setTimeout fallback beside requestAnimationFrame or it silently never
   ran in the Browser pane (same trap as the drawer transitions).
 - Gauntlet 75/75.
+
+## 6 beta 251 (pending) — live droplet shakeout + prereq cards
+- DROPLET VERIFICATION of the 6b250 remote-agent work, and it earned its
+  keep — two real bugs the live run caught, both fixed:
+  1. _parse_action was REGEX-based and choked on the JSON the model
+     legitimately produces — heredocs, [ini sections], {awk braces} in
+     command strings truncated the match. Replaced with a balanced,
+     string-aware brace scanner (_json_objects). 6/6 hard cases pass.
+  2. A transient empty turn (cloud_text swallows a 429/timeout as "")
+     used to END the whole run mid-task. Now the loop retries the turn
+     up to 4x with backoff and, if it truly gives up, says "keep going"
+     rather than dying silently.
+- LOCKOUT RULE PROVEN IN THE WILD: asked to install fail2ban, the agent
+  (Claude Sonnet 5) whitelisted the connecting IP in ignoreip FIRST and
+  tried to arm an 8-minute systemd-run rollback timer — exactly the
+  taught pattern. Independently verified on the box: fail2ban active,
+  sshd jail protecting SSH (118 fails, 1 attacker already banned),
+  ignoreip carries the SSH source IP, no rollback timer left armed.
+- ARCHITECTURE ANSWER (per Patrick's gate): long jobs need NO install
+  (systemd-run, present everywhere — the agent reached for it live);
+  reboot survival's minimal form is Concorde-side reconnect, but the
+  FOOLPROOF form wants a small server-side helper. So: yes, build the
+  prereq card, scoped tightly to reboot/long-job tasks only.
+- PREREQ CARD: a grey beetle (BUG_SVG) where the triangle was, a short
+  why, then "Required tools" — each as a mono `name` + plain
+  description (concorde-resume: reconnect after reboot; tmux: survive a
+  dropped connection on a long step). Chained AFTER the risk card via a
+  `stage` counter: risk -> prereq -> send. Only 3 tasks carry `req`
+  (distro upgrade [reboot+long], SELinux/AppArmor [reboot], persistent
+  mount [reboot]) — deliberately NOT overused for normal task packages.
+- NOT YET BUILT (the actual parity engine): systemd-run long-job polling
+  and the reconnect-after-reboot loop in run_remote_agent, plus the
+  agent actually installing concorde-resume as its opening move. The
+  card fronts this; the execution wiring is the next build, verifiable
+  against the same droplet.
+- Gauntlet 76/76.

@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 250               # integer compared against the GitHub release tag
+APP_BUILD = 251               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -5319,28 +5319,55 @@ def _agent_turn(driver, convo) -> str:
     return strip_think("".join(parts))
 
 
+def _json_objects(text: str):
+    """Every top-level {...} in text, brace-balanced and STRING-AWARE, so
+    a command value full of [sections], {braces} or heredocs can't fool
+    the scan (6b250 — the regex approach did, on a live run). Yields the
+    raw substrings in order."""
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        depth, j, instr, esc = 0, i, False, False
+        while j < n:
+            ch = text[j]
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                instr = not instr
+            elif not instr:
+                if ch == "{":
+                    depth += 1
+                elif ch == "}":
+                    depth -= 1
+                    if depth == 0:
+                        yield text[i:j + 1]
+                        break
+            j += 1
+        i = j + 1
+
+
 def _parse_action(text: str) -> dict:
-    """Lenient: prefer a JSON object, fall back to a fenced shell block.
-    Understands a BATCH (6b250) — {"plan":"…","cmds":[…]} — which is one
-    approval for several steps, and normalises it to a cmds list."""
-    mb = re.search(r"\{[\s\S]*?\"cmds\"\s*:\s*\[[\s\S]*?\][\s\S]*?\}", text)
-    if mb:
+    """Lenient: the first balanced JSON object that carries a known key.
+    A BATCH — {"plan":"…","cmds":[…]} — is one approval for several
+    steps; anything else with cmd/done/ask is a single action. Falls
+    back to a fenced shell block."""
+    for blob in _json_objects(text):
         try:
-            d = json.loads(mb.group(0))
-            cmds = [str(c) for c in (d.get("cmds") or []) if str(c).strip()]
-            if cmds:
-                return {"cmds": cmds[:6], "plan": str(d.get("plan", "")),
-                        "done": False}
+            d = json.loads(blob)
         except Exception:
-            pass
-    m = re.search(r"\{[^{}]*\"(?:cmd|done|ask)\"[^{}]*\}", text, re.S)
-    if m:
-        try:
-            d = json.loads(m.group(0))
-            if isinstance(d, dict):
-                return d
-        except Exception:
-            pass
+            continue
+        if not isinstance(d, dict):
+            continue
+        cmds = [str(c) for c in (d.get("cmds") or []) if str(c).strip()]
+        if cmds:
+            return {"cmds": cmds[:6], "plan": str(d.get("plan", "")),
+                    "done": False}
+        if any(k in d for k in ("cmd", "done", "ask")):
+            return d
     fb = re.search(r"```(?:bash|sh|shell)?\s*\n?(.+?)```", text, re.S)
     if fb:
         cmd = fb.group(1).strip().splitlines()
@@ -5426,10 +5453,26 @@ def run_remote_agent(messages, conf, autonomy, emit, status, step,
         else driver[1]
     for i in range(1, REMOTE_CAP + 1):
         status("%s is planning step %d" % (driver_name, i))
-        text = _agent_turn(driver, convo)
-        act = _parse_action(text)
+        # RIDE THROUGH A CLOUD HICCUP (6b250, seen live): cloud_text
+        # swallows a transient 429/timeout as "", and an empty turn used
+        # to END the whole run — mid-task, on a live box. Retry the turn
+        # a few times with backoff before giving up, so a blink doesn't
+        # abandon work in progress.
+        text, act = "", {}
+        for _try in range(4):
+            text = _agent_turn(driver, convo)
+            act = _parse_action(text)
+            if act or text.strip():
+                break
+            status("driver went quiet — retrying")
+            time.sleep(2.0 * (_try + 1))
         if not act:
-            emit(text.strip() or "(the agent had nothing to say)")
+            if not text.strip():
+                emit("The driver model went quiet — a cloud hiccup, not a "
+                     "problem with the server. Say “keep going” "
+                     "and I’ll pick up where I left off.")
+            else:
+                emit(text.strip())
             return
         if act.get("ask"):
             emit(str(act["ask"]))
@@ -8942,6 +8985,24 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
 .rkbtn.no:hover{background:rgba(255,255,255,.14);color:#fff}
 .rkverdict{font-size:12.5px;color:#a8cf9f;font-family:var(--mono)}
 .rkverdict.quiet{color:var(--faint)}
+/* the prereq card — same frame, grey bug where the triangle was */
+.prereqcard{margin:0 0 12px;border-radius:12px;overflow:hidden;
+  border:1px solid rgba(255,255,255,.13);background:rgba(8,9,12,.55)}
+.prereqcard .rktop{display:flex;gap:14px;padding:15px 16px 10px}
+.prereqcard .rkico{flex:none;line-height:0}
+.bugico{width:32px;height:32px;color:var(--faint);opacity:.8;display:block}
+.prereqcard .rktext b{display:block;font-size:13.5px;line-height:1.4;
+  color:var(--text);margin-bottom:7px}
+.prereqcard .rktext p{margin:0;font-size:12.5px;line-height:1.6;
+  color:var(--dim)}
+.reqlist{padding:2px 16px 12px}
+.reqhead{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--faint);margin:6px 0 8px}
+.reqrow{display:flex;gap:11px;align-items:baseline;padding:4px 0}
+.reqrow code{font:12px var(--mono);color:#9fb8e8;
+  background:rgba(125,143,255,.12);padding:2px 7px;border-radius:6px;
+  flex:none;white-space:nowrap}
+.reqrow span{font-size:12.5px;color:var(--dim);line-height:1.5}
 /* ------------------------------------ interactive form cards (6b250) */
 /* The model asks structured questions and the answer comes back as a
    click, not a typed sentence — Claude-style. */
@@ -11779,14 +11840,15 @@ $("#task-list").addEventListener("click",e=>{
 // starting a task = a normal turn with a GUIDED framing, so the model
 // opens by gathering what it needs (with [[FORM]] cards) instead of
 // guessing. The Remote agent runs it for real when a server is set up.
-function startTask(name,confirmed){
+// two gates in order (6b250): the risk card, then — only for reboot /
+// long-job tasks — the prereq card. `stage` tracks how far we've cleared.
+function startTask(name,stage){
   if(!name)return;
   if(uiMode!=="code")switchLane("code");
   const t=TASK_BY_NAME[name];
-  // a flagged task explains itself FIRST (6b250, per Patrick) — the
-  // risk card is the first thing in the chat, and nothing is sent
-  // until "let's go for it"
-  if(t&&t.w&&!confirmed){riskCard(t);return;}
+  stage=stage||0;
+  if(t&&t.w&&stage<1){riskCard(t);return;}          // gate 1: risk
+  if(t&&t.req&&t.req.length&&stage<2){prereqCard(t);return;}  // gate 2: tools
   input.value="I want to: "+name;
   input.dispatchEvent(new Event("input"));
   syncSuggest();
@@ -11815,7 +11877,43 @@ function riskCard(t){
     card.classList.add("decided");
     card.querySelector(".rkfoot").innerHTML=
       '<span class="rkverdict">Right then — here we go.</span>';
-    startTask(t.n,true);
+    startTask(t.n,1);                 // risk cleared -> next gate
+  });
+  card.querySelector(".rkbtn.no").addEventListener("click",()=>{
+    card.classList.add("decided");
+    card.querySelector(".rkfoot").innerHTML=
+      '<span class="rkverdict quiet">Skipped — nothing was run.</span>';
+  });
+}
+// the prereq card: a grey bug, why the extra tooling is needed, and each
+// required tool as a mono name + plain description (6b250, per Patrick)
+function prereqCard(t){
+  const hero=$("#hero"); if(hero)hero.remove();
+  const sg=$("#suggest"); if(sg)sg.hidden=true;
+  const reasons=t.req.map(r=>PREREQ_WHY[r]).filter(Boolean);
+  const tools=t.req.map(r=>PREREQ[r]).filter(Boolean);
+  const div=document.createElement("div");
+  div.className="msg ai";
+  div.innerHTML='<div class="who">Concorde</div><div class="body"></div>';
+  const card=document.createElement("div");
+  card.className="prereqcard";
+  card.innerHTML='<div class="rktop"><span class="rkico">'+BUG_SVG+'</span>'
+    +'<div class="rktext"><b>This one needs a couple of tools on your '
+    +'server first</b><p>'+esc(reasons.join(" "))+'</p></div></div>'
+    +'<div class="reqlist"><div class="reqhead">Required tools</div>'
+    +tools.map(x=>'<div class="reqrow"><code>'+esc(x.tool)+'</code>'
+      +'<span>'+esc(x.d)+'</span></div>').join("")+'</div>'
+    +'<div class="rkfoot">'
+    +'<button class="rkbtn go">🐛 Install these & continue</button>'
+    +'<button class="rkbtn no">🙅‍♂️ Not today</button></div>';
+  div.querySelector(".body").appendChild(card);
+  inner.appendChild(div);
+  scroller.scrollTop=scroller.scrollHeight;
+  card.querySelector(".rkbtn.go").addEventListener("click",()=>{
+    card.classList.add("decided");
+    card.querySelector(".rkfoot").innerHTML=
+      '<span class="rkverdict">On it — I’ll set those up first.</span>';
+    startTask(t.n,2);                 // prereqs cleared -> send
   });
   card.querySelector(".rkbtn.no").addEventListener("click",()=>{
     card.classList.add("decided");
@@ -13103,7 +13201,8 @@ const TASKS=[
      +"client's known_hosts is updated. I'll keep this session open and "
      +"give you the new fingerprints before you need them."},
   {n:"Enable and configure SELinux/AppArmor",i:"\u{1F9F1}",c:"sec",
-   w:"Switching mandatory access control to enforcing can silently "
+   req:["reboot"],
+   w:"Switching mandatory access control to enforcing can silently"
      +"block services that worked a minute ago — including sshd on a "
      +"non-standard port. SELinux in particular may need a full "
      +"filesystem relabel and a reboot to come up clean, and a "
@@ -13132,7 +13231,8 @@ const TASKS=[
   {n:"Hold a package at its current version",i:"\u{1F4CC}",c:"pkg"},
   {n:"Clear the package cache and reclaim space",i:"\u{1F9F9}",c:"pkg"},
   {n:"Do a distro release upgrade",i:"\u{1F680}",c:"pkg",
-   w:"The heaviest thing on this list. A release upgrade replaces "
+   req:["reboot","long"],
+   w:"The heaviest thing on this list. A release upgrade replaces"
      +"thousands of packages, rewrites config across the system, takes "
      +"a long time, and requires a reboot you cannot skip — and if it "
      +"fails partway the box can be left unbootable with no console "
@@ -13207,8 +13307,8 @@ const TASKS=[
   {n:"Test bandwidth and latency to a target",i:"\u{1F55B}",c:"net"},
   {n:"Show me disk usage by directory, largest first",i:"\u{1F4BD}",c:"stor"},
   {n:"Mount a new volume and make it persist across reboots",
-   i:"\u{1F5C4}\uFE0F",c:"stor",
-   w:"The persistence half is the risky half: a wrong device name or "
+   i:"\u{1F5C4}\uFE0F",c:"stor",req:["reboot"],
+   w:"The persistence half is the risky half: a wrong device name or"
      +"UUID in /etc/fstab doesn't fail now, it fails at the next boot, "
      +"and a box that can't mount a required filesystem drops to an "
      +"emergency shell you can't reach over SSH. Formatting the wrong "
@@ -13248,6 +13348,38 @@ const TASKS=[
    c:"env"},
 ];
 const TASK_BY_NAME={};TASKS.forEach(t=>{TASK_BY_NAME[t.n]=t;});
+// PREREQ TOOLS (6b250, per Patrick): ONLY for tasks that reboot the box
+// or run for many minutes — never for a task's own packages. Concorde
+// installs a small helper on the server so it can carry the work across
+// a reboot / a dropped connection.
+const PREREQ={
+  reboot:{tool:"concorde-resume",
+    d:"a tiny service that lets Concorde reconnect and pick the task "
+      +"back up after the server reboots"},
+  long:{tool:"tmux",
+    d:"keeps a long-running step (a big upgrade, a compile) alive even "
+      +"if your connection drops partway"}};
+const PREREQ_WHY={
+  reboot:"This task restarts the server partway through. Left alone, "
+    +"Concorde would lose the connection at the reboot and stop — so it "
+    +"sets up a little help on the box first, so it can reconnect and "
+    +"carry on exactly where it left off.",
+  long:"This task runs a step that can take many minutes with no output "
+    +"in between. Concorde runs it in a way that survives a dropped "
+    +"connection and keeps streaming progress — which needs one small "
+    +"tool on the server."};
+// a plain grey beetle, drawn to sit where the warning triangle did
+const BUG_SVG='<svg class="bugico" viewBox="0 0 24 24" aria-hidden="true">'
+  +'<g fill="currentColor"><ellipse cx="12" cy="13.5" rx="5.2" ry="6.3"/>'
+  +'<ellipse cx="12" cy="6.2" rx="2.9" ry="2.6"/>'
+  +'<path d="M9.7 4.3 8.2 2.4M14.3 4.3 15.8 2.4" stroke="currentColor" '
+  +'stroke-width="1.3" stroke-linecap="round" fill="none"/>'
+  +'<path d="M6.9 10 3.6 8.5M6.5 13.5 3 13.5M6.9 17 3.8 18.8M17.1 10 20.4 '
+  +'8.5M17.5 13.5 21 13.5M17.1 17 20.2 18.8" stroke="currentColor" '
+  +'stroke-width="1.3" stroke-linecap="round"/>'
+  +'<circle cx="12" cy="10.5" r="1" fill="#15161a"/>'
+  +'<circle cx="12" cy="13.6" r="1" fill="#15161a"/>'
+  +'<circle cx="12" cy="16.7" r="1" fill="#15161a"/></g></svg>';
 
 const SUGG_SETS=[
 ["🍝 What should I make for dinner tonight?","🥘 What can I cook with what's in my fridge?","🍳 How do I cook the perfect egg?","🌮 Cheap meals that taste expensive","🍕 Is pizza actually that unhealthy?","☕ How much caffeine is too much?","🥗 Meal prep ideas for a busy week","🍞 How hard is it to bake bread at home?","🔪 Knife skills every beginner should know","🍜 Why does restaurant food taste better than mine?","🧄 Ingredients that make everything taste better","🍗 How do I stop overcooking chicken?","🍰 Desserts with 5 ingredients or less","🌶️ Why does spicy food hurt?","🍺 What's the actual difference between beers?","🥤 How bad is soda really?","🍎 Foods people think are healthy but aren't","🧊 How long does food really last in the fridge?","🍽️ How do I cook for one without wasting food?","🥑 Why is avocado so expensive?"],

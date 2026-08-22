@@ -171,6 +171,12 @@ check("risky tasks gated by a warning card",
       and 'class="twarn"' in page)
 check("full 53-task library with the flagged set",
       page.count("{n:\"") == 53 and page.count("w:\"") == 22)
+# 6b250: prereq card (grey bug) for reboot/long-job tasks only, chained
+# AFTER the risk card
+check("prereq card gates reboot/long-job tasks",
+      "function prereqCard" in page and "prereqcard" in page
+      and "concorde-resume" in page and "bugico" in page
+      and 'req:["reboot"' in page and "Required tools" in page)
 # 6b249: the Remote SSH agent — autonomy throttle, connection bar, and
 # the live approval card in the stream
 check("remote agent UI present",
