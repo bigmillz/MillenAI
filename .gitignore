@@ -28,3 +28,7 @@ ConcordeAI-*-x64.msi
 .build-venv/
 build/
 dist/
+
+# icon build intermediates — make_icon.py output; the .icns/.ico are the product
+MillenAI.iconset/
+icon_preview.png
