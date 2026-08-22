@@ -4115,3 +4115,68 @@ one of which made a SUCCESSFUL job look like a failure:
 - Gauntlet 108/108 (+9: descriptions/Account/scoped forget, honest
   ledger + real gates, roster + manage, updates face, the name, four
   CSRF probes, generation token, marker removal, honest removal).
+
+## The sync droplet: zero-knowledge accounts (2026-08-22)
+- THE BOX: concordeai-db, Ubuntu 26.04, NYC3, $6/mo. The $4 tier was
+  refused on purpose — password stretching is memory-hard by design,
+  and 512 MB would have forced the KDF cost DOWN, weakening the one
+  thing the whole scheme exists to protect. Reserved IP
+  129.212.150.83 so DNS survives a rebuild.
+  sync.millertechnology.net, Cloudflare DNS-ONLY per Patrick: TLS
+  terminates only on our box, so not even Cloudflare is a middlebox on
+  a service whose pitch is "nobody can read this". Caddy + Let's
+  Encrypt, auto-renewing.
+- THE SHAPE (sync/concordeai_sync.py, stdlib only): the server cannot
+  read a chat, and that is arithmetic rather than policy. The client
+  derives auth_key and wrap_key from the password (PBKDF2-600k then
+  HKDF, domain separated), makes an INDEPENDENT random data_key,
+  encrypts the chats with it, and uploads data_key wrapped in
+  wrap_key. The server holds email, a public salt, scrypt(auth_key),
+  and two opaque blobs — no path to wrap_key, therefore no path to
+  plaintext. That separate data_key is what makes a password change a
+  re-WRAP rather than a re-encrypt, so chats never cross the server in
+  the clear.
+- DETAILS THAT MATTER: /v1/login-begin returns a convincing FAKE salt
+  (HMAC of the email under the server secret) for unknown addresses,
+  so it cannot be used to test who has an account; login hashes even
+  for unknown users to flatten timing; sessions are stored only as an
+  HMAC of the token; /v1/sync is optimistic-concurrency and hands the
+  current copy back on 409 so the client merges instead of clobbering;
+  rekey signs out OTHER devices but not the one doing it.
+- THE BOX ITSELF: key-only SSH (passwords off), ufw 22/80/443 only,
+  2 GB swap, unattended-upgrades, and the service as a nologin system
+  user inside a systemd sandbox (ProtectSystem=strict, MemoryMax=350M)
+  bound to 127.0.0.1 — Caddy is the only way in. NO ACCESS LOG ON
+  DISK, deliberately: a service promising it cannot see your data
+  should not keep a durable record of who connected and when either.
+- BACKUPS: DAILY, not weekly — an account store whose contents nobody
+  can reconstruct earns the extra $0.60/mo. And a DO snapshot alone is
+  NOT enough: it images a running disk, and SQLite in WAL mode can be
+  mid-transaction at that instant, so the restored file can be torn. A
+  nightly systemd timer takes a consistent dump through SQLite's
+  online backup API and keeps 14 days, so whatever the snapshot
+  catches, a known-good copy sits beside it.
+- A FALSE ALARM WORTH RECORDING: probing from this Mac showed backend
+  port 8792 "open" to the world. It is not — ports 9999 and 31337
+  answered identically with no banner while SSH returned a real one,
+  so something in the local sandbox's network path accepts every SYN.
+  `ss` reporting LISTEN 127.0.0.1:8792 is the authority (the kernel
+  will not accept off-loopback packets for it), and ufw default-denies
+  besides. Trust the listen address, not a connect().
+
+## 6 beta 257 (cont.) — the reset that was not a flake
+- A REFUSED POST WAS ANSWERING WITH A TCP RESET. The gauntlet's own
+  admin-lockdown probe died twice with "Connection reset by peer"
+  while reading a 403 body, and the first time it was written off as
+  transient. It was not: _admin_gate answered without a Content-Length
+  AND without draining the request body, so the socket still held the
+  posted bytes when the handler closed — which the kernel turns into
+  an RST, so the caller sees a network error instead of the tidy 403
+  that was genuinely sent. The new CSRF gate had copied the same shape.
+- One _refuse(code, err) now owns both paths: drain the body (bounded,
+  64 KB at a time), send a Content-Length, write the JSON. Verified by
+  hammering the exact probe six times — six clean 403s, body intact —
+  where it had been resetting intermittently.
+- The lesson generalises past this file: any handler that answers
+  WITHOUT reading the request body must drain it first, or its
+  refusal arrives as a network error rather than a refusal.

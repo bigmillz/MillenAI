@@ -80,7 +80,7 @@ try:
 except ImportError:
     HAS_WEBVIEW = False
 
-APP_VERSION = "6.0.0"   # bump here — UI, window, DMG all follow
+APP_VERSION = "6.1.0"   # bump here — UI, window, DMG all follow
 # BETA HOLD (per Patrick): the 6.x line is beta until the kinks are out.
 # While True: every display surface says "beta", release.sh publishes
 # as a GitHub PRERELEASE, and — because the desktop updater reads
@@ -114,7 +114,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 256               # integer compared against the GitHub release tag
+APP_BUILD = 257               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -6876,20 +6876,43 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         local = ("127.0.0.1", "localhost", "[::1]")
         return op == hp and oa in local and ha in local
 
+    def _refuse(self, code: int, err: str) -> bool:
+        """Turn a POST away CLEANLY. Two details that look optional and
+        are not (6b257): the request body must be DRAINED — refusing
+        without reading it leaves bytes in the socket, and the close
+        that follows becomes a TCP reset, which the caller sees as
+        'Connection reset by peer' instead of our tidy 403 (it made the
+        gauntlet's own lockdown probe flaky, twice) — and the response
+        needs a Content-Length, or an HTTP/1.1 reader waits for a close
+        to know the body ended. Always returns False, so gates can
+        `return self._refuse(...)`."""
+        try:
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            while n > 0:                      # bounded, chunk at a time
+                chunk = self.rfile.read(min(n, 65536))
+                if not chunk:
+                    break
+                n -= len(chunk)
+        except Exception:
+            pass
+        body = json.dumps({"ok": False, "err": err}).encode()
+        try:
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+        except Exception:
+            pass
+        return False
+
     def _admin_gate(self) -> bool:
         """True = allowed. Answers the request itself when blocked."""
         if not self._remote():
             return True
         if not any(self.path.startswith(p) for p in self.ADMIN_PATHS):
             return True
-        self.send_response(403)
-        self.send_header("Content-Type", "application/json")
-        self.end_headers()
-        try:
-            self.wfile.write(b'{"ok": false, "err": "owner only"}')
-        except Exception:
-            pass
-        return False
+        return self._refuse(403, "owner only")
 
     # ------------------------------------------------------------ identity
     def _remote(self) -> bool:
@@ -7461,13 +7484,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
         if not self._gate():
             return
         if not self._csrf_ok():
-            self.send_response(403)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            try:
-                self.wfile.write(b'{"ok": false, "err": "cross-site"}')
-            except Exception:
-                pass
+            self._refuse(403, "cross-site")
             return
         if not self._admin_gate():
             return

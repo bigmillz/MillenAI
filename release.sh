@@ -81,17 +81,30 @@ SHOW="$VERSION"; [[ "$VERSION" == *.*.0 ]] && SHOW="${VERSION%.0}"
 # existing installs stay on the last stable until the beta graduates.
 PRE=()
 grep -q "APP_BETA = True" millenai.py && { PRE=(--prerelease); SHOW="$SHOW beta"; }
+# WHAT'S NEW, IN HUMAN (6b257): the Updates pane renders the release
+# BODY now — /api/update/check carries it — so every cut deserves a
+# short bulleted summary a person would actually read. Write it into
+# RELEASE_NOTES.md before releasing; it is consumed here and then
+# cleared, so a stale list can never ship with the next build.
+WHATS_NEW=""
+if [[ -s RELEASE_NOTES.md ]]; then
+  WHATS_NEW="$(cat RELEASE_NOTES.md)
+
+"
+else
+  echo "  (no RELEASE_NOTES.md — the Updates pane will show the boilerplate only)"
+fi
 gh release create "v$BUILD" "$DMG" "$ZIP" \
   "${PRE[@]}" \
   --title "$SHOW" \
-  --notes "ConcordeAI $VERSION.
-
-**macOS** — download the .dmg. Existing installs update themselves.
+  --notes "${WHATS_NEW}**macOS** — download the .dmg. Existing installs update themselves.
 
 **Windows** — the .msi installer (attached by CI a few minutes after
 release) needs nothing else: no Python, no admin. On an NVIDIA machine CUDA
 is used automatically. The .zip is the same app for people who prefer a
 portable copy (needs Python 3.10+)."
+# consumed — the next build writes its own
+[[ -s RELEASE_NOTES.md ]] && : > RELEASE_NOTES.md
 
 # THE HOSTED WEB UI UPDATES WITH THE CUT (6b248, per Patrick: "going
 # forth always update the web ui too"). The live :9889 self-updates
