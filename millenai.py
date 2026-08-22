@@ -4708,7 +4708,8 @@ def _cloud_all_down() -> str:
 def run_council(labels: list, messages: list, emit, status,
                 reflect: bool = False, peer: bool = False,
                 cloud_only: bool = False,
-                bench_allow=None, comp: str = "") -> None:
+                bench_allow=None, comp: str = "",
+                hurry=None) -> None:
     """Ask each selected model in turn, then stream a merged answer.
 
     Sequential on purpose: only one MLX engine can be resident at a time
@@ -4732,6 +4733,14 @@ def run_council(labels: list, messages: list, emit, status,
     labels = (usable or labels[:1])[:12]
 
     drafts = []
+    # ANSWER NOW (6b257): pressed mid-run, the button trades quality
+    # for speed — skip what hasn't started, shorten every wait, hand
+    # the merge to the fastest pen. Checked between waits, never
+    # blocking; reads of `drafts` are whole-tuple appends (GIL-atomic),
+    # so no lock, matching the file's discipline.
+    _hurried = lambda: hurry is not None and hurry.is_set()
+    _have_draft = lambda: any(not t.startswith("(no answer")
+                              for _l, t in drafts)
     _running = set()
     _run_lock = threading.Lock()
 
@@ -4856,6 +4865,11 @@ def run_council(labels: list, messages: list, emit, status,
         if i > 1 and _left < 15:
             took_part(label, "(no answer — out of time)")
             continue
+        # the first model always gets to commit — a hurry with zero
+        # drafts would otherwise starve the run into the RuntimeError
+        if i > 1 and _hurried() and _have_draft():
+            took_part(label, "(no answer — hurried)")
+            continue
         status(f"asking {label} · {i} of {len(labels)}")
         parts = []
         _err = []
@@ -4868,7 +4882,14 @@ def run_council(labels: list, messages: list, emit, status,
                 _err.append(exc)
         _lt = threading.Thread(target=_draft_local, daemon=True)
         _lt.start()
-        _lt.join(timeout=min(LOCAL_CAP, max(15.0, _left)))
+        # joined in slices so a mid-generation Answer-now cuts the wait
+        # short; the straggler branch below already keeps a usable
+        # partial, so a hurried break costs no new semantics
+        _jd = time.time() + min(LOCAL_CAP, max(15.0, _left))
+        while _lt.is_alive() and time.time() < _jd:
+            _lt.join(timeout=0.5)
+            if _hurried() and _have_draft():
+                break
         if _lt.is_alive():
             # abandoned, not killed: it is a daemon, and the NEXT model's
             # engine swap stops the process it is stuck in. Keep whatever
@@ -4898,9 +4919,13 @@ def run_council(labels: list, messages: list, emit, status,
     # providers hung at once. They all started together, so they get one
     # window together — whatever hasn't landed by then is simply absent,
     # and its thread is a daemon that dies with the process.
-    _deadline = time.time() + 75
-    for _th in cloud_threads:
-        _th.join(timeout=max(0.1, _deadline - time.time()))
+    _deadline = time.time() + (5 if _hurried() else 75)
+    while (any(_th.is_alive() for _th in cloud_threads)
+           and time.time() < _deadline):
+        time.sleep(0.5)
+        # a hurry pressed DURING this wait shortens it too
+        if _hurried():
+            _deadline = min(_deadline, time.time() + 5)
 
     good = [d for d in drafts if not d[1].startswith("(no answer")]
     if not good:
@@ -4913,7 +4938,7 @@ def run_council(labels: list, messages: list, emit, status,
     # the drafts and rewrites its own best answer from them; Gemma then
     # merges the rewrites. Twice the engine passes — the mode that says
     # "take as long as you need, give me your best".
-    if peer and len(good) >= 2:
+    if peer and len(good) >= 2 and not _hurried():
         question0 = messages[-1]["content"] if messages else ""
         block = "\n\n".join(f"[draft {n}]\n{t[:1200]}"
                              for n, (_l, t) in enumerate(good[:5], 1))
@@ -4992,7 +5017,7 @@ def run_council(labels: list, messages: list, emit, status,
     # blending alone regresses toward the average draft. Best-effort:
     # any failure just means merging without notes.
     notes = ""
-    if reflect and len(good) > 1:
+    if reflect and len(good) > 1 and not _hurried():
         status(f"{merger} is double-checking the drafts")
         try:
             parts = []
@@ -5065,6 +5090,15 @@ def run_council(labels: list, messages: list, emit, status,
     _comp_cloud = bool(comp) and comp not in MODEL_ROUTES
     if _comp_cloud:
         _ladder = [c for c in _ladder if _provider_of(c) == comp]
+    # a hurried merge goes to the FASTEST pen, not the strongest —
+    # speed is what the button promised (6b257). An empty fast ladder
+    # (no keys, everyone resting) keeps the strength ladder, and the
+    # local-merger floor below still catches everything.
+    _hurry_fast = _hurried() and len(good) >= 2
+    if _hurry_fast and not _comp_cloud:
+        _fast = fast_cloud_ladder()
+        if _fast:
+            _ladder = _fast
     if cloud_only:
         # every rung here is a cloud one, and if they all fail the
         # strongest draft ships as it stands — a local merge would break
@@ -5077,7 +5111,7 @@ def run_council(labels: list, messages: list, emit, status,
         return
     if comp in MODEL_ROUTES:
         pass          # the user chose a LOCAL pen — no cloud ladder
-    elif _comp_cloud or load_prefs(None).get("turbo"):
+    elif _comp_cloud or _hurry_fast or load_prefs(None).get("turbo"):
         for _cc in _ladder:
             run_mark(compositor=_cc.get("model") or _cc.get("name", ""))
             if _stream_composite(_cc):
@@ -5216,6 +5250,15 @@ REMOTE_FILE = os.path.join(app_dir(), "remote.json")
 REMOTE_CAP = 40                 # hard ceiling on commands per run
 _remote_jobs = {}               # jid -> {"gate": Event, "ok": bool}
 _remote_lock = threading.Lock()
+
+# ANSWER NOW (6b257, per Patrick — "take a clue from Gemini"): each
+# /api/chat run mints an unguessable id, ships it in the X-Hurry
+# header, and parks an Event here. POSTing the id to /api/chat/hurry
+# sets the Event; run_council checks it between waits and trades the
+# rest of the council for the fastest compositor. Same trust model as
+# the APPROVE jid above: the id IS the authorization.
+_hurry_jobs = {}                # hid -> threading.Event
+_hurry_lock = threading.Lock()
 
 
 def remote_conf() -> dict:
@@ -7717,6 +7760,22 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     store_chats(items, self._data_base())
             self._send_json({"ok": isinstance(items, list)})
             return
+        if self.path == "/api/chat/hurry":
+            # ANSWER NOW (6b257): flips the per-request Event minted in
+            # /api/chat. NOT admin-gated — a tunnel guest may hurry its
+            # OWN run; the unguessable id is the whole authorization,
+            # exactly like the Remote agent's APPROVE jid.
+            n = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                hid = str(json.loads(self.rfile.read(n)).get("hid", ""))
+            except (ValueError, json.JSONDecodeError):
+                hid = ""
+            with _hurry_lock:
+                ev = _hurry_jobs.get(hid)
+            if ev:
+                ev.set()
+            self._send_json({"ok": bool(ev)})
+            return
         if self.path == "/api/title":
             n = int(self.headers.get("Content-Length", 0))
             try:
@@ -8344,6 +8403,15 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             xm_names += [lbl for lbl, _c in cloud_bench()]
         xm = ", ".join(xm_names)[:300]
         self.send_header("X-Models", xm)
+        # ANSWER NOW (6b257): an unguessable per-request id the client
+        # may POST back to /api/chat/hurry. A header beats a frame here
+        # — it arrives before the first body byte and costs the frame
+        # parser nothing.
+        hurry_id = secrets.token_hex(8)
+        hurry_ev = threading.Event()
+        with _hurry_lock:
+            _hurry_jobs[hurry_id] = hurry_ev
+        self.send_header("X-Hurry", hurry_id)
         self.end_headers()
 
         # Cloudflare drops a proxied response after ~100s without bytes,
@@ -8522,7 +8590,8 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 run_council(council, full_messages, emit, status,
                             reflect=(tier == "Thinking"),
                             peer=(tier == "Pro"),
-                            bench_allow=req_cloud, comp=req_comp)
+                            bench_allow=req_cloud, comp=req_comp,
+                            hurry=hurry_ev)
             else:
                 lbl = route_label or model_name
                 # cloud is a pref, not a tier (Best retired in 5.3).
@@ -8667,6 +8736,10 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                      "didn't answer either. Ask again — it usually "
                      "comes straight back.")
         finally:
+            # the hurry registry entry dies with the request — a set()
+            # arriving after this harmlessly answers ok:false (6b257)
+            with _hurry_lock:
+                _hurry_jobs.pop(hurry_id, None)
             # THE MODULE MUST NOT DEPEND ON THE BIG MODEL REMEMBERING a
             # trailer (it forgets ~half the time, and doesn't always
             # bold names either — both seen live). A tiny model reads
@@ -9834,6 +9907,23 @@ body:not(.perf) .autoseg[data-a="full"].on .ai{animation:flameP 1.5s ease infini
 .wtbar i{display:block;height:100%;border-radius:0;background:#ecedf2;
   transition:width .45s cubic-bezier(.4,0,.2,1)}
 body:not(.perf) .wtbar i{animation:barBreathe 2.4s ease-in-out infinite}
+/* 6b257: the machinery holds back for the run's first 5s — quick
+   answers stay machinery-free, slow ones fade the card in when
+   paintSteps lifts .warm. max-height snaps (no transition to auto);
+   only the opacity fades, which is the part the eye follows. */
+.worktree.warm{opacity:0;max-height:0;overflow:hidden;margin:0;padding:0}
+body:not(.perf) .worktree{transition:opacity .5s ease}
+/* the bare boot spinner yields once the card is showing */
+.worktree:not(.warm)~.statusline{display:none}
+.wtsub{display:flex;align-items:center;gap:10px;margin:-4px 0 8px}
+.wteta{font-size:10.5px;font-style:italic;color:var(--faint)}
+.wtnow{font-family:var(--mono);font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--text);background:none;
+  border:1px solid rgba(255,255,255,.25);border-radius:999px;
+  padding:3px 10px;cursor:pointer;margin-left:auto;flex:none}
+.wtnow:hover{border-color:rgba(255,255,255,.5)}
+.wtnow[disabled]{color:var(--faint);border-color:rgba(255,255,255,.12);
+  cursor:default}
 /* the living pinwheel (5.2): Claude has its flower — ours spins the
    identity gradient beside whatever is in motion */
 .wthead{display:flex;align-items:center;gap:9px;margin-bottom:10px}
@@ -10192,11 +10282,9 @@ body:not(.perf) .statusline{animation:blink 1.4s ease infinite}
 .lmap.leaflet-container{background:#0d0f14;font-family:var(--sans)}
 .lmap .leaflet-popup-content-wrapper,.lmap .leaflet-popup-tip{
   background:#171a21;color:#ececec}
-.caret{
-  display:inline-block;width:8px;height:15px;background:var(--accent);
-  vertical-align:-2px;margin-left:2px;border-radius:1px;
-}
-body:not(.perf) .caret{animation:blink .9s step-end infinite}
+/* the pulsing caret is retired (6b257) — the stream opens on the
+   statusline pinwheel instead, and the shared blink keyframe lives on
+   in the statusline, the run dots and the mic. */
 
 /* -------------------------------------------------------------- composer */
 #composer-wrap{
@@ -12778,9 +12866,18 @@ function mapCard(m){
 let steps=[],stepHost=null;
 // what THIS run is expected to do (set at stream start) + live signals
 let stepPlan=[],answerChars=0,streamDone=false;
+// 6b257, per Patrick: the bar the user SEES is a tween chasing the
+// honest math, a time-left line rides under it (millen.speeds keeps a
+// per-tier EMA of past runs), and Answer now can cut a council short.
+let dispPct=0,lastTween=0,etaTxt="";
+let curHid="",liveDrafts=0,hurriedNow=false;
+let runT0=0,runTier="";
 const STEP_ORDER=["search","read","geo","council","draft","polish","places"];
 function resetSteps(host){steps=[];stepHost=host;
-  stepPlan=[];answerChars=0;streamDone=false;}
+  stepPlan=[];answerChars=0;streamDone=false;
+  dispPct=0;lastTween=0;etaTxt="";
+  curHid="";liveDrafts=0;hurriedNow=false;
+  runT0=performance.now();runTier=tier||"?";}
 function addStep(s){
   if(!s||!s.id)return;
   const at=steps.findIndex(x=>x.id===s.id);
@@ -12796,8 +12893,16 @@ function paintSteps(){
   let box=stepHost.querySelector(".worktree");
   if(!box){
     box=document.createElement("div");box.className="worktree";
+    // SPINNER-FIRST (6b257, per Patrick): a quick answer never shows
+    // machinery. The card exists from the first step but stays hidden
+    // for the run's first 5s; the clock below lifts .warm and the
+    // opacity transition fades it in.
+    if(performance.now()-runT0<5000)box.classList.add("warm");
     stepHost.insertBefore(box,stepHost.firstChild);
   }
+  if(box.classList.contains("warm")
+     &&(performance.now()-runT0>=5000||streamDone))
+    box.classList.remove("warm");
   // HONEST PROGRESS (6b226, per Patrick: "not go right to 99% and
   // sit there"): weight the phases this run will ACTUALLY have —
   // known at stream start from the search header and the tier — and
@@ -12829,11 +12934,60 @@ function paintSteps(){
   // question) must not hold the bar short of full at the end
   const pct=streamDone?100
     :(total?Math.min(96,Math.round(got/total*100)):0);
+  // SMOOTH (6b257, per Patrick: "have it move a little more
+  // smoothly"). The honest math above is the TARGET; what the bar
+  // shows EASES toward it, so a landed milestone pulls the bar over
+  // ~a second instead of teleporting it. Time-based, monotonic, and
+  // it never overshoots the honest value.
+  const nowT=performance.now();
+  const dt=lastTween?Math.min(2,(nowT-lastTween)/1000):0.2;
+  lastTween=nowT;
+  if(streamDone)dispPct=100;
+  else dispPct=Math.max(dispPct,
+    dispPct+(pct-dispPct)*(1-Math.exp(-dt/0.55)));
+  const shown=streamDone?100:Math.min(dispPct,96);
+  // TIME LEFT (6b257): this run's own pace blended with the
+  // remembered per-tier total (millen.speeds EMA). Quiet until there
+  // is signal, gone the moment the stream settles.
+  const el2=(nowT-runT0)/1000;
+  let eta=0;
+  try{
+    const sp=JSON.parse(localStorage.getItem("millen.speeds")||"{}");
+    const hist=sp[runTier]||0;
+    const pace=shown>8?el2/(shown/100):0;
+    const est=hist&&pace?hist*.45+pace*.55:(pace||hist);
+    if(est)eta=Math.max(0,est-el2);
+  }catch(e){}
+  etaTxt=(!streamDone&&el2>5&&eta>=3)
+    ?(eta>=90?"~"+Math.round(eta/60)+" min left"
+             :"~"+Math.round(eta)+"s left"):"";
+  const nowBtn=(curHid&&liveDrafts>0&&!streamDone)
+    ?(hurriedNow
+      ?'<button class="wtnow" disabled>Hurrying it along…</button>'
+      :'<button class="wtnow">Answer now</button>'):"";
   const ordered=steps.slice().sort((a,b)=>
     STEP_ORDER.indexOf(a.id)-STEP_ORDER.indexOf(b.id));
+  const headTail=(etaTxt||nowBtn)
+    ?'<div class="wtsub"><i class="wteta">'+etaTxt+'</i>'+nowBtn+'</div>'
+    :"";
+  // CHEAP PATH: same rows, same tail shape — move the bar IN PLACE so
+  // the CSS width transition actually animates (a full innerHTML
+  // rewrite recreates the <i> and kills the transition every 600ms,
+  // which is why the old bar always jumped)
+  const sig=ordered.map(s=>s.id+s.s+(s.d||"")).join("|")
+    +(etaTxt?"|e":"")+(nowBtn?(hurriedNow?"|h":"|n"):"");
+  if(box._sig===sig&&box.firstChild){
+    const bi=box.querySelector(".wtbar i");
+    if(bi)bi.style.width=shown+"%";
+    const et=box.querySelector(".wteta");
+    if(et)et.textContent=etaTxt;
+    return;
+  }
+  box._sig=sig;
   box.innerHTML=
     '<div class="wthead"><i class="cspin"></i>'
-    +'<div class="wtbar"><i style="width:'+pct+'%"></i></div></div>'
+    +'<div class="wtbar"><i style="width:'+shown+'%"></i></div></div>'
+    +headTail
     +'<div class="wtlist">'+ordered.map(s=>
       '<div class="wtrow '+(s.s==="done"?"ok":"run")+'">'
       +'<span class="wtdot"></span>'
@@ -12841,11 +12995,25 @@ function paintSteps(){
       +(s.d?'<span class="wtd">'+esc(s.d)+'</span>':"")
       +'</div>').join("")+'</div>';
 }
-// repaint on a slow clock so the creep is visible even when the
-// server is silent (a big model can load for 20s without a word)
+// repaint on a 200ms clock — the tween needs frames even when the
+// server is silent (a big model can load for 20s without a word), and
+// the in-place fast path above keeps each tick to one style write.
+// Hidden windows still skip (the rAF trap: nothing advances there).
 setInterval(()=>{
   if(stepHost&&steps.length&&!streamDone&&!document.hidden)paintSteps();
-},600);
+},200);
+// ANSWER NOW (6b257): delegated like the chevron — the card is
+// re-cloned from its HTML string on every drip frame, so a listener
+// on the button itself dies within the second.
+inner.addEventListener("click",e=>{
+  const b=e.target.closest&&e.target.closest(".wtnow");
+  if(!b||!curHid||hurriedNow)return;
+  hurriedNow=true;
+  fetch("/api/chat/hurry",{method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({hid:curHid})}).catch(()=>{});
+  paintSteps();
+});
 // srcs, when given, are TUCKED INSIDE the disclosure (6b242, per
 // Patrick): visible while the answer works, folded away with the steps
 // once it lands, so a finished answer is prose \u2014 not prose sitting under
@@ -12854,6 +13022,7 @@ function collapseSteps(srcs){
   if(!stepHost)return;
   const box=stepHost.querySelector(".worktree");
   if(!box)return;
+  box.classList.remove("warm");   // a sub-5s answer still gets its fold
   if(!steps.length){box.remove();stepHost=null;return;}
   const n=steps.length;
   const ns=(srcs&&srcs.length)||0;
@@ -13156,7 +13325,9 @@ async function send(){
   sendBtn.textContent="■"; sendBtn.classList.add("stop"); sendBtn.title="Stop";
   const aiDiv=addMsg("assistant",""); const body=aiDiv.querySelector(".body");
   aiDiv.classList.add("live");     // soft mask on the newest line
-  body.innerHTML='<span class="caret"></span>';
+  // the pulsing caret is RETIRED (6b257, per Patrick): the first 5s
+  // are a quiet pinwheel; machinery only fades in if the run earns it
+  body.innerHTML='<span class="statusline"><i class="cspin"></i></span>';
 
   resetSteps(body);
   abortCtl=new AbortController();
@@ -13181,6 +13352,7 @@ async function send(){
     });
     searched=resp.headers.get("X-Web-Search")==="1";
     lastModels=resp.headers.get("X-Models")||"";
+    curHid=resp.headers.get("X-Hurry")||"";   // Answer now (6b257)
     // the phase plan for THIS run — what the bar measures against
     stepPlan=[];
     if(searched)stepPlan.push("search","read","geo");
@@ -13245,7 +13417,11 @@ async function send(){
               .replace(/\u0000STATUS:[^\u0000]*$/,"")    // partial marker
               .replace(/\u0000DRAFT:(.*?)\u0000/g,(_,j)=>{
                  try{const d=JSON.parse(j);
-                     if(!drafts.some(x=>x.m===d.m))drafts.push(d);}catch(e){}
+                     if(!drafts.some(x=>x.m===d.m))drafts.push(d);
+                     // real drafts arm the Answer-now button (6b257)
+                     liveDrafts=drafts.filter(
+                       x=>!/^\(no answer/.test(x.t||"")).length;
+                 }catch(e){}
                  return "";})
               .replace(/\u0000DRAFT:[^\u0000]*$/,"")
               .replace(/\u0000SOURCES:(.*?)\u0000/g,(_,j)=>{
@@ -13362,6 +13538,17 @@ async function send(){
     +(full&&!wasAborted?photoRow(photos)
       +(places&&places.length?placesModule(places,locCtx,mapd):mapCard(mapd)):"");
   const secs=((performance.now()-t0)/1000);
+  // remember this tier's pace for the next run's time-left line — an
+  // EMA so one slow outlier can't wreck the estimate, and hurried or
+  // aborted runs don't count (they lie about the tier's real speed)
+  if(full&&!wasAborted&&!hurriedNow&&secs>3){
+    try{
+      const sp=JSON.parse(localStorage.getItem("millen.speeds")||"{}");
+      sp[runTier]=sp[runTier]?sp[runTier]*.6+secs*.4:secs;
+      localStorage.setItem("millen.speeds",JSON.stringify(sp));
+    }catch(e){}
+  }
+  curHid="";liveDrafts=0;
   const isErr=full.trim().startsWith("⚠️")||full.includes("\n⚠️");
   if(full&&!isErr&&!aiDiv.querySelector(".mact"))
     msgActions(aiDiv,"assistant",full);
@@ -16844,6 +17031,37 @@ if __name__ == "__main__":
                 try:
                     from AppKit import NSColor, NSTimer
 
+                    # SEAMLESS DARK TITLE BAR (6b257, per Patrick:
+                    # "like we did for the vpn app") — the cooperative
+                    # recipe, ported back from ConcordeVPN (which
+                    # credits this file's cocoa pattern). Keep the
+                    # titled strip — NO fullSizeContentView: WKWebView
+                    # under the bar kills window drag and summons
+                    # WebKit's un-killable scroll-pocket tint (seen
+                    # live over there) — make the titlebar transparent,
+                    # hide the title text, and let the window's own
+                    # page-dark background BE the bar. Guarded top to
+                    # bottom: if pywebview's internals move, the app
+                    # just gets the stock titlebar back.
+                    def _chrome_pass(_w):
+                        try:
+                            from AppKit import NSAppearance
+                            _w.setStyleMask_(_w.styleMask() & ~(1 << 15))
+                            _w.setTitlebarAppearsTransparent_(True)
+                            _w.setTitleVisibility_(1)  # title hidden
+                            try:
+                                _w.setTitlebarSeparatorStyle_(0)
+                            except Exception:
+                                pass
+                            ap = NSAppearance.appearanceNamed_(
+                                "NSAppearanceNameDarkAqua")
+                            if ap:
+                                _w.setAppearance_(ap)
+                        except Exception:
+                            pass
+
+                    _chrome_pass(self.window)
+
                     self.window.setOpaque_(False)
                     self.window.setBackgroundColor_(NSColor.clearColor())
                     self.window.setHasShadow_(False)
@@ -16861,17 +17079,26 @@ if __name__ == "__main__":
 
                     def _resolidify(_timer=None):
                         try:
+                            # the page's own #0a0a0c — with a
+                            # transparent titlebar this color IS the
+                            # bar, so anything else shows as a stripe
                             _win.setBackgroundColor_(
                                 NSColor.colorWithSRGBRed_green_blue_alpha_(
-                                    0x21 / 255, 0x21 / 255, 0x21 / 255, 1.0))
+                                    0x0a / 255, 0x0a / 255, 0x0c / 255, 1.0))
                             _win.setOpaque_(True)
                             _win.setHasShadow_(True)
                             _win.invalidateShadow()
+                            _chrome_pass(_win)
                         except Exception:
                             pass
 
                     NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
                         2.0, False, _resolidify)
+                    # pywebview touches window chrome after init; one
+                    # early re-pass keeps the bar from reverting (the
+                    # reference app needed exactly this, seen live)
+                    NSTimer.scheduledTimerWithTimeInterval_repeats_block_(
+                        0.8, False, lambda _t=None: _chrome_pass(_win))
                 except Exception:
                     pass
 

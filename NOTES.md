@@ -3970,3 +3970,55 @@ one of which made a SUCCESSFUL job look like a failure:
   unrelated transient (ConnectionResetError reading a 403 body in the
   remote-lockdown probe; clean on re-run).
 - Gauntlet 90/90 (+1: about-name id retired, veil titles distinct).
+
+## 6 beta 257 (cont.) — the stream got manners, and an Answer now button
+- SPINNER-FIRST (per Patrick: "get rid of that pulsing grey
+  rectangle"). The caret is retired — a stream opens on the quiet
+  statusline pinwheel, and the whole machinery card (bar, steps) holds
+  back for the run's first 5 seconds behind a .warm class that
+  paintSteps lifts; a quick answer never shows its workings, a slow
+  one fades the card in. A sibling rule hides the boot spinner the
+  moment the card is showing, and collapseSteps clears .warm so a
+  sub-5s answer still gets its fold.
+- SMOOTH BAR + TIME LEFT (per Patrick). The honest-progress math
+  (6b226) is unchanged and became the TARGET; what the bar SHOWS is a
+  time-based tween easing toward it, so a landed milestone pulls the
+  bar over ~a second instead of teleporting. The real fix was found by
+  measuring WHY the CSS transition never ran: paintSteps rewrote
+  box.innerHTML every 600ms, recreating the <i> each time — there is
+  now an in-place fast path (same rows -> only .wtbar i width + the
+  eta text change) on a 200ms clock, so the width transition finally
+  animates. Under the bar: "~40s left" in italic grey — this run's
+  pace blended 55/45 with a per-tier EMA in millen.speeds (new
+  localStorage key), shown only past 5s with >=3s left; hurried and
+  aborted runs don't feed the EMA (they lie about the tier).
+- ANSWER NOW (per Patrick: "take a clue from Gemini"). /api/chat
+  ships an unguessable X-Hurry id and parks an Event in _hurry_jobs;
+  POST /api/chat/hurry sets it (not admin-gated — the id is the
+  authorization, the APPROVE-jid trust model). run_council checks it:
+  skips not-yet-started local models (the first always commits),
+  joins the running one in 0.5s slices, shortens the cloud join to
+  5s, skips peer review and reflection, and hands the merge to
+  fast_cloud_ladder() when 2+ real drafts exist — the fastest pen,
+  which is what the button promised. Registry popped in the handler's
+  finally (mint verified to sit BEFORE the owning try, so the pop can
+  never NameError). Client: an "Answer now" ghost button beside the
+  time-left line, armed only once a REAL draft arrived (liveDrafts
+  counts non-"(no answer" chips), delegated from the chat container
+  like the chevron; on click it greys to "Hurrying it along…".
+- SEAMLESS DARK TITLE BAR (per Patrick: "like we did for the vpn
+  app"). The cooperative recipe ported back from ConcordeVPN — which
+  credits this file's cocoa pattern, so the trick has now crossed the
+  fence twice: transparent titlebar, hidden title, DarkAqua, window
+  background matched to the page, and NO fullSizeContentView (content
+  under the bar kills window drag and summons WebKit's scroll-pocket
+  tint — their live findings, inherited here for free). The wipe's
+  _resolidify now paints #0a0a0c instead of 0x212121 — with a
+  transparent bar that color IS the bar — and re-runs the chrome
+  pass; one extra 0.8s pass catches pywebview's post-init chrome
+  touch.
+- VERIFIED over the wire: caret absent from the page, warm/tween/eta
+  markers served, /api/chat answers with a live X-Hurry header, and
+  a bogus hid gets {"ok": false}.
+- Gauntlet 94/94 (+4: spinner-first, smooth bar + time-left, Answer
+  now, seamless title bar).

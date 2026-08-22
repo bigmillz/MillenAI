@@ -393,6 +393,39 @@ check("about-name id retired, veil titles distinct",
       'id="about-name"' not in page
       and 'id="new-title"' in page and 'id="up-title"' in page
       and "#about-name" not in page)
+# 6b257: the stream opens on a QUIET pinwheel, not the pulsing caret,
+# and the machinery card holds back for the run's first 5 seconds —
+# a quick answer never shows its workings (paintSteps lifts .warm)
+check("spinner-first stream, caret retired",
+      '<span class="caret">' not in page and ".caret{" not in page
+      and ".worktree.warm{" in page
+      and 'box.classList.add("warm")' in page)
+# 6b257: the bar the user SEES is a tween chasing the honest math —
+# the in-place fast path moves .wtbar i without an innerHTML rewrite
+# (a rewrite recreates the <i> and kills the width transition), and
+# a per-tier EMA (millen.speeds) feeds the italic time-left line
+check("smooth bar + honest time-left",
+      "millen.speeds" in page and 'class="wteta"' in page
+      and "dispPct" in page and "bi.style.width=shown" in page)
+# 6b257: Answer now — armed only once a REAL draft exists, delegated
+# like the chevron (the card is re-cloned every drip frame), and the
+# server end: an unguessable X-Hurry id, a non-admin endpoint, and
+# run_council trading the rest of the council for the fastest pen
+check("Answer now: button, endpoint, council hooks",
+      'class="wtnow"' in page and "Hurrying it along" in page
+      and "/api/chat/hurry" in page
+      and "X-Hurry" in _MILLENAI_SRC
+      and "_hurry_jobs" in _MILLENAI_SRC
+      and "hurry=hurry_ev" in _MILLENAI_SRC
+      and "fast_cloud_ladder()" in _MILLENAI_SRC)
+# 6b257: the seamless dark title bar — transparent titlebar + hidden
+# title over the page-dark window background, NO fullSizeContentView
+# (the VPN app proved content under the bar kills window drag)
+check("seamless dark title bar",
+      "setTitlebarAppearsTransparent_" in _MILLENAI_SRC
+      and "NSAppearanceNameDarkAqua" in _MILLENAI_SRC
+      and "fullSizeContentView" not in _MILLENAI_SRC.replace(
+          "NO fullSizeContentView", ""))
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)
