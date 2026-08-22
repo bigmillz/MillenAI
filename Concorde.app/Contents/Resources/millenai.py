@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 251               # integer compared against the GitHub release tag
+APP_BUILD = 252               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -5181,6 +5181,84 @@ def ssh_run(conf: dict, cmd: str, timeout: int = 120):
         return -1, "ssh failed: %s" % (str(exc)[:200])
 
 
+def ssh_alive(conf: dict) -> bool:
+    rc, out = ssh_run(conf, "echo __up__", timeout=12)
+    return rc == 0 and "__up__" in out
+
+
+def ssh_wait_back(conf: dict, minutes: float = 8.0, status=None):
+    """Poll a host that is expected to return (a reboot) until SSH answers
+    again. Returns (True, uptime_line) or (False, ''). A reboot keeps the
+    host key, so accept-new + the existing known_hosts entry reconnects
+    cleanly; a REBUILD changes the key and correctly refuses."""
+    deadline = time.time() + minutes * 60
+    # give it a moment to actually go down before we start polling
+    time.sleep(8)
+    while time.time() < deadline:
+        rc, out = ssh_run(conf, "echo __up__ && uptime -p", timeout=10)
+        if rc == 0 and "__up__" in out:
+            up = ""
+            for ln in out.splitlines():
+                if ln.startswith("up "):
+                    up = ln.strip()
+            return True, up
+        if status:
+            try:
+                status("waiting for %s to come back up"
+                       % conf.get("host", "the server"))
+            except Exception:
+                pass
+        time.sleep(10)
+    return False, ""
+
+
+def ssh_run_long(conf: dict, cmd: str, emit_status=None,
+                 minutes: float = 45.0):
+    """Run a command that may take many minutes WITHOUT holding an SSH
+    session open the whole time (6b251). It launches detached under a
+    transient systemd unit — present on every systemd box, no install —
+    and polls its status + tail until it settles. Falls back to a plain
+    long-timeout run where systemd-run is absent."""
+    unit = "concorde-job-%s" % secrets.token_hex(3)
+    launch = ("systemd-run --unit=%s --collect --property=Type=oneshot "
+              "/bin/bash -lc %s" % (unit, _shq(cmd)))
+    rc, out = ssh_run(conf, launch, timeout=30)
+    if rc != 0 or "systemd-run" in out and "not found" in out.lower():
+        # no systemd-run — do it in one long blocking call instead
+        return ssh_run(conf, cmd, timeout=int(minutes * 60))
+    deadline = time.time() + minutes * 60
+    poll = ("systemctl is-active %s 2>/dev/null; echo __RC__ "
+            "$(systemctl show -p ExecMainStatus --value %s 2>/dev/null); "
+            "journalctl -u %s --no-pager -n 4 2>/dev/null | tail -n 4"
+            % (unit, unit, unit))
+    while time.time() < deadline:
+        time.sleep(12)
+        rc2, st = ssh_run(conf, poll, timeout=20)
+        active = st.splitlines()[0].strip() if st else ""
+        if active in ("inactive", "failed", "dead", ""):
+            code = 0
+            m = re.search(r"__RC__\s+(\d+)", st)
+            if m:
+                code = int(m.group(1))
+            _r, tail = ssh_run(
+                conf, "journalctl -u %s --no-pager -n 40 2>/dev/null; "
+                "systemctl reset-failed %s 2>/dev/null || true"
+                % (unit, unit), timeout=20)
+            return code, tail
+        if emit_status:
+            try:
+                emit_status("still running (" + active + ")")
+            except Exception:
+                pass
+    return -1, ("(long job still running after %d min — left it going on "
+                "the box under unit %s)" % (int(minutes), unit))
+
+
+def _shq(s: str) -> str:
+    """Single-quote a string for a POSIX shell."""
+    return "'" + s.replace("'", "'\\''") + "'"
+
+
 # ---- the safety classifier: what the autonomy levels actually gate on
 # DANGER = irreversible / whole-system. Even Full autonomy stops here.
 _DANGER_RX = re.compile(
@@ -5390,6 +5468,22 @@ REMOTE_SYSTEM = (
     "the next few moves are already obvious:\n"
     "  {\"plan\":\"what this batch does, one line\",\"cmds\":[\"cmd "
     "one\",\"cmd two\"],\"done\":false}\n"
+    "  a LONG step (a build, a big upgrade, anything that may run past a "
+    "minute with no output): mark it so it runs detached and is polled "
+    "instead of blocking:\n"
+    "  {\"long\":true,\"thought\":\"why\",\"cmd\":\"the long command\","
+    "\"done\":false}\n"
+    "  For a long step, write the command in the FOREGROUND, exactly as "
+    "you would run it by hand (e.g. \"apt-get -y full-upgrade\" or "
+    "\"make -j$(nproc)\"). Concorde detaches and watches it for you, so "
+    "do NOT background it yourself with &, nohup, setsid, systemd-run or "
+    "a redirect to a logfile — that makes it report done the instant it "
+    "starts, before the work is finished.\n"
+    "  REBOOT the server (only when the task genuinely needs it — a "
+    "kernel or release upgrade, a relabel): Concorde waits for the box "
+    "to come back and continues automatically, so never issue a bare "
+    "`reboot` as a cmd:\n"
+    "  {\"reboot\":\"why the reboot is needed\",\"done\":false}\n"
     "  task complete:  {\"done\":true,\"summary\":\"what you did, plainly\"}\n"
     "  need a detail only the user knows (a domain, a choice, a secret "
     "they must type themselves): {\"ask\":\"one clear question\"}\n"
@@ -5480,6 +5574,38 @@ def run_remote_agent(messages, conf, autonomy, emit, status, step,
         if act.get("done"):
             emit(str(act.get("summary") or "Done.").strip())
             return
+        # REBOOT SURVIVAL (6b251): a reboot always needs a nod (it drops
+        # the session), then Concorde waits for the box and continues.
+        if act.get("reboot"):
+            why = str(act.get("reboot"))[:200]
+            sid = "reboot%d" % i
+            step(sid, "Reboot the server", "wait", why[:60])
+            if not await_approval("REBOOT the server — " + why, "danger"):
+                step(sid, "Reboot the server", "skip", "you skipped it")
+                convo.append({"role": "assistant", "content": text})
+                convo.append({"role": "user", "content":
+                              "The user DECLINED the reboot. Do not "
+                              "reboot; find another way or finish."})
+                continue
+            step(sid, "Rebooting " + host, "run", "session will drop")
+            status("rebooting %s" % host)
+            ssh_run(conf, "( sleep 1; systemctl reboot ) >/dev/null 2>&1 &",
+                    timeout=15)
+            ok, up = ssh_wait_back(conf, minutes=8.0, status=status)
+            if not ok:
+                step(sid, "Reboot", "done", "did not come back in 8 min")
+                emit("The server didn't come back within 8 minutes of the "
+                     "reboot. It may still be booting, or the change kept "
+                     "it from starting — check your provider's console.")
+                return
+            _r, ident = ssh_run(conf, "uname -r; %s"
+                                % "uptime -p", timeout=15)
+            step(sid, "Back up after reboot", "done", up or "reconnected")
+            convo.append({"role": "assistant", "content": text})
+            convo.append({"role": "user", "content":
+                          "The server rebooted and is back. %s\nRunning "
+                          "kernel / uptime:\n%s\nContinue." % (up, ident)})
+            continue
         # ONE STEP OR A BATCH (6b250): a batch is several commands under a
         # SINGLE approval, priced at its riskiest member. It stops early
         # the moment one fails, so a bad step can't drag the rest along.
@@ -5513,10 +5639,17 @@ def run_remote_agent(messages, conf, autonomy, emit, status, step,
                               "The user DECLINED that. Do not run it. "
                               "Choose a different approach or ask why."})
                 continue
+        # a single command flagged long runs detached + polled (6b251),
+        # so a 30-minute compile doesn't hit the per-command timeout
+        want_long = bool(act.get("long")) and not batch
         results, ran, failed = [], 0, False
         for n, c in enumerate(cmds, 1):
             status("running: " + c[:60])
-            rc, out = ssh_run(conf, c)
+            if want_long:
+                status("long job — running detached and watching it")
+                rc, out = ssh_run_long(conf, c, emit_status=status)
+            else:
+                rc, out = ssh_run(conf, c)
             ran += 1
             if batch:
                 step("%s_%d" % (sid, n), c, "done",
@@ -8976,33 +9109,17 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
   color:var(--text);margin-bottom:7px}
 .riskcard .rktext p{margin:0;font-size:12.5px;line-height:1.6;
   color:var(--dim)}
-.riskcard .rkfoot{display:flex;gap:8px;padding:0 16px 14px}
-.rkbtn{flex:1;padding:9px;border-radius:9px;border:none;cursor:pointer;
+.rkfoot{display:flex;gap:10px;padding:6px 16px 18px}
+.rkbtn{flex:1;display:inline-flex;align-items:center;justify-content:center;
+  gap:8px;padding:11px 16px;border-radius:9px;border:none;cursor:pointer;
   font:600 12.5px var(--sans)}
+.rkbtn .rkemo{font-size:14px;line-height:1}
 .rkbtn.go{background:var(--accent);color:#1a1a1a}
 .rkbtn.go:hover{background:var(--accent-hot)}
 .rkbtn.no{background:rgba(255,255,255,.08);color:var(--dim)}
 .rkbtn.no:hover{background:rgba(255,255,255,.14);color:#fff}
 .rkverdict{font-size:12.5px;color:#a8cf9f;font-family:var(--mono)}
 .rkverdict.quiet{color:var(--faint)}
-/* the prereq card — same frame, grey bug where the triangle was */
-.prereqcard{margin:0 0 12px;border-radius:12px;overflow:hidden;
-  border:1px solid rgba(255,255,255,.13);background:rgba(8,9,12,.55)}
-.prereqcard .rktop{display:flex;gap:14px;padding:15px 16px 10px}
-.prereqcard .rkico{flex:none;line-height:0}
-.bugico{width:32px;height:32px;color:var(--faint);opacity:.8;display:block}
-.prereqcard .rktext b{display:block;font-size:13.5px;line-height:1.4;
-  color:var(--text);margin-bottom:7px}
-.prereqcard .rktext p{margin:0;font-size:12.5px;line-height:1.6;
-  color:var(--dim)}
-.reqlist{padding:2px 16px 12px}
-.reqhead{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
-  text-transform:uppercase;color:var(--faint);margin:6px 0 8px}
-.reqrow{display:flex;gap:11px;align-items:baseline;padding:4px 0}
-.reqrow code{font:12px var(--mono);color:#9fb8e8;
-  background:rgba(125,143,255,.12);padding:2px 7px;border-radius:6px;
-  flex:none;white-space:nowrap}
-.reqrow span{font-size:12.5px;color:var(--dim);line-height:1.5}
 /* ------------------------------------ interactive form cards (6b250) */
 /* The model asks structured questions and the answer comes back as a
    click, not a typed sentence — Claude-style. */
@@ -11840,15 +11957,15 @@ $("#task-list").addEventListener("click",e=>{
 // starting a task = a normal turn with a GUIDED framing, so the model
 // opens by gathering what it needs (with [[FORM]] cards) instead of
 // guessing. The Remote agent runs it for real when a server is set up.
-// two gates in order (6b250): the risk card, then — only for reboot /
-// long-job tasks — the prereq card. `stage` tracks how far we've cleared.
+// ONE gate (6b251): the risk card. The execution engine needs NOTHING
+// installed on the server — systemd-run is already there and reboot
+// survival is Concorde-side polling — so there is nothing to ask for.
 function startTask(name,stage){
   if(!name)return;
   if(uiMode!=="code")switchLane("code");
   const t=TASK_BY_NAME[name];
   stage=stage||0;
   if(t&&t.w&&stage<1){riskCard(t);return;}          // gate 1: risk
-  if(t&&t.req&&t.req.length&&stage<2){prereqCard(t);return;}  // gate 2: tools
   input.value="I want to: "+name;
   input.dispatchEvent(new Event("input"));
   syncSuggest();
@@ -11868,8 +11985,10 @@ function riskCard(t){
     +'issues that may be challenging to undo</b>'
     +'<p>'+esc(t.w)+'</p></div></div>'
     +'<div class="rkfoot">'
-    +'<button class="rkbtn go">🤞 Let’s go for it</button>'
-    +'<button class="rkbtn no">🙅‍♂️ Not today</button></div>';
+    +'<button class="rkbtn go"><span class="rkemo">🤞</span>'
+    +'<span>Let’s go for it</span></button>'
+    +'<button class="rkbtn no"><span class="rkemo">🙅‍♂️</span>'
+    +'<span>Not today</span></button></div>';
   div.querySelector(".body").appendChild(card);
   inner.appendChild(div);
   scroller.scrollTop=scroller.scrollHeight;
@@ -11887,41 +12006,6 @@ function riskCard(t){
 }
 // the prereq card: a grey bug, why the extra tooling is needed, and each
 // required tool as a mono name + plain description (6b250, per Patrick)
-function prereqCard(t){
-  const hero=$("#hero"); if(hero)hero.remove();
-  const sg=$("#suggest"); if(sg)sg.hidden=true;
-  const reasons=t.req.map(r=>PREREQ_WHY[r]).filter(Boolean);
-  const tools=t.req.map(r=>PREREQ[r]).filter(Boolean);
-  const div=document.createElement("div");
-  div.className="msg ai";
-  div.innerHTML='<div class="who">Concorde</div><div class="body"></div>';
-  const card=document.createElement("div");
-  card.className="prereqcard";
-  card.innerHTML='<div class="rktop"><span class="rkico">'+BUG_SVG+'</span>'
-    +'<div class="rktext"><b>This one needs a couple of tools on your '
-    +'server first</b><p>'+esc(reasons.join(" "))+'</p></div></div>'
-    +'<div class="reqlist"><div class="reqhead">Required tools</div>'
-    +tools.map(x=>'<div class="reqrow"><code>'+esc(x.tool)+'</code>'
-      +'<span>'+esc(x.d)+'</span></div>').join("")+'</div>'
-    +'<div class="rkfoot">'
-    +'<button class="rkbtn go">🐛 Install these & continue</button>'
-    +'<button class="rkbtn no">🙅‍♂️ Not today</button></div>';
-  div.querySelector(".body").appendChild(card);
-  inner.appendChild(div);
-  scroller.scrollTop=scroller.scrollHeight;
-  card.querySelector(".rkbtn.go").addEventListener("click",()=>{
-    card.classList.add("decided");
-    card.querySelector(".rkfoot").innerHTML=
-      '<span class="rkverdict">On it — I’ll set those up first.</span>';
-    startTask(t.n,2);                 // prereqs cleared -> send
-  });
-  card.querySelector(".rkbtn.no").addEventListener("click",()=>{
-    card.classList.add("decided");
-    card.querySelector(".rkfoot").innerHTML=
-      '<span class="rkverdict quiet">Skipped — nothing was run.</span>';
-  });
-}
-
 /* ------------------------------------------------- remote agent (6b249) */
 // The autonomy throttle: Manual / Auto / Full, stored and sent with the
 // request. The server's classifier decides which commands actually pause.
@@ -13201,8 +13285,7 @@ const TASKS=[
      +"client's known_hosts is updated. I'll keep this session open and "
      +"give you the new fingerprints before you need them."},
   {n:"Enable and configure SELinux/AppArmor",i:"\u{1F9F1}",c:"sec",
-   req:["reboot"],
-   w:"Switching mandatory access control to enforcing can silently"
+   w:"Switching mandatory access control to enforcing can silently "
      +"block services that worked a minute ago — including sshd on a "
      +"non-standard port. SELinux in particular may need a full "
      +"filesystem relabel and a reboot to come up clean, and a "
@@ -13231,8 +13314,7 @@ const TASKS=[
   {n:"Hold a package at its current version",i:"\u{1F4CC}",c:"pkg"},
   {n:"Clear the package cache and reclaim space",i:"\u{1F9F9}",c:"pkg"},
   {n:"Do a distro release upgrade",i:"\u{1F680}",c:"pkg",
-   req:["reboot","long"],
-   w:"The heaviest thing on this list. A release upgrade replaces"
+   w:"The heaviest thing on this list. A release upgrade replaces "
      +"thousands of packages, rewrites config across the system, takes "
      +"a long time, and requires a reboot you cannot skip — and if it "
      +"fails partway the box can be left unbootable with no console "
@@ -13307,8 +13389,8 @@ const TASKS=[
   {n:"Test bandwidth and latency to a target",i:"\u{1F55B}",c:"net"},
   {n:"Show me disk usage by directory, largest first",i:"\u{1F4BD}",c:"stor"},
   {n:"Mount a new volume and make it persist across reboots",
-   i:"\u{1F5C4}\uFE0F",c:"stor",req:["reboot"],
-   w:"The persistence half is the risky half: a wrong device name or"
+   i:"\u{1F5C4}\uFE0F",c:"stor",
+   w:"The persistence half is the risky half: a wrong device name or "
      +"UUID in /etc/fstab doesn't fail now, it fails at the next boot, "
      +"and a box that can't mount a required filesystem drops to an "
      +"emergency shell you can't reach over SSH. Formatting the wrong "
@@ -13348,38 +13430,6 @@ const TASKS=[
    c:"env"},
 ];
 const TASK_BY_NAME={};TASKS.forEach(t=>{TASK_BY_NAME[t.n]=t;});
-// PREREQ TOOLS (6b250, per Patrick): ONLY for tasks that reboot the box
-// or run for many minutes — never for a task's own packages. Concorde
-// installs a small helper on the server so it can carry the work across
-// a reboot / a dropped connection.
-const PREREQ={
-  reboot:{tool:"concorde-resume",
-    d:"a tiny service that lets Concorde reconnect and pick the task "
-      +"back up after the server reboots"},
-  long:{tool:"tmux",
-    d:"keeps a long-running step (a big upgrade, a compile) alive even "
-      +"if your connection drops partway"}};
-const PREREQ_WHY={
-  reboot:"This task restarts the server partway through. Left alone, "
-    +"Concorde would lose the connection at the reboot and stop — so it "
-    +"sets up a little help on the box first, so it can reconnect and "
-    +"carry on exactly where it left off.",
-  long:"This task runs a step that can take many minutes with no output "
-    +"in between. Concorde runs it in a way that survives a dropped "
-    +"connection and keeps streaming progress — which needs one small "
-    +"tool on the server."};
-// a plain grey beetle, drawn to sit where the warning triangle did
-const BUG_SVG='<svg class="bugico" viewBox="0 0 24 24" aria-hidden="true">'
-  +'<g fill="currentColor"><ellipse cx="12" cy="13.5" rx="5.2" ry="6.3"/>'
-  +'<ellipse cx="12" cy="6.2" rx="2.9" ry="2.6"/>'
-  +'<path d="M9.7 4.3 8.2 2.4M14.3 4.3 15.8 2.4" stroke="currentColor" '
-  +'stroke-width="1.3" stroke-linecap="round" fill="none"/>'
-  +'<path d="M6.9 10 3.6 8.5M6.5 13.5 3 13.5M6.9 17 3.8 18.8M17.1 10 20.4 '
-  +'8.5M17.5 13.5 21 13.5M17.1 17 20.2 18.8" stroke="currentColor" '
-  +'stroke-width="1.3" stroke-linecap="round"/>'
-  +'<circle cx="12" cy="10.5" r="1" fill="#15161a"/>'
-  +'<circle cx="12" cy="13.6" r="1" fill="#15161a"/>'
-  +'<circle cx="12" cy="16.7" r="1" fill="#15161a"/></g></svg>';
 
 const SUGG_SETS=[
 ["🍝 What should I make for dinner tonight?","🥘 What can I cook with what's in my fridge?","🍳 How do I cook the perfect egg?","🌮 Cheap meals that taste expensive","🍕 Is pizza actually that unhealthy?","☕ How much caffeine is too much?","🥗 Meal prep ideas for a busy week","🍞 How hard is it to bake bread at home?","🔪 Knife skills every beginner should know","🍜 Why does restaurant food taste better than mine?","🧄 Ingredients that make everything taste better","🍗 How do I stop overcooking chicken?","🍰 Desserts with 5 ingredients or less","🌶️ Why does spicy food hurt?","🍺 What's the actual difference between beers?","🥤 How bad is soda really?","🍎 Foods people think are healthy but aren't","🧊 How long does food really last in the fridge?","🍽️ How do I cook for one without wasting food?","🥑 Why is avocado so expensive?"],

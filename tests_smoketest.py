@@ -22,6 +22,10 @@ K = "millen_key=" + KEY
 
 RESULTS = []
 
+# the engine lives in server-side Python, not the served page — a few
+# checks assert against the source directly
+_MILLENAI_SRC = open("millenai.py").read()
+
 
 def check(name, ok, detail=""):
     RESULTS.append((name, bool(ok), detail))
@@ -171,12 +175,15 @@ check("risky tasks gated by a warning card",
       and 'class="twarn"' in page)
 check("full 53-task library with the flagged set",
       page.count("{n:\"") == 53 and page.count("w:\"") == 22)
-# 6b250: prereq card (grey bug) for reboot/long-job tasks only, chained
-# AFTER the risk card
-check("prereq card gates reboot/long-job tasks",
-      "function prereqCard" in page and "prereqcard" in page
-      and "concorde-resume" in page and "bugico" in page
-      and 'req:["reboot"' in page and "Required tools" in page)
+# 6b251: the prereq card is GONE on purpose — the execution engine needs
+# nothing installed on the server (systemd-run is already there, reboot
+# survival is Concorde-side polling), so asking the user to install
+# anything would have been a lie. Guard it from creeping back.
+check("no prereq card — the engine is zero-install",
+      "prereqCard" not in page and "concorde-resume" not in page
+      and 'req:["reboot"' not in page
+      and "systemd-run" in _MILLENAI_SRC
+      and "ssh_wait_back" in _MILLENAI_SRC)
 # 6b249: the Remote SSH agent — autonomy throttle, connection bar, and
 # the live approval card in the stream
 check("remote agent UI present",

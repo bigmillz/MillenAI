@@ -3593,3 +3593,65 @@ Workspace.
   card fronts this; the execution wiring is the next build, verifiable
   against the same droplet.
 - Gauntlet 76/76.
+
+## 6 beta 252 (pending) — the parity execution engine + prereq polish
+- LONG-JOB ENGINE: ssh_run_long launches a command as a transient
+  systemd-run unit (--collect, oneshot) — present on every systemd box,
+  ZERO install — then polls is-active + journalctl tail until it settles
+  and returns the real exit code + last log lines. Falls back to a plain
+  long-timeout run where systemd-run is absent. The model marks a step
+  {"long":true,...} and the loop routes it here, so a 30-min compile no
+  longer hits the 120s per-command timeout.
+- REBOOT SURVIVAL: a new {"reboot":"why"} action. Always gated (it drops
+  the session). The loop issues a detached `systemctl reboot`, then
+  ssh_wait_back polls up to 8 min until SSH answers again, reads the new
+  kernel/uptime, and feeds "the box rebooted and is back" into the convo
+  so the agent continues. Key insight, verified by the rebuild today: a
+  REBOOT keeps the host key so accept-new reconnects cleanly; a REBUILD
+  changes it and correctly refuses (different machine).
+- PREREQ POLISH (per Patrick): tool descriptions shortened to one line
+  at default width (measured 1 line each); .rkfoot padding 6/16/18 so
+  the buttons aren't jammed in the corner; buttons are flex with an
+  8px gap between a .rkemo span and the label (guaranteed spacing
+  regardless of emoji width) — no longer "stuffed together".
+- Unit-verified: parser understands {long}/{reboot}; ssh_run_long,
+  ssh_wait_back, _shq present and correct. Gauntlet 76/76.
+- STILL OWED — the live shakeout: a real long job (a compile under
+  systemd-run) and a real reboot-and-resume against the droplet. Blocked
+  only on the key: the rebuild wiped it, needs one ssh-copy-id. The
+  concorde-resume helper the prereq card promises is not yet installed
+  by the agent as its opening move — that's the last wire, best added
+  once the live reboot loop is confirmed.
+
+## 6 beta 252 (pending) — the prereq card is gone; the engine is zero-install
+- DROPPED THE PREREQ CARD ENTIRELY (per Patrick: "so it's more
+  seamless"). It promised the user we'd install `concorde-resume` and
+  `tmux` — but the execution engine uses NEITHER. Long jobs ride
+  systemd-run, which ships on every systemd box; reboot survival is
+  Concorde-side polling. The card was asking permission for work that
+  never happens, which is worse than no card at all.
+  Removed: prereqCard(), PREREQ/PREREQ_WHY/BUG_SVG, the .prereqcard /
+  .bugico / .reqlist CSS, the `req:` flags on the three tasks, and the
+  stage-2 gate in startTask. startTask is back to ONE gate: the risk
+  card. Gauntlet check inverted — it now asserts the prereq card can't
+  creep back AND that systemd-run/ssh_wait_back are still in the source.
+- FOUND VIA SCREENSHOT: three word-join bugs in the risk copy —
+  "replacesthousands", "silentlyblock", "orUUID". My own earlier edits
+  adding `req:` had eaten the trailing space at a string-concatenation
+  boundary. Wrote a scanner that rebuilds every `w:` value the way JS
+  concatenates it and flags letter-meets-letter across a boundary; 3
+  found, 3 fixed, 0 remain. Worth re-running that scanner after any
+  bulk edit of the task library.
+- ENGINE PROVEN ON LIVE HARDWARE (rebuilt droplet, Ubuntu 26.04):
+  * long job SUCCESS — a 180-SECOND job returned rc=0 with full output.
+    That is 50% past the 120s per-command wall that would have killed
+    it, which is the entire point of ssh_run_long.
+  * long job FAILURE — a job exiting 42 surfaced rc=42, so failures
+    aren't silently swallowed by the detach.
+  * REBOOT SURVIVAL — issued the real reboot, reconnected in 36s,
+    uptime 32 min -> 0 min, `who -b` confirms a fresh boot.
+- The host-key subtlety worth remembering: a REBOOT keeps the host key
+  so ssh_wait_back reconnects cleanly, but a REBUILD changes it and SSH
+  correctly refuses (hit this when Patrick rebuilt the box — needed a
+  manual ssh-keygen -R). That refusal is a feature, not a bug.
+- Gauntlet 76/76.
