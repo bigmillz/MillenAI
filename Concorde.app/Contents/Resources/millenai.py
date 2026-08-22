@@ -112,7 +112,7 @@ def short_version(v: str = None) -> str:
     if v.count(".") >= 2 and v.endswith(".0"):
         v = v[:-2]
     return v + (" beta %d" % APP_BUILD if APP_BETA else "")
-APP_BUILD = 253               # integer compared against the GitHub release tag
+APP_BUILD = 254               # integer compared against the GitHub release tag
 APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
@@ -3425,6 +3425,57 @@ def accel_name() -> str:
     return name
 
 
+# MEMORY PRESSURE, not "memory used" (6b254, per Patrick). On macOS the
+# two are wildly different numbers: the OS deliberately fills free RAM
+# with cache, so psutil's used% sits near 90 on a perfectly happy Mac and
+# would light this meter red forever. Activity Monitor's pressure gauge
+# instead tracks how hard the VM system is WORKING — wired pages it can
+# never reclaim, plus whatever it has had to compress. That's the number
+# worth watching, and it's the one this returns.
+def mem_pressure():
+    """0-100. macOS: real memory pressure. Elsewhere: memory used."""
+    if IS_MAC:
+        try:
+            out = subprocess.run(["vm_stat"], capture_output=True,
+                                 text=True, timeout=3).stdout
+            pg = re.search(r"page size of (\d+)", out)
+            page = int(pg.group(1)) if pg else 4096
+
+            def pages(label):
+                m = re.search(re.escape(label) + r":\s+(\d+)", out)
+                return int(m.group(1)) if m else 0
+            wired = pages("Pages wired down")
+            compressed = pages("Pages occupied by compressor")
+            # total RAM from sysctl, NOT psutil — psutil is optional and
+            # vm_stat already gave us everything else, so the whole mac
+            # path stays available on a bare install
+            total = 0
+            try:
+                total = int(subprocess.run(
+                    ["sysctl", "-n", "hw.memsize"], capture_output=True,
+                    text=True, timeout=3).stdout.strip())
+            except Exception:
+                if HAS_PSUTIL:
+                    total = psutil.virtual_memory().total
+            if total and (wired or compressed):
+                return round((wired + compressed) * page / total * 100, 1)
+        except Exception:
+            pass
+    if HAS_PSUTIL:
+        try:
+            return float(psutil.virtual_memory().percent)
+        except Exception:
+            pass
+    # None, never 0 — a meter pinned at 0% would read as "no pressure"
+    # on a machine that simply cannot measure it
+    return None
+
+
+def mem_label() -> str:
+    """What the meter is honestly showing on this platform."""
+    return "MEMORY PRESSURE" if IS_MAC else "MEMORY USED"
+
+
 def gpu_utilization():
     """GPU busy percentage, or None when it can't be read."""
     now = time.time()
@@ -6601,6 +6652,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                     .replace("__APP_BETA__",
                              'VERSION <b class="vnum">%s</b>' % short_version())
                     .replace("__CHIP__", chip_name())
+                    .replace("__MEM_LABEL__", mem_label())
                     .replace("__WIN_WIPE__",
                              "1" if (HAS_WEBVIEW and IS_MAC) else "0")
                     .replace("__SKY_N__", str(len(SKY_SOURCES)))
@@ -7022,6 +7074,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
                 "mem_used_gb": round(vm.used / 1e9, 1),
                 "mem_total_gb": round(vm.total / 1e9, 1),
                 "mem_pct": vm.percent,
+                "mem_pressure": mem_pressure(),
                 "gpu_pct": gpu,  # None when ioreg has no accelerator stats
                 "users_online": online, "users_total": total,
                 "fleet_online": len(_fleet_alive()),
@@ -7030,6 +7083,7 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             }
         else:
             stats = {"real": False, "gpu_pct": gpu,
+                     "mem_pressure": mem_pressure(),
                      "users_online": online, "users_total": total}
         body = json.dumps(stats).encode("utf-8")
         self.send_response(200)
@@ -9266,7 +9320,11 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
 .model .dot.up{background:#5fbf77;box-shadow:0 0 6px rgba(95,191,119,.5)}
 .model .dot.down{background:var(--red);opacity:.75}
 
-#settings{padding:14px 6px 4px;margin-top:auto}
+/* 6b254, per Patrick: the toggle + gear ride DOWN to sit just
+   above the monitor panel. margin-top:auto already pins this
+   row to the bottom of the rail, so closing the gap UNDER it is
+   what actually moves it down. */
+#settings{padding:14px 6px 0;margin-top:auto}
 .toggle-row{
   display:flex;align-items:center;gap:10px;cursor:pointer;
   color:var(--dim);font-size:12.5px;user-select:none;
@@ -9285,7 +9343,7 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
 
 /* telemetry — the instrument cluster */
 #telemetry{
-  margin-top:12px;background:rgba(6,7,10,.44);
+  margin-top:7px;background:rgba(6,7,10,.44);
   border:1px solid rgba(255,255,255,.07);
   box-shadow:inset 0 1px 0 rgba(255,255,255,.05);
   -webkit-backdrop-filter:blur(18px);backdrop-filter:blur(18px);
@@ -9300,11 +9358,12 @@ input.crename{flex:1;min-width:0;background:rgba(0,0,0,.45);
   margin-bottom:7px;gap:10px;
 }
 #telemetry .t-head span{white-space:nowrap}
-#models-up{cursor:pointer;color:var(--dim);font-weight:700;
-  padding:1px 8px;border:1px solid var(--line);border-radius:6px;
-  font-size:11px;line-height:1.4;user-select:none}
-#models-up:active{transform:translateY(1px)}
-#models-up:hover{color:var(--text);border-color:var(--accent-hot)}
+/* the memory readout: quiet mono digits beside the label, tabular so
+   the number doesn't jitter as it climbs (6b254). Replaced #models-up,
+   whose ↑ chip went with the MODELS meter. */
+#mem-val{font-family:var(--mono);font-size:10px;font-weight:400;
+  color:var(--faint);font-variant-numeric:tabular-nums;
+  letter-spacing:.04em}
 #telemetry .t-head .live{color:var(--text);white-space:nowrap}
 .meter-row{margin-bottom:7px}
 .meter-row:last-child{margin-bottom:0}
@@ -11138,9 +11197,9 @@ __CODE_ROWS__
       <div class="meter" id="gpu-meter"></div>
     </div>
     <div class="meter-row">
-      <div class="meter-label"><span>MODELS</span>
-        <b id="models-up" title="Get more models">&uarr;</b></div>
-      <div class="meter" id="models-meter"></div>
+      <div class="meter-label"><span>__MEM_LABEL__</span>
+        <b id="mem-val"></b></div>
+      <div class="meter" id="mem-meter"></div>
     </div>
     <div class="meter-row">
       <div class="meter-label"><span>COMMUNITY GPU</span></div>
@@ -13214,69 +13273,195 @@ async function send(){
 
 /* ------------------------------------------------------------- greeting */
 const GREETINGS=[
-  // NYC-MAJORITY, per Patrick — bodega warmth, subway pace. No church,
-  // no startup-speak, nothing mean. A few plain ones for balance.
-  "What's up?","Yo.","What's good?",
-  "What's good dawg?","Whaddaya need?","Let's get it.","Hit me.",
-  "What's the move?","Say less.","Let's cook.","Bet — what's up?",
-  "Lay it on me.","What's the word?","Let's run it.","What's the play?",
-  "Go ahead, I got time.","Shoot.","What're we getting into?",
-  "Straight up — what do you need?","Yerrr.","What's poppin'?",
-  "Ayo, what's good?","Talk your talk.","Run me the play.",
-  "What we cookin'?","You already know what it is.",
-  "Deadass, what do you need?","No cap — hit me.","Gimme the rundown.",
-  "What's the deal?","How we movin'?","What's the wave?",
-  "Aight, let's work.","You good? What do you need?",
-  "The city's up. So am I.","What's crackin'?","Word — what's next?",
-  "What it do?","Son, just ask.","What's the story, kid?","Let's eat.",
-  "Talk to me nice.","In a New York minute — go.",
-  "Bodega's open. What do you need?","What's the deal, boss?",
-  "Uptown, downtown — where we headed?","Concrete jungle. What's up?",
-  "The train's delayed anyway. Ask away.","Off the dome — go.",
-  "Chopped cheese energy today.","What's good, my g?",
-  "Least crowded corner in the city, right here.",
-  "Brick outside, warm in here — what's up?",
-  "Bacon, egg and cheese? Nah — questions. Go.",
-  "This ain't Times Square. Real answers only.",
-  "Big city, bigger questions.","You know how we do.",
-  "Mad questions? Start with one.","Talk to me, Goose.",
-  "Bodega cat's asleep. I'm not.",
-  "Deli's got your sandwich. I got your questions.",
-  "Chopped cheese or answers? We got both.",
-  "Cash only? Nah, questions only.",
-  "Halal cart's got the line. I'm free right now.",
-  "Showtime. What time is it? SHOWTIME.",
-  "This is a Brooklyn-bound express. Ask away.",
-  "Stand clear of the closing doors — but ask first.",
-  "We are delayed because of train traffic ahead. Perfect time to ask.",
-  "Swipe again at this turnstile.",
-  "The G came on time once. Anything's possible.",
-  "Walk faster, talk faster, ask faster.",
-  "Alternate side parking's suspended. Ask anything.",
-  "The rats are organized. So am I.",
-  "Pigeons know things. So do I.",
-  "Rent's too high, questions are free.",
-  "Dollar slice energy — cheap, fast, hits the spot.",
-  "I'm walkin' here. But go ahead.",
-  "You lookin' at me? Good. Ask.",
-  "Fuhgeddaboudit — actually no, tell me about it.",
-  "Not for nothing, but what do you need?",
-  "Ayo, I got answers like Canal Street's got 'watches.'",
-  "Radiator's clanking, I'm cooking. What's up?",
-  "Stoop's open. Sit. Talk.",
-  "It's giving answers today.",
-  // the plain-spoken handful
-  "What's on your mind?","Where should we start?","Talk to me.",
-  "Ask me anything.","What's cooking?","Fire away.","Hit me with it.",
-  "I'm all ears.","Ready when you are.","Give me the messy version.",
-  "What are you stuck on?","What's today's rabbit hole?",
-  "What would make today a win?","Throw me a curveball.",
-  "Where's the friction?","What's the puzzle?","What's your angle?",
-  "Let's crack this.","Point me at it.","Make it interesting.",
-  "Tell me everything.","Let's find out.","Your move.",
-  "What's it gonna be?","Feed me a problem.","Let's go deep.",
+  // 150 NYC lines from Patrick (6b255). `m` months 0-11, `d` days
+  // 0=Sun, `h` [from,to] inclusive and WRAPS when from>to, `dom` a
+  // day-of-month window. No keys at all = safe any time.
+  {t:"Hawk's out today — pull up a chair.",m:[0,1]},
+  {t:"It's giving three-coats-and-a-hoodie. What you need?",m:[0,1]},
+  {t:"Radiator's clanking, tea's hot — talk to me.",m:[11,0,1,2]},
+  {t:"Sun's out, stoops are full. What's the move?",m:[3,4,5,6,7,8],h:[9,18]},
+  {t:"Ninety degrees and the train has no AC. Let's make this quick.",m:[6,7],h:[11,19]},
+  {t:"Hydrant's open, block's happy. What's good?",m:[6,7],h:[11,20]},
+  {t:"Slush season. Wipe your feet, take a seat.",m:[0,1,2]},
+  {t:"That April fake-out weather. Don't trust it, trust me.",m:[3]},
+  {t:"Humidity's winning today. What can I do for you?",m:[5,6,7,8]},
+  {t:"Sweater weather finally hit different. What's on your mind?",m:[9]},
+  {t:"Fall in the city, no notes. What you working on?",m:[8,9,10]},
+  {t:"Heat wave's got the whole block moving slow. Not me.",m:[6,7],h:[11,19]},
+  {t:"Wind's whipping down the avenue. Warmer in here.",m:[10,11,0,1,2]},
+  {t:"Leaves are turning, prices are too. What's up?",m:[9,10]},
+  {t:"It's beach day at the Rockaways. Or we can just talk.",m:[5,6,7],h:[8,18]},
+  {t:"Clear sky, cold air, big city. Let's go.",m:[11,0,1]},
+  {t:"Steam coming out the manhole. Yeah, it's winter.",m:[11,0,1]},
+  {t:"Fire escape's got a breeze tonight. What's the question?",m:[5,6,7],h:[19,23]},
+  {t:"Train's running local. Plenty of time to talk."},
+  {t:"Swipe in, sit down — what's good?"},
+  {t:"Signal problems at Jay Street. Take your time."},
+  {t:"Showtime kid just got off. Floor's yours."},
+  {t:"G train's coming in 14 minutes. Ask me anything."},
+  {t:"Held at the station momentarily. So, what's on your mind?"},
+  {t:"Doors closing — get your question in."},
+  {t:"Made the transfer with no running. Feeling generous today."},
+  {t:"L train's actually on time. Anything's possible today."},
+  {t:"Ferry's cheaper than therapy. So am I."},
+  {t:"Stand clear of the closing doors — and hit me with it."},
+  {t:"Uptown, downtown, either way I got you."},
+  {t:"Express just passed the local. That's us right now."},
+  {t:"Bus is stuck behind a double-parked truck. Let's talk."},
+  {t:"Citi Bike had one dock left. Winning already."},
+  {t:"Two transfers deep. What's the mission?"},
+  {t:"Got a seat on a Monday? Blessed. What's up?",d:[1]},
+  {t:"Got the whole car to yourself? Suspicious. What's up?",h:[21,4]},
+  {t:"Bacon, egg and cheese, salt pepper ketchup. And your question?"},
+  {t:"Bodega cat's asleep on the chips. Quiet in here. Talk."},
+  {t:"Chopped cheese energy. What you need?"},
+  {t:"Dollar slice, folded right. Now what?"},
+  {t:"Halal cart, white sauce, no red. What's up?"},
+  {t:"Arizona still 99 cents. Some things hold. What's on your mind?"},
+  {t:"Coffee's regular, cup's blue. Let's get into it."},
+  {t:"Deli guy already knows my order. Do you know yours?"},
+  {t:"Fresh bagel, still warm. Ask away."},
+  {t:"Two dumplings for a dollar somewhere. I'll help you find it."},
+  {t:"Egg roll and a mango lassi kinda day. What's the move?"},
+  {t:"Pizza's too hot, still eating it. Multitasking. What's up?"},
+  {t:"Line's out the door at the taco spot. Worth it? Ask me."},
+  {t:"Corner store got everything except what you came for. I don't."},
+  {t:"Cannoli's fresh downtown. So are my answers."},
+  {t:"Order's up. What's yours?"},
+  {t:"Nothing in the fridge but condiments. Let's figure it out."},
+  {t:"Cold seltzer, folding chair, good question. That's all I need.",m:[4,5,6,7,8],h:[12,21]},
+  {t:"3 AM and the city's still up. So am I.",h:[2,4]},
+  {t:"Sun's not up yet. I am. What's good?",h:[4,5]},
+  {t:"First coffee hasn't hit yet. Second one might.",h:[6,9]},
+  {t:"Lunch break clock is ticking. What you need?",h:[11,13]},
+  {t:"Golden hour on the rooftops. Ask me something.",m:[9,10,11,0,1,2],h:[15,17]},
+  {t:"Golden hour on the rooftops. Ask me something.",m:[3,4,5,6,7,8],h:[18,20]},
+  {t:"Friday at 4:58. Let's make it count.",d:[5],h:[15,18]},
+  {t:"Sunday reset in progress. What's on the list?",d:[0],h:[10,20]},
+  {t:"Late night, low volume, deep questions. Go ahead.",h:[23,2]},
+  {t:"Monday's here whether we like it or not. What's first?",d:[1],h:[5,11]},
+  {t:"Nobody's answering emails today. But I'm up.",d:[0,6],h:[9,17]},
+  {t:"Midnight in the city that pretends it sleeps. Talk to me.",h:[0,0]},
+  {t:"Early enough that the block is still quiet. What's up?",h:[5,8]},
+  {t:"Sun's going down over Jersey. Perfect time to think.",m:[9,10,11,0,1,2],h:[16,17]},
+  {t:"Sun's going down over Jersey. Perfect time to think.",m:[3,4,5,6,7,8],h:[19,20]},
+  {t:"Been up since the birds. Let's get into it.",h:[5,7]},
+  {t:"Whole weekend ahead. What are we doing?",d:[5],h:[16,23]},
+  {t:"Whole weekend ahead. What are we doing?",d:[6],h:[6,11]},
+  {t:"Brooklyn's up. What's the move?"},
+  {t:"BX in the building. What you need?"},
+  {t:"Queens got the best food and I'll defend that. What's up?"},
+  {t:"Shaolin represent. Ask away."},
+  {t:"Uptown to the top of the island. Let's go."},
+  {t:"Bushwick's awake. What's good?"},
+  {t:"From the Rockaways to Riverdale, I got you."},
+  {t:"Flatbush energy today. What's on your mind?"},
+  {t:"Harlem got the blueprint. What are we building?"},
+  {t:"Jackson Heights got the whole world on one avenue. Where we going?"},
+  {t:"Bed-Stuy do or die — the do part. What's up?"},
+  {t:"Coney Island air's got salt in it. Ask me something."},
+  {t:"Five boroughs, one question. Which one's yours?"},
+  {t:"Sunset Park to Sunnyside, say the word."},
+  {t:"Astoria in the morning, that's a vibe. Talk to me.",h:[5,11]},
+  {t:"Shells laced loose, no strings needed. What's up?"},
+  {t:"I actually do have the answers. Try me."},
+  {t:"Fitted low, brim flat, listening."},
+  {t:"Queensbridge raised the bar. I'm just trying to clear it."},
+  {t:"Boom bap in the headphones. What's on your mind?"},
+  {t:"Diamond up, Brooklyn's finest energy. What you need?"},
+  {t:"Beat's looping, mic's open. Go ahead."},
+  {t:"Crate digging for a good question. Got one?"},
+  {t:"Tribe on the aux. Nothing but smooth from here."},
+  {t:"Villain mask off, helpful mode on. Talk to me."},
+  {t:"Bronx built the whole thing. Respect. What's up?"},
+  {t:"Freestyle round — say anything, I'll run with it."},
+  {t:"Sample flipped, question welcome."},
+  {t:"Turntable's spinning, timer's not. Take your time."},
+  {t:"Bars are for rappers. Answers are for me. Go."},
+  {t:"Radio's on 97-point-something. What's your request?"},
+  {t:"Hollis, Queens taught the world how to walk. Step in."},
+  {t:"Verse two, back to the beat. What's up?"},
+  {t:"Pink everything today. Dipset winter. What's good?",m:[11,0,1]},
+  {t:"Summer Jam energy. Let's get loud.",m:[5,6]},
+  {t:"Friendly neighborhood assistant. Queens raised me."},
+  {t:"Who you gonna call? Right here, actually."},
+  {t:"Times Square Elmo waved at me. Weird day. What's yours?"},
+  {t:"Season finale energy. What's the big question?"},
+  {t:"New York minute — but I'll take as long as you need."},
+  {t:"Everybody's got a podcast now. I just have answers."},
+  {t:"Group chat's been quiet. Let's talk."},
+  {t:"Doorman nodded at me like I live here. What's up?"},
+  {t:"That opening-credits shot of the skyline. Roll it."},
+  {t:"Feed's all the same today. Ask me something real."},
+  {t:"Broadway's dark tonight. I'm not.",d:[1],h:[18,23]},
+  {t:"Rom-com montage weather. What's the plot?",m:[3,4,8,9]},
+  {t:"Yankee fitted, Mets patience. Balanced. What's up?"},
+  {t:"Ball's in your court."},
+  {t:"Free throw line, no crowd, just focus. What's on your mind?"},
+  {t:"Knicks got a real shot. So do you. Ask me.",m:[9,10,11,0,1,2,3,4,5]},
+  {t:"Rucker Park in July. Bring your best.",m:[6]},
+  {t:"Cage at West 4th, no easy buckets. Let's go.",m:[4,5,6,7,8]},
+  {t:"Handball courts are packed. Meet me here instead.",m:[4,5,6,7,8],h:[10,20]},
+  {t:"Garden's loud tonight. Still hear you though.",h:[18,23]},
+  {t:"Marathon's got the streets closed. We're going anyway.",m:[10],d:[0],dom:[1,7]},
+  {t:"Chess tables in the park are full. I'll play.",m:[3,4,5,6,7,8,9],h:[10,19]},
+  {t:"Deadass, what's up?"},
+  {t:"Talk to me, nice."},
+  {t:"Say less — actually, say a little more."},
+  {t:"What's good? I got time today."},
+  {t:"No cap, ask me anything."},
+  {t:"I'm listening. Hard."},
+  {t:"Pull up a chair, the stoop's free."},
+  {t:"Wildin' or working? Either way I'm here."},
+  {t:"You came to the right corner."},
+  {t:"Hit me with it."},
+  {t:"What's the word?"},
+  {t:"Locked in. What's the mission?"},
+  {t:"All gas, no meter running. What's up?"},
+  {t:"Whatever it is, we can figure it out."},
+  {t:"Bet. What are we doing?"},
+  {t:"Ready when you are — and I'm always ready."},
+  {t:"City never blinks. Neither do I."},
+  {t:"Big question or small one, both welcome."},
+  {t:"You bring the question, I bring the work."},
+  {t:"Let's get it."},
+  {t:"Concrete, coffee, curiosity. What's yours?"},
+  {t:"Whole city's out here figuring it out. Let's figure yours out."},
 ];
-function greeting(){return GREETINGS[Math.floor(Math.random()*GREETINGS.length)];}
+// CONDITION-GATED (6b255, per Patrick: gate the weather and time lines on
+// live conditions — "ninety degrees and the train has no AC" landing in
+// February kills the whole illusion). The browser already knows the
+// month, hour and weekday for free, so the filter costs NOTHING: no
+// network call, no location, no permission prompt. Live TEMPERATURE is
+// deliberately not used — the app has no idea where the user is, and
+// wiring a weather lookup into first paint would be an 8s uncached call
+// against a rate-limited free service on every single load.
+function greetOK(g,mo,hr,dw,dm){
+  if(g.m&&g.m.indexOf(mo)<0)return false;
+  if(g.d&&g.d.indexOf(dw)<0)return false;
+  if(g.dom&&(dm<g.dom[0]||dm>g.dom[1]))return false;
+  if(g.h){
+    const a=g.h[0],b=g.h[1];
+    // a>b WRAPS past midnight (23->2). A naive a<=hr&&hr<=b would make
+    // those lines unreachable, and h:[0,0] would vanish under a falsy
+    // check — both are real traps, so the test is explicit.
+    if(!(a<=b?(hr>=a&&hr<=b):(hr>=a||hr<=b)))return false;
+  }
+  return true;
+}
+function greetPool(){
+  const d=new Date(),mo=d.getMonth(),hr=d.getHours(),
+        dw=d.getDay(),dm=d.getDate();
+  return GREETINGS.filter(g=>greetOK(g,mo,hr,dw,dm));
+}
+function greeting(){
+  let p=greetPool();
+  // belt and braces: if a filter bug ever emptied the pool, fall back to
+  // the always-safe lines rather than showing nothing at all
+  if(!p.length)p=GREETINGS.filter(g=>!g.m&&!g.h&&!g.d&&!g.dom);
+  if(!p.length)p=GREETINGS;
+  return p[Math.floor(Math.random()*p.length)].t;
+}
 (function(){const g=$(".greet");if(g)g.textContent=greeting();})();
 
 /* ------------------------------------------------- chats: list + store */
@@ -14098,19 +14283,20 @@ $("#newchat").addEventListener("click",()=>{
 /* ---------------------------------------------------------- telemetry */
 function buildMeter(el){const f=document.createElement("div");
   f.className="mfill";el.appendChild(f);}
-buildMeter($("#gpu-meter"));buildMeter($("#models-meter"));
+buildMeter($("#gpu-meter"));buildMeter($("#mem-meter"));
 buildMeter($("#fleet-meter"));
 function paintMeter(el,pct){
   const f=el.firstChild;if(!f)return;
   f.style.width=Math.max(0,Math.min(100,pct))+"%";
   f.classList.toggle("hot",pct>=80);
 }
-let simGpu=12,fleetStat=null;
+let simGpu=12,fleetStat=null,memPct=null;
 async function pollStats(){
   let gpu;
   try{
     const st=await(await fetch("/api/stats")).json();
     gpu=st.gpu_pct;
+    memPct=(st.mem_pressure!=null?st.mem_pressure:st.mem_pct);
     fleetStat={online:st.fleet_online||0,busy:st.fleet_busy||0};
   }catch(e){}
   if(gpu==null){
@@ -14119,6 +14305,16 @@ async function pollStats(){
     gpu=simGpu;
   }
   paintMeter($("#gpu-meter"),gpu);
+  // memory pressure (mac) / memory used (windows) — 6b254. The number
+  // rides beside the label so the bar isn't the only reading.
+  {const row=$("#mem-meter")&&$("#mem-meter").closest(".meter-row");
+   if(memPct==null){ if(row)row.hidden=true; }
+   else{
+     if(row)row.hidden=false;
+     paintMeter($("#mem-meter"),memPct);
+     const mv=$("#mem-val");
+     if(mv)mv.textContent=Math.round(memPct)+"%";
+   }}
   // COMMUNITY GPU: each friend online lights a quarter of the bar;
   // it burns hot while any of them is actually working
   const fm=$("#fleet-meter");
@@ -14185,13 +14381,7 @@ async function pollEngines(){
 
     });
     // headline tally: how many models are actually usable right now
-    {
-      const all=Object.entries(st).filter(([,v])=>v.supported!==false);
-      const up=all.filter(([,v])=>v.up).length;
-      const mm=$("#models-meter");
-      if(mm&&mm.firstChild&&all.length)
-        mm.firstChild.style.width=Math.round(up/all.length*100)+"%";
-    }
+
     // engine states just arrived — prune hand-picked rosters of models
     // that can't run (red dots showing council ranks was a lie), then
     // fill the roster automatically if the user hasn't curated one
@@ -15127,8 +15317,12 @@ setupGo.addEventListener("click",async()=>{
   setupTick();
 });
 $("#open-setup").addEventListener("click",()=>{aboutVeil.hidden=true;openSetup();});
-$("#models-up").addEventListener("click",openSetup);
-if(!IS_LOCAL)$("#models-up").hidden=true;   // borrowers can't install
+// the ↑ "get more models" chip rode the MODELS meter, which the memory
+// reading replaced (6b254). Settings › Download models and the
+// MODELS AVAILABLE flag both still open the same panel.
+{const mu=$("#models-up");
+ if(mu){mu.addEventListener("click",openSetup);
+        if(!IS_LOCAL)mu.hidden=true;}}
 // ONE-TIME invitation, and never during the show: it waits for the
 // rainbow wipe to LAND (body.painted, wipeBusy clear) so the card never
 // crowds the boot flourish. Marked seen the moment it appears, so it is

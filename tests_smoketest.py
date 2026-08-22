@@ -122,6 +122,21 @@ check("no raw NUL bytes", b"\x00" not in b)
 # assert the MARKUP is gone, not the substring
 check("hero is greeting-only", '<p class="greet"' in page
       and 'class="h1row"' not in page)
+# 6b255: 150 NYC greeting lines, condition-gated so a weather or
+# time line never lands absurdly. The three landmines a naive filter
+# hits, all guarded here: a wrapping hour range (23->2) must not be
+# unreachable, h:[0,0] must not vanish under a falsy check, and a
+# weekday line must carry an explicit `d` rather than prose.
+check("greetings are condition-gated",
+      "function greetOK" in page and "function greetPool" in page
+      and "GREETINGS.filter" in page
+      and "a<=b?(hr>=a&&hr<=b):(hr>=a||hr<=b)" in page   # wraparound
+      and "h:[0,0]" in page                              # midnight kept
+      and 'd:[5],h:[15,18]' in page)                     # Friday is real
+check("no ungated weather-claim greetings",
+      "Ninety degrees" in page and "m:[6,7]" in page
+      and "First snow" not in page          # needs a precip signal
+      and "umbrella's toast" not in page)   # ditto
 # 6.0b4: the wordmark went SMALL (gpt/gemini corner mark) — assert the
 # compact form + the beta-updates opt-in
 check("corner wordmark + version row", "font-size:12.5px" in page
@@ -335,6 +350,15 @@ check("Best and Power tiers are gone",
 s, h, b = req("/api/stats", cookie=K)
 st = json.loads(b)
 check("stats has users + memory", "users_total" in st and "mem_total_gb" in st)
+# 6b254: the MODELS meter became a MEMORY reading — pressure on macOS
+# (wired+compressed, what Activity Monitor gauges), used% elsewhere.
+# psutil's used% would have read ~2x higher on a healthy Mac.
+check("memory meter replaced the models meter",
+      'id="mem-meter"' in page and 'id="mem-val"' in page
+      and "models-meter" not in page
+      and ("MEMORY PRESSURE" in page or "MEMORY USED" in page)
+      and "def mem_pressure" in _MILLENAI_SRC
+      and "Pages occupied by compressor" in _MILLENAI_SRC)
 
 print("== engines (live generations) ==")
 

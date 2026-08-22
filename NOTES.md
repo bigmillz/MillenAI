@@ -3744,3 +3744,84 @@ Workspace.
   pattern is `stress(?!\s*test)`: the Code lane shares this module.
 - Gauntlet 80/80. (Deduped: I'd added a second copy of two funnel
   checks that already existed from before the session interruption.)
+
+## 6 beta 254 (pending) — bottom-left rail: tighter, and a real memory read
+- THE TOGGLE ROW RIDES DOWN to sit just above the monitor panel (per
+  Patrick). #settings already had margin-top:auto pinning it to the
+  bottom of the rail, so the fix was closing the gap UNDER it — padding
+  14/6/4 -> 14/6/0 and #telemetry margin-top 12 -> 7. Measured: 26px
+  gap -> 15px.
+- MODELS -> MEMORY. And it is real memory PRESSURE on macOS, not
+  "used": psutil's used% reads 43% on this Mac while actual pressure is
+  19%, because macOS deliberately fills free RAM with cache. A meter
+  wired to used% would sit near-red on a perfectly happy machine and
+  mean nothing. mem_pressure() reads vm_stat and computes
+  (wired + compressor) / total — the same quantity Activity Monitor
+  gauges. Windows/Linux fall through to psutil used%, which IS the
+  meaningful number there, and mem_label() names it honestly:
+  "MEMORY PRESSURE" vs "MEMORY USED".
+- Total RAM comes from `sysctl -n hw.memsize`, NOT psutil — vm_stat
+  already supplies the page counts, so the whole mac path works on a
+  bare install where psutil is missing.
+- UNMEASURABLE RETURNS None, NEVER 0. A meter pinned at 0% would read
+  as "no pressure at all" on a box that simply can't measure; the row
+  hides instead. Verified by stubbing mem_pressure:null — row hides,
+  then reappears with the real value when the stat returns.
+- The ↑ "get more models" chip lived on the MODELS label and went with
+  it. Its handler is now guarded rather than deleted, and the shortcut
+  still exists in Settings › Download models and the MODELS AVAILABLE
+  flag. Dead #models-up CSS removed; #mem-val is quiet mono with
+  tabular-nums so the number doesn't jitter as it climbs.
+- Gauntlet 81/81.
+
+## 6 beta 255 (pending) — 150 new greetings, gated so they never lie
+- Patrick's 150 NYC lines replace the old 110, with his key instruction
+  built in: the Weather and Time groups only fire when they'd ring true.
+  151 entries (148 lines; 3 appear twice, see the solar note below).
+- GATED ON MONTH + HOUR + WEEKDAY, WHICH ARE FREE. A capability audit of
+  the whole file settled the design: the app has NO idea where the user
+  is — no IP-geo, no navigator.geolocation, no stored locality, not even
+  a timezone. weather_snippets() derives its location by string-slicing
+  the user's QUESTION and returns None without one, has zero caching,
+  and an 8s timeout. Wiring that into first paint would mean an uncached
+  blocking call to a rate-limited free service on every load AND every
+  new chat, for a greeting. So live temperature is deliberately unused;
+  the browser's own clock costs nothing and covers the real failure.
+- EVERY TEMP CONDITION BECAME A MONTH WINDOW. Months, not seasons —
+  "that April fake-out weather" gates to April alone (season would leak
+  into March and May), "Rucker Park in July" to July, "sweater weather
+  finally hit" to October (fall would still be firing in late November,
+  six weeks after the arrival it claims).
+- TWO LINES CUT, and only two: "First snow just hit" and "Rain's
+  sideways, umbrella's toast". Both claim a PRECIPITATION EVENT, which
+  no amount of calendar gating can fake — a dry January afternoon three
+  weeks after the last flake would still say "first snow just hit".
+  They come back the day the app has a real weather signal.
+- THREE LINES ARE SPLIT IN TWO, on purpose: golden hour and sunset swing
+  about four hours across the year (NYC sunset ~16:30 Dec, ~20:30 Jun),
+  so one wide band would be wrong more often than right. Each gets a
+  winter entry and a summer entry. "Whole weekend ahead" splits Friday
+  evening / Saturday morning for the same reason.
+- THE SWEEP FOUND WHAT THE BRIEF MISSED. Patrick flagged Weather and
+  Time; 15 more lines across Transit, Bodega, Borough, Hiphop, Pop
+  Culture and Sports carried hidden assumptions. Best catches:
+  BROADWAY IS DARK ON MONDAYS (so "Broadway's dark tonight" is a Monday
+  evening line, not an any-night one), the NYC Marathon closes streets
+  on exactly the FIRST SUNDAY IN NOVEMBER (gated with a day-of-month
+  window, 1.19% of slots — a deliberate annual easter egg), Summer Jam
+  is a June concert, and "Got a seat on a Monday?" names its own day.
+- THREE IMPLEMENTATION LANDMINES, all caught before shipping:
+  1. `hour+day` tags carried the weekday in PROSE only — shipping that
+     JSON verbatim would have fired "Friday at 4:58" every day at 4pm.
+     Every day-bound line now carries an explicit `d` array.
+  2. The one wrapping range (23->2) is unreachable under a naive
+     `hr>=a&&hr<=b`. The test branches on a>b.
+  3. `h:[0,0]` (midnight) vanishes under any `g.h[0] || fallback`
+     idiom. Checks are explicit, never falsy.
+- MEASURED, not assumed. Across all 2016 month x hour x weekday
+  combinations: pool never drops below 104 lines (max 116), ZERO heat
+  lines reachable in February, ZERO winter lines in July, and ZERO
+  unreachable entries — every line has a moment. Midnight fires at 00
+  and not 12; the wrap line fires at 23 and 01 and not 12; Friday fires
+  Friday and not Tuesday; the Marathon fires Nov 2 but not Nov 16.
+- Gauntlet 83/83.
