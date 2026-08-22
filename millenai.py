@@ -10544,8 +10544,10 @@ body:not(.perf) #mic.rec{animation:blink 1s ease infinite}
 }
 #persona:focus{border-color:var(--dim)}
 #persona::placeholder{color:var(--faint)}
-#about-name{font-family:var(--helv);font-size:24px;font-weight:600;color:var(--text)}
-#about-name em{font-style:italic;font-weight:400;opacity:.85}
+/* the two veil titles, distinct ids (6b257): about-name existed THREE
+   times and every bare query found a hidden copy — the id is retired.
+   The em rule died with the pre-rail platform line it styled. */
+#new-title,#up-title{font-family:var(--helv);font-size:24px;font-weight:600;color:var(--text)}
 /* #up-ver only (6b245): #about-ver used to share this rule from the
    old About layout, which left VERSION in 14px Helvetica inside a
    9.5px mono spec list — one row shouting in a different face */
@@ -11431,7 +11433,7 @@ __CODE_ROWS__
 
 <div id="new-veil" hidden>
   <div id="about-card">
-    <div id="about-name">New models available</div>
+    <div id="new-title">New models available</div>
     <div id="up-detail">This version adds models you don&rsquo;t have yet.</div>
     <div id="new-list"></div>
     <div class="big-bar" id="new-bar" hidden><i></i></div>
@@ -11445,7 +11447,7 @@ __CODE_ROWS__
 
 <div id="update-veil" hidden>
   <div id="about-card">
-    <div id="about-name">Update available</div>
+    <div id="up-title">Update available</div>
     <div id="up-ver"></div>
     <div id="up-detail"></div>
     <div class="big-bar" id="up-bar" hidden><i></i></div>
@@ -11462,7 +11464,7 @@ __CODE_ROWS__
          dot-separated run that wrapped mid-word. -->
     <nav id="set-rail">
       <div id="set-brand">
-        <svg id="set-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="swg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#swg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b id="about-name">Concorde<b>AI</b></b>
+        <svg id="set-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="swg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#swg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b>Concorde<b>AI</b></b>
       </div>
       <dl id="set-spec">
         <div><dt>version</dt><dd id="about-ver">__APP_VER__</dd></div>
@@ -15871,7 +15873,12 @@ async function openAbout(){
     const [m,st]=await Promise.all([
       (await fetch("/api/memory")).json(),
       (await fetch("/api/setup")).json()]);
-    if(st.plat)$("#about-name").innerHTML="MillenAI <em>"+esc(st.plat)+"</em>";
+    // NO platform line (6b257): it was a pre-rail relic — the about-name
+    // id had THREE matches, so the write landed on the new-models veil
+    // title, invisible behind announceModels' own rewrite, for several
+    // builds. The rail already reports the machine in #set-spec
+    // (chip / memory / accel), so the fix is deletion — the 6b245
+    // lesson — and the id is retired (distinct new-title / up-title).
     try{
       const fs=await(await fetch("/api/fleet/status")).json();
       if(fs.key!==undefined){
@@ -15955,7 +15962,7 @@ async function announceModels(){
         remind_models_ts:Date.now()},extra||{}))});
     if(!seen.length){await stamp();return;}   // first run: nothing is "new"
 
-    const veil=$("#new-veil"),title=document.querySelector("#new-veil #about-name");
+    const veil=$("#new-veil"),title=document.querySelector("#new-veil #new-title");
     const missing=st.models.filter(m=>m.status!=="ready"&&m.supported!==false);
     const fresh=missing.filter(m=>seen.indexOf(m.label)<0);
 

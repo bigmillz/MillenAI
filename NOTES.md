@@ -3947,3 +3947,26 @@ one of which made a SUCCESSFUL job look like a failure:
 - Gauntlet 89/89 (85 -> 89: four new checks — bold-AI lockup, guarded
   auto-update, funnel typed answers, sources-fold — and the brand
   check now also forbids bare "Concorde" outside the split lockup).
+
+## 6 beta 257 (pending) — the platform line that nobody ever saw
+- THE about-name ID IS RETIRED. It existed THREE times (both veil
+  titles + the Settings rail lockup — the duplicate-id trap this log
+  has recorded three separate times), and the pre-rail About code
+  still wrote to it: the platform line ("ConcordeAI Apple Silicon")
+  landed on the FIRST match — the new-models veil title — where
+  announceModels' own properly-scoped rewrite papered over it. Dead
+  UI for many builds; surfaced by an adversarial review of the rename
+  diff and confirmed pre-existing via git history, not a rename
+  regression.
+- The fix is deletion (the 6b245 lesson): the rail already reports
+  the machine in #set-spec (chip / memory / accel), so the platform
+  write is gone; the veil titles carry distinct ids (new-title /
+  up-title sharing one title rule), the rail lockup is just
+  #set-brand b, and the stale pre-rail rules died with the id — no
+  rule or query names it anywhere now.
+- VERIFIED over the wire: the served page has zero occurrences of the
+  old id in any form, both veils still title correctly, and the
+  Concorde<b>AI</b> lockup is untouched. One run tripped on an
+  unrelated transient (ConnectionResetError reading a 403 body in the
+  remote-lockdown probe; clean on re-run).
+- Gauntlet 90/90 (+1: about-name id retired, veil titles distinct).

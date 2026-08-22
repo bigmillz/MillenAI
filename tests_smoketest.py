@@ -383,6 +383,16 @@ check("funnel accepts typed answers",
 check("sources fold into the disclosure on every path",
       "function srcBox(" in page and "srcBox(srcs)+renderMD" in page
       and 'srcRow(srcs):"")+renderMD' not in page)
+# 6b257: the about-name id is RETIRED. It existed THREE times (both
+# veil titles + the rail lockup — the trap NOTES logged three separate
+# times), and the pre-rail platform line wrote into whichever copy came
+# first: the new-models veil title, invisible behind announceModels'
+# own rewrite. Veil titles now carry distinct ids, the rail lockup is
+# just #set-brand b, and no rule or query names the old id at all.
+check("about-name id retired, veil titles distinct",
+      'id="about-name"' not in page
+      and 'id="new-title"' in page and 'id="up-title"' in page
+      and "#about-name" not in page)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)
