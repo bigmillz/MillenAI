@@ -88,11 +88,13 @@ APP_VERSION = "6.0.0"   # bump here — UI, window, DMG all follow
 # stays parked on the last stable (v197 / 5.3.7). The live :9889
 # instance follows raw tags and DOES run betas: that's the testbed.
 APP_BETA = True
-# THE BRAND (6.0): Concorde. Every user-facing surface says Concorde;
-# everything load-bearing stays "MillenAI" — app_dir, bundle id, the
-# executable name (_SWAP_SCRIPT pgreps it), UPDATE_REPO, User-Agents —
-# so data, permissions and the self-update chain survive the rename.
-APP_NAME = "Concorde"
+# THE BRAND (6b257): ConcordeAI — Concorde grew its AI, and the AI is
+# BOLD in every lockup (nested <b>, see .vghost). Every user-facing
+# surface says ConcordeAI; everything load-bearing stays "MillenAI" —
+# app_dir, bundle id, the executable name (_SWAP_SCRIPT pgreps it),
+# User-Agents — so data, permissions and the self-update chain survive
+# both renames.
+APP_NAME = "ConcordeAI"
 
 
 def brand(html: str) -> str:
@@ -118,7 +120,7 @@ APP_BUILD_DATE = ""         # ISO date; blank falls back to this file's mtime
 # Set to "youruser/yourrepo" once this is on GitHub. Publish each build as a
 # Release whose tag ends in the build number (e.g. "v5") with the .dmg
 # attached; the app then offers a one-click in-place update.
-UPDATE_REPO = "bigmillz/concorde"
+UPDATE_REPO = "bigmillz/concordeai"
 
 # MILLENAI_PORT: the go-live LaunchAgent runs a second, headless instance
 # beside the desktop app — it must not fight the app for 8889
@@ -2670,9 +2672,33 @@ def _channel_release():
         return json.loads(r.read().decode("utf-8"))
 
 
-def check_update():
+_chk_cache = {"ts": 0.0, "data": None, "beta": None}
+
+
+def check_update(force=False):
+    """Cached wrapper — every open client now polls hourly (the owner
+    auto-check, 6b257), so one GitHub hit per 15 min serves them all:
+    the unauthenticated API budget is 60/hr per IP and check_update
+    used to spend one on EVERY call. The Settings button passes
+    force=True so a human click still reaches GitHub every time.
+    Failures are never cached — a launch-time DNS blip must not read
+    as an authoritative "no update" for 15 minutes — and the cache is
+    keyed to the beta pref, so toggling the channel never serves the
+    other channel's verdict."""
     if not UPDATE_REPO:
         return {"configured": False, "available": False}
+    beta = bool(load_prefs(None).get("beta_updates"))
+    if not force and _chk_cache["data"] is not None \
+            and _chk_cache["beta"] == beta \
+            and time.time() - _chk_cache["ts"] < 900:
+        return _chk_cache["data"]
+    out = _check_update_live()
+    if "note" not in out:
+        _chk_cache.update(ts=time.time(), data=out, beta=beta)
+    return out
+
+
+def _check_update_live():
     try:
         rel = _channel_release()
     except urllib.error.HTTPError as exc:
@@ -5577,12 +5603,12 @@ REMOTE_SYSTEM = (
     "\"done\":false}\n"
     "  For a long step, write the command in the FOREGROUND, exactly as "
     "you would run it by hand (e.g. \"apt-get -y full-upgrade\" or "
-    "\"make -j$(nproc)\"). Concorde detaches and watches it for you, so "
+    "\"make -j$(nproc)\"). ConcordeAI detaches and watches it for you, so "
     "do NOT background it yourself with &, nohup, setsid, systemd-run or "
     "a redirect to a logfile — that makes it report done the instant it "
     "starts, before the work is finished.\n"
     "  REBOOT the server (only when the task genuinely needs it — a "
-    "kernel or release upgrade, a relabel): Concorde waits for the box "
+    "kernel or release upgrade, a relabel): ConcordeAI waits for the box "
     "to come back and continues automatically, so never issue a bare "
     "`reboot` as a cmd:\n"
     "  {\"reboot\":\"why the reboot is needed\",\"done\":false}\n"
@@ -5690,7 +5716,7 @@ def run_remote_agent(messages, conf, autonomy, emit, status, step,
             emit(str(act.get("summary") or "Done.").strip())
             return
         # REBOOT SURVIVAL (6b251): a reboot always needs a nod (it drops
-        # the session), then Concorde waits for the box and continues.
+        # the session), then ConcordeAI waits for the box and continues.
         if act.get("reboot"):
             why = str(act.get("reboot"))[:200]
             sid = "reboot%d" % i
@@ -6412,8 +6438,8 @@ button.guest::after{display:none}
 <canvas id="motes"></canvas>
 <div class="door">
   <div class="wrap">
-    <div class="halo" aria-hidden="true"><h1>MillenAI</h1></div>
-    <h1>MillenAI</h1>
+    <div class="halo" aria-hidden="true"><h1>Concorde<b>AI</b></h1></div>
+    <h1>Concorde<b>AI</b></h1>
   </div>
   <p class="tag">Your AI. Walk right in.</p>
   <a class="gbtn primary" href="/auth/google">
@@ -6544,7 +6570,7 @@ button{background:#ececec;color:#111;border:0;border-radius:12px;
 button:hover{background:#fff}
 </style></head><body>
 <div class="door">
-  <h1>MillenAI</h1>
+  <h1>Concorde<b>AI</b></h1>
   <p>private &middot; enter your access key</p>
   <form onsubmit="location.href='/?key='+encodeURIComponent(
       document.getElementById('k').value.trim());return false">
@@ -6933,8 +6959,11 @@ class StudioHandler(http.server.BaseHTTPRequestHandler):
             self._send_engines()
         elif self.path == "/api/setup":
             self._send_json(setup_status())
-        elif self.path == "/api/update/check":
-            self._send_json(check_update())
+        elif self.path.startswith("/api/update/check"):
+            force = urllib.parse.parse_qs(
+                urllib.parse.urlparse(self.path).query
+            ).get("force", [""])[0] == "1"
+            self._send_json(check_update(force=force))
         elif self.path == "/api/update/status":
             self._send_json(dict(_update))
         elif self.path == "/api/tiers":
@@ -8938,9 +8967,17 @@ body.resizing{cursor:col-resize;user-select:none}
   margin-right:auto;min-width:0;overflow:hidden;text-overflow:ellipsis;
 }
 .vghost b{font-weight:400}
+/* 6b257, per Patrick: the name grew an AI and the AI is BOLD — a
+   nested <b> inside each quiet 400-weight lockup. NOT a span: the
+   gauntlet's tab guard forbids a span whose content is exactly AI
+   (this comment ships in the page, so it can't spell the literal
+   either — it already tripped the guard once). Michroma ships one
+   weight, so the 700 is synthesized — heavier stroke, same face, and
+   both engines (Blink pane, WKWebView app) do it. */
+.vghost b b,#set-brand b b,#wiz-brand b b{font-weight:700}
 /* 6b241, per Patrick's sketch: the dock icon's diagonal bars become a
    swept wedge that runs INTO the C — a delta wing whose trailing edge
-   is the letter, which is the right idea for something called Concorde.
+   is the letter, which is the right idea for something called ConcordeAI.
    Same construction as make_icon.py (parallel 45-degree bars, each
    shorter toward the corner, so the group reads as a triangle) and the
    same greyscale ramp, but reversed: steel at the far tip, brightest
@@ -11141,7 +11178,7 @@ body:not(.perf) .big-bar i{animation:barBreathe 2.4s ease-in-out infinite}
   <div id="sb-resize" title="Drag to resize"></div>
   <div id="brand-wrap">
     <div id="brand-row">
-    <span class="vghost" title="MillenAI"><svg id="vmark" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="vmg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#vmg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b>MillenAI</b> <i class="vsub">__APP_VER__</i></span>
+    <span class="vghost" title="MillenAI"><svg id="vmark" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="vmg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#vmg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b>Concorde<b>AI</b></b> <i class="vsub">__APP_VER__</i></span>
 <button id="newchat" title="New chat">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"
            stroke-linecap="round" stroke-linejoin="round">
@@ -11425,7 +11462,7 @@ __CODE_ROWS__
          dot-separated run that wrapped mid-word. -->
     <nav id="set-rail">
       <div id="set-brand">
-        <svg id="set-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="swg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#swg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b id="about-name">MillenAI</b>
+        <svg id="set-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="swg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#swg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg><b id="about-name">Concorde<b>AI</b></b>
       </div>
       <dl id="set-spec">
         <div><dt>version</dt><dd id="about-ver">__APP_VER__</dd></div>
@@ -11544,10 +11581,10 @@ __CODE_ROWS__
     <div class="wstep" data-w="1">
       <div id="wiz-brand">
         <svg id="wiz-wing" viewBox="2 2.3 19.6 16.4" aria-hidden="true"><defs><linearGradient id="wwg" x1="0" y1="1" x2="1" y2="0"><stop offset="0" stop-color="#787e89"/><stop offset=".55" stop-color="#b7bcc6"/><stop offset="1" stop-color="#f4f5f8"/></linearGradient></defs><g stroke="url(#wwg)" stroke-width="2.4" stroke-linecap="round"><line x1="3.2" y1="17.5" x2="20.4" y2="3.5"/><line x1="7.5" y1="17.5" x2="20.4" y2="7"/><line x1="11.8" y1="17.5" x2="20.4" y2="10.5"/><line x1="16.1" y1="17.5" x2="20.4" y2="14"/><line x1="19.3" y1="17.5" x2="20.4" y2="16.6"/></g></svg>
-        <b>Concorde</b>
+        <b>Concorde<b>AI</b></b>
         <span id="wiz-ver">__APP_VER__</span>
       </div>
-      <p>Concorde runs real AI models on your own machine &mdash; private,
+      <p>MillenAI runs real AI models on your own machine &mdash; private,
       free, and yours &mdash; with optional cloud power when you want a
       frontier brain on the case. Its trick is compositing: several
       &ldquo;minds&rdquo; draft an answer, the strongest one writes the
@@ -11562,7 +11599,7 @@ __CODE_ROWS__
       <div class="set-h">Local models</div>
       <p>A large language model is a brain in a file &mdash; it lives on
       your disk and answers on your silicon, no internet required.
-      Concorde installs a few of different sizes and personalities, asks
+      MillenAI installs a few of different sizes and personalities, asks
       several at once on hard questions, and composites their drafts
       into one answer. Pick how much to install:</p>
       <div id="wiz-plans"></div>
@@ -11576,7 +11613,7 @@ __CODE_ROWS__
       <div class="set-h">Cloud power</div>
       <p>Cloud models are frontier brains that answer over the network
       &mdash; some free, some needing a paid API key from the provider.
-      With any key saved, Concorde blends cloud drafts into its answers
+      With any key saved, MillenAI blends cloud drafts into its answers
       and hands the final word to the strongest mind available. All
       optional; your prompts only leave this machine while it&rsquo;s
       on.</p>
@@ -11585,7 +11622,7 @@ __CODE_ROWS__
 
     <div class="wstep" data-w="4" hidden>
       <div class="set-h">That&rsquo;s it</div>
-      <p id="wiz-done-line">Thanks for setting up Concorde. Your models
+      <p id="wiz-done-line">Thanks for setting up MillenAI. Your models
       download in the background &mdash; start chatting the moment the
       first one lands, and find everything else under Settings.</p>
     </div>
@@ -12168,7 +12205,7 @@ $("#task-list").addEventListener("click",e=>{
 // guessing. The Remote agent runs it for real when a server is set up.
 // ONE gate (6b251): the risk card. The execution engine needs NOTHING
 // installed on the server — systemd-run is already there and reboot
-// survival is Concorde-side polling — so there is nothing to ask for.
+// survival is MillenAI-side polling — so there is nothing to ask for.
 function startTask(name,stage){
   if(!name)return;
   if(uiMode!=="code")switchLane("code");
@@ -12186,7 +12223,7 @@ function riskCard(t){
   const sg=$("#suggest"); if(sg)sg.hidden=true;
   const div=document.createElement("div");
   div.className="msg ai";
-  div.innerHTML='<div class="who">Concorde</div><div class="body"></div>';
+  div.innerHTML='<div class="who">MillenAI</div><div class="body"></div>';
   const card=document.createElement("div");
   card.className="riskcard";
   card.innerHTML='<div class="rktop"><span class="rkico">⚠</span>'
@@ -12626,6 +12663,19 @@ function srcRow(srcs){
   }
   return h;
 }
+// 6b257, per Patrick ("once the query is done... it's redundant"): a
+// finished answer shows sources ONLY inside the disclosure. Live
+// answers fold them in with the steps (collapseSteps, 6b242); this is
+// the same folded box for RELOADED answers, where the steps are gone
+// (telemetry isn't persisted) but the chips survive on m.sources. The
+// delegated wtsum handler on the chat works here unchanged.
+function srcBox(srcs){
+  const ns=(srcs&&srcs.length)||0;
+  if(!ns)return "";
+  return '<div class="worktree folded"><button class="wtsum">'
+    +'<span class="wtchev">›</span>'+ns+' source'+(ns===1?"":"s")
+    +'</button><div class="wtlist" hidden>'+srcRow(srcs)+'</div></div>';
+}
 // THE CLAUDE TREATMENT, per Patrick: a place answer renders as a dark
 // multi-pin map with a card rail — the model hands over structured
 // places in a [[PLACES]] trailer, pins geocode through /api/geo, and
@@ -12929,7 +12979,7 @@ function addMsg(role,text,drafts,srcs,mapd,ph,places,loc){
       else form=null;
     }
   }
-  if(role==="user")body.textContent=text; else{body.innerHTML=(srcs&&srcs.length?srcRow(srcs):"")+renderMD(text)+photoRow(ph)+(places&&places.length?placesModule(places,loc,mapd):mapCard(mapd));requestAnimationFrame(()=>wireFlow(body));}
+  if(role==="user")body.textContent=text; else{body.innerHTML=srcBox(srcs)+renderMD(text)+photoRow(ph)+(places&&places.length?placesModule(places,loc,mapd):mapCard(mapd));requestAnimationFrame(()=>wireFlow(body));}
   if(form)body.appendChild(formCard(form));
   if(role!=="user"&&drafts&&drafts.length)paintDrafts(div,drafts,false);
   if(text)msgActions(div,role,text);
@@ -13032,6 +13082,32 @@ function autoScroll(){
 async function send(){
   const text=input.value.trim();
   if((!text&&!pendingImages.length&&!pendingDocs.length)||generating)return;
+
+  // FUNNEL LANE (6b257, per Patrick): a typed answer IS an answer.
+  // Mid-funnel (in the funnel's OWN chat), free text answers the
+  // current stage exactly as clicking its card would. On the lane's
+  // blank slate it IS the decision, and starts one. In a chat that
+  // already holds a finished funnel it falls THROUGH to /api/chat —
+  // the funnel is the subject there (6b238) and a follow-up deserves
+  // an answer, not a fresh "stage 1 of 5" about its own wording.
+  if(uiMode==="funnel"&&text&&!pendingImages.length&&!pendingDocs.length){
+    if(fnState&&fnState.chat===curChat){
+      if(!fnAnswer)return;          // stage still building — keep the text
+      input.value="";input.style.height="auto";
+      addMsg("user",text);
+      messages.push({role:"user",content:text});
+      // one line, whatever was typed: the server reads picks back out
+      // of "q → label" assistant turns, and $-anchored regex can't
+      // cross a newline (_FUNNEL_PICK_RX)
+      fnAnswer(text.replace(/\s+/g," ").trim());
+      return;
+    }
+    if(!messages.length){
+      input.value="";input.style.height="auto";
+      startFunnel(text);
+      return;
+    }
+  }
 
   // engine down? give launch instructions instead of a doomed request.
   // in combine mode, drop unavailable models rather than failing outright
@@ -14071,7 +14147,7 @@ function deleteChat(id){
   if(idx<0)return;
   undoStash={chat:chats[idx],idx:idx,wasCur:curChat===id};
   chats.splice(idx,1);
-  if(curChat===id){curChat=null;messages=[];resetHero();}
+  if(curChat===id){curChat=null;messages=[];fnState=null;fnAnswer=null;resetHero();}
   saveChats();renderChats();
   const t=$("#undobar");
   t.querySelector(".ut").textContent='Deleted "'
@@ -14097,6 +14173,10 @@ function loadChat(id){
   if((c.lane||"ai")!==uiMode)switchLane(c.lane||"ai");
   // an in-flight answer is NOT aborted: it streams on quietly and lands
   // in its own chat — switching away no longer costs you the response
+  // ...but an in-flight FUNNEL is abandoned: its option cards die with
+  // the DOM below, and the typed-answer path (6b257) must not advance
+  // an orphaned funnel into whichever chat is on screen
+  fnState=null;fnAnswer=null;
   curChat=id;
   messages=c.messages.slice();
   inner.innerHTML="";
@@ -14141,8 +14221,9 @@ $("#ws-set").addEventListener("click",async()=>{
 // stage renders as a question with option cards; a pick appends to the
 // path and asks the server for the next stage. Every funnel is a chat
 // in the "funnel" lane, so it lands in history like anything else.
-let fnState=null;
+let fnState=null,fnAnswer=null;
 async function fnStep(){
+  fnAnswer=null;                    // a new stage voids the old answer path
   const box=document.createElement("div");
   box.className="msg ai";
   box.innerHTML='<div class="who">Funnel</div><div class="body">'
@@ -14155,13 +14236,19 @@ async function fnStep(){
       headers:{"Content-Type":"application/json"},
       body:JSON.stringify(fnState)})).json();
   }catch(e){d={err:"couldn\u2019t reach the engine"};}
+  if(!fnState){box.remove();return;}   // the chat moved on mid-build \u2014
+                                       // don't render into it, don't arm
+                                       // fnAnswer with a dead closure
   const b=box.querySelector(".body");
-  if(d.err){b.innerHTML=esc(d.err);return;}
+  // an errored stage ABANDONS the funnel (as abandoning always did):
+  // the message shows, and the composer falls back to plain chat
+  // instead of dead-ending on a stage that will never build (6b257)
+  if(d.err){b.innerHTML=esc(d.err);fnState=null;fnAnswer=null;return;}
   if(d.done){
     box.querySelector(".who").textContent="Funnel \u00b7 done";
     b.innerHTML='<div class="fpath">'+esc(fnState.picks.join(" \u2192 "))
       +'</div>'+renderMD(d.summary||"");
-    fnState=null;persistCurrent();return;
+    fnState=null;fnAnswer=null;persistCurrent();return;
   }
   b.innerHTML='<div class="fstage"><div class="fpath">stage '+d.stage
     +' of '+d.total+(fnState.picks.length?' \u00b7 '
@@ -14173,14 +14260,22 @@ async function fnStep(){
       +'<b>'+esc(o.label)+'</b>'
       +(o.why?'<span>'+esc(o.why)+'</span>':"")
       +'</button>').join("")+'</div></div>';
+  // a typed answer and a clicked card are the SAME thing (6b257, per
+  // Patrick: the cards are suggestions, not a menu \u2014 free text must
+  // not dead-end the funnel). Both paths land here; the composer's
+  // send() calls fnAnswer with whatever the user wrote.
+  fnAnswer=label=>{
+    if(!fnState)return;
+    b.innerHTML='<div class="fpath">stage '+d.stage+' \u00b7 '
+      +esc(d.q)+'</div><b>'+esc(label)+'</b>';
+    fnState.picks.push(String(label).slice(0,90));
+    messages.push({role:"assistant",content:d.q+" \u2192 "+label});
+    fnAnswer=null;persistCurrent();fnStep();
+  };
   b.querySelectorAll(".fopt").forEach(el=>{
     el.addEventListener("click",()=>{
-      const o=(d.options||[])[+el.dataset.i];if(!o||!fnState)return;
-      b.innerHTML='<div class="fpath">stage '+d.stage+' \u00b7 '
-        +esc(d.q)+'</div><b>'+esc(o.label)+'</b>';
-      fnState.picks.push(o.label);
-      messages.push({role:"assistant",content:d.q+" \u2192 "+o.label});
-      persistCurrent();fnStep();
+      const o=(d.options||[])[+el.dataset.i];
+      if(o&&fnAnswer)fnAnswer(o.label);
     });
   });
   autoScroll();
@@ -14195,6 +14290,7 @@ $("#fn-go").addEventListener("click",()=>{
   addMsg("user","Funnel: "+goal);
   messages.push({role:"user",content:"Funnel: "+goal});
   persistCurrent();
+  fnState.chat=curChat;             // the funnel belongs to THIS chat
   fnStep();
 });
 
@@ -14339,6 +14435,7 @@ document.addEventListener("keydown",e=>{
 $("#newchat").addEventListener("click",()=>{
   if(generating&&abortCtl)abortCtl.abort();
   persistCurrent();
+  fnState=null;fnAnswer=null;       // a new chat abandons any funnel
   curChat=null;messages=[];
   resetHero();renderChats();
   input.focus();
@@ -15959,7 +16056,8 @@ $("#about-check").addEventListener("click",async ev=>{
   const b=ev.currentTarget,was=b.textContent;
   b.disabled=true;b.textContent="Checking\u2026";
   try{
-    const r=await(await fetch("/api/update/check")).json();
+    // a human click deserves a real answer, not the 15-min server cache
+    const r=await(await fetch("/api/update/check?force=1")).json();
     if(!r.configured){b.textContent="Updates not configured";}
     else if(r.available){
       upInfo=r;$("#update-flag").hidden=false;
@@ -15986,8 +16084,9 @@ $("#about-forget").addEventListener("click",async ev=>{
 
 /* --------------------------------------------------------- self-update */
 const upVeil=$("#update-veil"),upBar=$("#up-bar"),upGo=$("#up-go");
-let upInfo=null;
+let upInfo=null,lastUpCheck=0;
 async function checkUpdate(){
+  lastUpCheck=Date.now();
   try{
     const r=await(await fetch("/api/update/check")).json();
     if(r.available){
@@ -16037,10 +16136,23 @@ addEventListener("resize",()=>{     // a narrower window fits fewer chips
   const b=$("#suggest");
   if(b&&!b.hidden){b.hidden=true;syncSuggest();}
 });
-checkUpdate();                      // ALWAYS on launch — a stale build
+if(IS_LOCAL){                       // install nudges belong to the owner
+                                    // sitting at the machine, never to
+                                    // a tunnel visitor (who can't run
+                                    // the install — it 403s on them)
+  checkUpdate();                    // ALWAYS on launch — a stale build
                                     // was the root of most "X doesn't
                                     // work" reports (seen live, often)
-setInterval(checkUpdate,3600000);   // and hourly while running
+  // ...and hourly while running (6b257, per Patrick: an app left open
+  // must not fall behind just because nobody clicked Check for
+  // updates). A hidden window skips the poll — the pollEngines idiom —
+  // and settles up on wake if it slept through a tick, so the badge is
+  // waiting by the time anyone is looking.
+  setInterval(()=>{if(!document.hidden)checkUpdate();},3600000);
+  document.addEventListener("visibilitychange",()=>{
+    if(!document.hidden&&Date.now()-lastUpCheck>3600000)checkUpdate();
+  });
+}
 
 /* ------------------------------------------------------ ZITO override */
 /* Hold Z, I, T and O together. The chrome falls away and the pipeline is

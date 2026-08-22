@@ -1,5 +1,5 @@
 #!/bin/bash
-# MillenAI Turbo — point the app at a free cloud GPU in one step.
+# ConcordeAI Turbo — point the app at a free cloud GPU in one step.
 #
 #   ./turbo.sh            interactive: paste your key, it does the rest
 #   ./turbo.sh off        back to fully local
@@ -25,8 +25,8 @@ fi
 
 cat <<'INTRO'
 
-  MillenAI Turbo
-  ──────────────
+  ConcordeAI Turbo
+  ────────────────
   Answers come from a cloud GPU instead of your Mac. Much faster,
   but your prompts leave this computer while it is on.
 

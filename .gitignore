@@ -1,5 +1,9 @@
-# build artifacts — the DMG ships as a Release asset, not in the tree
+# build artifacts — the DMG ships as a Release asset, not in the tree.
+# Three brand generations of bundle names; the .app is a build output
+# (its Resources/millenai.py is a stale duplicate of the source).
 MillenAI.app/
+Concorde.app/
+ConcordeAI.app/
 *.dmg
 __pycache__/
 *.pyc
@@ -8,12 +12,19 @@ __pycache__/
 .DS_Store
 .claude/
 
-# unrelated to MillenAI, and v23-mac.sh contains a private server address
+# unrelated to the app, and v23-mac.sh contains a private server address
 v23-*.sh
+# Windows artifacts, all brand generations — the *-Setup* / *-exe*
+# globs carry the -x64/-arm64 suffix the old patterns missed
 MillenAI-*-Windows.zip
-MillenAI-*-Setup.exe
-MillenAI-*-Windows-exe.zip
+MillenAI-*-Setup*.exe
+MillenAI-*-Windows-exe*.zip
 MillenAI.iss
+Concorde-*-Windows.zip
+ConcordeAI-*-Windows.zip
+ConcordeAI-*-Setup*.exe
+ConcordeAI-*-Windows-exe*.zip
+ConcordeAI-*-x64.msi
 .build-venv/
 build/
 dist/

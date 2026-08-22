@@ -341,11 +341,48 @@ check("pantry rotates a fresh clip per session",
 # private-mode WKWebView wiped localStorage every launch until now
 check("veteran pantry overrides first-run dark set",
       "stocked pantry is proof" in page)
-# 6.0: the brand is Concorde on every user-facing surface; the old name
-# survives only in internals (paths, bundle id, repo) which never
-# reach the page
-check("Concorde brand, no stray MillenAI",
-      "Concorde" in page and "MillenAI" not in page)
+# 6b257: the brand is ConcordeAI on every user-facing surface; the old
+# names survive only in internals (paths, bundle id, cookies) which
+# never reach the page. Bare "Concorde" is a stray now too — the only
+# place it stands alone is a lockup, where a nested <b> splits the AI
+# off ("Concorde<b>AI"); lowercase tokens (concorde-resume,
+# concorde-job) are internals and don't trip the case-sensitive regex.
+check("ConcordeAI brand, no stray MillenAI or bare Concorde",
+      "ConcordeAI" in page and "MillenAI" not in page
+      and not re.search(r"Concorde(?!(?:<b>)?AI)", page))
+# 6b257: every lockup sets the AI in BOLD inside the quiet 400-weight
+# mark — a nested <b> (a span would trip the ">AI</span>" tab guard
+# above), bolded by one shared rule across all three lockups
+check("wordmark splits ConcordeAI with a bold AI",
+      "Concorde<b>AI</b></b>" in page
+      and "#wiz-brand b b{font-weight:700}" in page)
+# 6b257: the app checks for updates BY ITSELF — hourly while open,
+# owner only (a tunnel visitor can't run the install, so never tempt
+# them), skipping hidden windows and settling up on wake; the server
+# answers the hourly pollers from a 15-min cache and only a human
+# click on the Settings button forces a real GitHub hit
+check("auto update check: hourly, owner-only, wake-aware, cached",
+      "setInterval(()=>{if(!document.hidden)checkUpdate();},3600000)" in page
+      and "visibilitychange" in page
+      and "/api/update/check?force=1" in page
+      and "def check_update(force=False)" in _MILLENAI_SRC
+      and "_chk_cache" in _MILLENAI_SRC)
+# 6b257: in the funnel lane a TYPED answer advances the funnel — the
+# composer routes free text through the same fnAnswer path as a card
+# click (or starts a funnel with it) instead of falling through to
+# /api/chat as dead-end generic prose
+check("funnel accepts typed answers",
+      'uiMode==="funnel"&&text' in page
+      and "if(o&&fnAnswer)fnAnswer(o.label);" in page
+      and "startFunnel(text)" in page)
+# 6b257, per Patrick: "once the query is done ... it's redundant" — a
+# finished answer shows sources ONLY inside the disclosure. Live
+# answers fold chips in with the steps (collapseSteps, 6b242);
+# reloaded answers now fold them into the same box (srcBox) instead
+# of the loose row addMsg used to prepend.
+check("sources fold into the disclosure on every path",
+      "function srcBox(" in page and "srcBox(srcs)+renderMD" in page
+      and 'srcRow(srcs):"")+renderMD' not in page)
 
 print("== resolvers ==")
 s, h, b = req("/api/tiers", cookie=K)

@@ -1,10 +1,11 @@
-# MillenAI — developer notes
+# ConcordeAI — developer notes
 
 A local-only LLM desktop app for macOS. Everything runs on the user's machine:
 models, transcription, speech, memory. Nothing is sent anywhere except
 optional DuckDuckGo lookups and the GitHub update check.
 
-Current: **1.1.0** (build 26) · repo `bigmillz/MillenAI`
+Current: repo `bigmillz/concordeai` — version and build live in
+`millenai.py` (`APP_VERSION`/`APP_BUILD`), the only place either is stored.
 
 ---
 
@@ -13,7 +14,7 @@ Current: **1.1.0** (build 26) · repo `bigmillz/MillenAI`
 | File | What it is |
 |---|---|
 | `millenai.py` | The whole app — HTTP backend, model routing, and the UI as one embedded HTML string (~3,400 lines) |
-| `build_macos_app.sh` | Wraps `millenai.py` into `MillenAI.app` |
+| `build_macos_app.sh` | Wraps `millenai.py` into `ConcordeAI.app` |
 | `build_dmg.sh` | Builds the app, then a styled DMG with custom artwork and Finder layout |
 | `release.sh` | Bumps version → builds → commits → pushes → publishes a GitHub Release |
 | `MillenAI.icns` | App/volume icon |
@@ -3888,3 +3889,61 @@ one of which made a SUCCESSFUL job look like a failure:
 - The local checkout is still `My Drive/Downloads/files` and the main
   file is still millenai.py — only the remote changed. Older NOTES
   entries and memory files saying "MillenAI" mean this same project.
+
+## Renamed: Concorde -> ConcordeAI; repo -> bigmillz/concordeai (2026-08-22)
+- THE BRAND GREW ITS AI, AND THE AI IS BOLD (per Patrick). APP_NAME is
+  "ConcordeAI"; the three lockups (sidebar .vghost, Settings
+  #set-brand, wizard #wiz-brand) hand-split the mark as
+  Concorde<b>AI</b> inside the styled outer <b> — nested, because the
+  gauntlet's tab guard forbids a span holding a bare AI (a CSS comment
+  SPELLING that forbidden literal shipped in the page and tripped the
+  guard itself; reworded). One shared rule bolds all three (.vghost
+  b b etc.); Michroma is single-weight, the 700 is synthesized. The
+  sign-in and gate pages carry the same split h1. Everything
+  load-bearing keeps MillenAI: app_dir, bundle id, executable
+  (_SWAP_SCRIPT pgreps it), cookies, millen.* localStorage.
+- ARTIFACTS RENAMED, IDENTITIES PINNED: ConcordeAI.app (CFBundleName/
+  DisplayName only), "ConcordeAI x.y.z.dmg", ConcordeAI-*-Windows.zip
+  (in-zip folder and .bat renamed too), ConcordeAI-*-x64.msi (WiX
+  Product/shortcuts renamed; UpgradeCode, INSTALLDIR and HKCU keys stay
+  MillenAI so upgrades land in place; Inno gets an explicit
+  AppId=MillenAI for the same reason). The DMG background draws
+  CONCORDEAI: tracking still derives from the measured 8-letter ink
+  width, total ink is computed rather than assumed, and the AI pair
+  gets a same-color stroke — PIL's synthetic bold.
+- REPO RENAMED bigmillz/concorde -> bigmillz/concordeai (gh repo
+  rename; origin repointed itself). UPDATE_REPO and go-live.sh
+  repointed. VERIFIED: the old API URL 301s, and /api/update/check
+  against the renamed repo resolves v256 — pre-rename installs keep
+  updating through the redirect, same as the MillenAI rename before it.
+- AUTO UPDATE CHECK HARDENED (per Patrick: leaving the app open must
+  not mean falling behind). The hourly checkUpdate() poll already
+  shipped; what it lacked was guards. Now: IS_LOCAL only (the install
+  POST 403s for tunnel visitors, whose dialog then hung at
+  "Downloading…" forever), hidden windows skip the tick (the
+  pollEngines idiom) and settle up on visibilitychange, and the server
+  answers pollers from a 15-min cache — failures never cached (a DNS
+  blip must not read as "no update"), cache keyed to the beta pref,
+  and the Settings button sends ?force=1 for a real hit.
+- FUNNEL: A TYPED ANSWER IS AN ANSWER (per Patrick — typing "a new
+  apartment" at stage 1 fell to /api/chat and produced a wall of
+  generic prose, stranding the funnel). The card-click body is now a
+  shared fnAnswer(label); send() routes funnel-lane text into it, or
+  starts a funnel with it on the lane's blank slate. Review caught two
+  regressions in the first cut, both fixed and re-verified: 1. a
+  funnel abandoned by switching chats stayed armed and a later typed
+  answer advanced it into whichever chat was on screen — fnState is
+  now tagged with its chat and cleared on loadChat/new/delete; 2. in a
+  FINISHED funnel chat, typed follow-ups were hijacked into a nonsense
+  new funnel — they now fall through to /api/chat, where the finished
+  funnel is the subject (6b238). A stage error abandons the funnel
+  instead of dead-ending the composer; typed picks are collapsed to
+  one line so _FUNNEL_PICK_RX can read them back.
+- SAY IT ONCE, AGAIN (per Patrick: "once the query is done ... it's
+  redundant"): reloaded answers prepended a loose srcRow above the
+  prose while live answers fold chips into the disclosure (6b242).
+  addMsg now folds them into the same collapsed box (srcBox, "N
+  sources" with the chevron) — no path renders a bare chips row.
+- Gauntlet 89/89 (85 -> 89: four new checks — bold-AI lockup, guarded
+  auto-update, funnel typed answers, sources-fold — and the brand
+  check now also forbids bare "Concorde" outside the split lockup).
